@@ -9,5 +9,6 @@ edition = "2021"
 mail-parser = { path = "/home/vagrant/code/mail-parser", features = ["ludicrous_mode", "full_encoding"] }
 mail-builder = { version = "0.2.4", git = "https://github.com/stalwartlabs/mail-builder", features = ["ludicrous_mode"] } 
 rsa = {version = "0.7.0"}
+ed25519-dalek = "1.0.1"
 sha1 = {version = "0.10", features = ["oid"]}
 sha2 = {version = "0.10.6", features = ["oid"]}

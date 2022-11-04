@@ -11,6 +11,7 @@ pub(crate) trait TagParser: Sized {
     fn get_items<T: ItemParser>(&mut self, separator: u8) -> Vec<T>;
     fn ignore(&mut self);
     fn skip_whitespaces(&mut self) -> bool;
+    fn next_skip_whitespaces(&mut self) -> Option<u8>;
 }
 
 pub(crate) trait ItemParser: Sized {
@@ -172,6 +173,16 @@ impl TagParser for Iter<'_, u8> {
             }
         }
         true
+    }
+
+    #[inline(always)]
+    fn next_skip_whitespaces(&mut self) -> Option<u8> {
+        for &ch in self {
+            if !ch.is_ascii_whitespace() {
+                return ch.into();
+            }
+        }
+        None
     }
 
     fn get_items<T: ItemParser>(&mut self, separator: u8) -> Vec<T> {

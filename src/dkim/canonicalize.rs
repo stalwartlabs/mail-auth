@@ -100,7 +100,9 @@ impl Canonicalization {
                         }
                         last_ch = ch;
                     }
-                    let _ = hasher.write(b"\r\n");
+                    if last_ch == b'\n' {
+                        let _ = hasher.write(b"\r\n");
+                    }
                 }
             }
             Canonicalization::Simple => {

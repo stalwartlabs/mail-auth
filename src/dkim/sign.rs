@@ -13,56 +13,62 @@ use std::{
     borrow::Cow,
     fmt::{Display, Formatter},
     io::Write,
-    path::Path,
     time::SystemTime,
 };
 
+use ed25519_dalek::ed25519::signature::SignerMut;
 use mail_builder::encoders::base64::base64_encode;
 use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::AssociatedOid, PaddingScheme, RsaPrivateKey};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
-use super::{Algorithm, Canonicalization, DKIMSigner, Error, Signature};
+use super::{Algorithm, Canonicalization, DKIMSigner, Error, PrivateKey, Signature};
 
 impl<'x> DKIMSigner<'x> {
-    /// Creates a new DKIM signer from a PKCS1 PEM file.
-    pub fn from_pkcs1_pem_file(path: &str) -> super::Result<Self> {
-        DKIMSigner::from_rsa_pkey(
-            RsaPrivateKey::read_pkcs1_pem_file(Path::new(path)).map_err(Error::PKCS)?,
-        )
-    }
-
-    /// Creates a new DKIM signer from a PKCS1 PEM string.
-    pub fn from_pkcs1_pem(pem: &str) -> super::Result<Self> {
-        DKIMSigner::from_rsa_pkey(RsaPrivateKey::from_pkcs1_pem(pem).map_err(Error::PKCS)?)
-    }
-
-    /// Creates a new DKIM signer from a PKCS1 binary file.
-    pub fn from_pkcs1_der_file(path: &str) -> super::Result<Self> {
-        DKIMSigner::from_rsa_pkey(
-            RsaPrivateKey::read_pkcs1_der_file(Path::new(path)).map_err(Error::PKCS)?,
-        )
-    }
-
-    /// Creates a new DKIM signer from a PKCS1 binary slice.
-    pub fn from_pkcs1_der(bytes: &[u8]) -> super::Result<Self> {
-        DKIMSigner::from_rsa_pkey(RsaPrivateKey::from_pkcs1_der(bytes).map_err(Error::PKCS)?)
-    }
-
     /// Creates a new DKIM signer from an RsaPrivateKey.
-    pub fn from_rsa_pkey(private_key: RsaPrivateKey) -> super::Result<Self> {
-        Ok(DKIMSigner {
-            private_key,
+    pub fn new() -> Self {
+        DKIMSigner {
+            a: Algorithm::RsaSha256,
+            private_key: PrivateKey::None,
             sign_headers: Vec::with_capacity(0),
             cb: Canonicalization::Relaxed,
             ch: Canonicalization::Relaxed,
-            a: Algorithm::Sha256,
             d: (b""[..]).into(),
             s: (b""[..]).into(),
             i: (b""[..]).into(),
             l: false,
             x: 0,
-        })
+        }
+    }
+
+    /// Creates a new RSA private key from a PKCS1 PEM string.
+    pub fn rsa_pem(mut self, private_key_pem: &str) -> super::Result<Self> {
+        self.private_key =
+            PrivateKey::Rsa(RsaPrivateKey::from_pkcs1_pem(private_key_pem).map_err(Error::PKCS)?);
+        Ok(self)
+    }
+
+    /// Creates a new RSA private key from a PKCS1 binary slice.
+    pub fn rsa(mut self, private_key_bytes: &[u8]) -> super::Result<Self> {
+        self.private_key =
+            PrivateKey::Rsa(RsaPrivateKey::from_pkcs1_der(private_key_bytes).map_err(Error::PKCS)?);
+        Ok(self)
+    }
+
+    /// Creates an Ed25519 private key
+    pub fn ed25519(
+        mut self,
+        public_key_bytes: &[u8],
+        private_key_bytes: &[u8],
+    ) -> super::Result<Self> {
+        self.private_key = PrivateKey::Ed25519(ed25519_dalek::Keypair {
+            public: ed25519_dalek::PublicKey::from_bytes(public_key_bytes)
+                .map_err(Error::Ed25519)?,
+            secret: ed25519_dalek::SecretKey::from_bytes(private_key_bytes)
+                .map_err(Error::Ed25519Signature)?,
+        });
+        self.a = Algorithm::Ed25519Sha256;
+        Ok(self)
     }
 
     /// Sets the headers to sign.
@@ -107,6 +113,12 @@ impl<'x> DKIMSigner<'x> {
         self
     }
 
+    /// Sets the algorithm to use (must be compatible with the private key provided).
+    pub fn algorithm(mut self, algorithm: Algorithm) -> Self {
+        self.a = algorithm;
+        self
+    }
+
     /// Include the body length in the signature.
     pub fn body_length(mut self, body_length: bool) -> Self {
         self.l = body_length;
@@ -134,8 +146,10 @@ impl<'x> DKIMSigner<'x> {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             match self.a {
-                Algorithm::Sha256 => self.sign_::<Sha256>(message, now),
-                Algorithm::Sha1 => self.sign_::<Sha1>(message, now),
+                Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => {
+                    self.sign_::<Sha256>(message, now)
+                }
+                Algorithm::RsaSha1 => self.sign_::<Sha1>(message, now),
             }
         } else {
             Err(Error::MissingParameters)
@@ -176,19 +190,27 @@ impl<'x> DKIMSigner<'x> {
         };
 
         // Add signature to hash
-        header_hasher.write_all(b"dkim-signature:")?;
         signature.write(&mut header_hasher, false)?;
 
-        // RSA Sign
-        signature.b = base64_encode(
-            &self
-                .private_key
+        // Sign
+        let b = match &self.private_key {
+            PrivateKey::Rsa(private_key) => private_key
                 .sign(
                     PaddingScheme::new_pkcs1v15_sign::<T>(),
                     &header_hasher.finalize(),
                 )
                 .map_err(Error::RSA)?,
-        )?;
+            PrivateKey::Ed25519(key_pair) => {
+                ed25519_dalek::ExpandedSecretKey::from(&key_pair.secret)
+                    .sign(&header_hasher.finalize(), &key_pair.public)
+                    .to_bytes()
+                    .to_vec()
+            }
+            PrivateKey::None => return Err(Error::MissingParameters),
+        };
+
+        // Encode
+        signature.b = base64_encode(&b)?;
 
         Ok(signature)
     }
@@ -196,13 +218,15 @@ impl<'x> DKIMSigner<'x> {
 
 impl<'x> Signature<'x> {
     pub(crate) fn write(&self, mut writer: impl Write, as_header: bool) -> std::io::Result<()> {
-        if as_header {
-            writer.write_all(b"DKIM-Signature: ")?;
-        };
+        writer.write_all(match self.ch {
+            Canonicalization::Relaxed if !as_header => b"dkim-signature:",
+            _ => b"DKIM-Signature: ",
+        })?;
         writer.write_all(b"v=1; a=")?;
         writer.write_all(match self.a {
-            Algorithm::Sha256 => b"rsa-sha256",
-            Algorithm::Sha1 => b"rsa-sha1",
+            Algorithm::RsaSha256 => b"rsa-sha256",
+            Algorithm::RsaSha1 => b"rsa-sha1",
+            Algorithm::Ed25519Sha256 => b"ed25519-sha256",
         })?;
         writer.write_all(b"; s=")?;
         writer.write_all(&self.s)?;
@@ -266,6 +290,12 @@ impl<'x> Signature<'x> {
     }
 }
 
+impl<'x> Default for DKIMSigner<'x> {
+    fn default() -> Self {
+        DKIMSigner::new()
+    }
+}
+
 impl<'x> Display for Signature<'x> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::new();
@@ -296,7 +326,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
     #[test]
     fn dkim_sign() {
-        let dkim = super::DKIMSigner::from_pkcs1_pem(TEST_KEY)
+        let dkim = super::DKIMSigner::new()
+            .rsa_pem(TEST_KEY)
             .unwrap()
             .headers(["From", "To", "Subject"])
             .domain("stalw.art")

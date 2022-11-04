@@ -1,11 +1,14 @@
 use std::slice::Iter;
 
 use mail_parser::decoders::base64::base64_decode_stream;
-use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
+use rsa::RsaPublicKey;
 
 use crate::common::parse::{ItemParser, TagParser};
 
-use super::{Algorithm, Canonicalization, Error, Flag, Record, Service, Signature, Version};
+use super::{
+    Algorithm, Canonicalization, Error, Flag, HashAlgorithm, PublicKey, Record, Service, Signature,
+    Version,
+};
 
 enum Key {
     V,
@@ -27,10 +30,10 @@ enum Key {
 
 impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
-    pub fn parse(header: &'x [u8]) -> super::Result<Self> {
+    pub fn parse(header: &'_ [u8]) -> super::Result<Self> {
         let mut signature = Signature {
             v: 0,
-            a: Algorithm::Sha256,
+            a: Algorithm::RsaSha256,
             d: (b""[..]).into(),
             s: (b""[..]).into(),
             i: (b""[..]).into(),
@@ -70,33 +73,51 @@ impl<'x> Signature<'x> {
                     }
                 }
                 Key::A => {
-                    if header.match_bytes(b"rsa-sha") {
-                        let mut algo = 0;
+                    if let Some(ch) = header.next_skip_whitespaces() {
+                        match ch {
+                            b'r' | b'R' => {
+                                if header.match_bytes(b"sa-sha") {
+                                    let mut algo = 0;
 
-                        while let Some(ch) = header.next() {
-                            match ch {
-                                b'1' if algo == 0 => algo = 1,
-                                b'2' if algo == 0 => algo = 2,
-                                b'5' if algo == 2 => algo = 25,
-                                b'6' if algo == 25 => algo = 256,
-                                b';' => {
-                                    break;
-                                }
-                                _ => {
-                                    if !ch.is_ascii_whitespace() {
-                                        return Err(Error::UnsupportedAlgorithm);
+                                    while let Some(ch) = header.next() {
+                                        match ch {
+                                            b'1' if algo == 0 => algo = 1,
+                                            b'2' if algo == 0 => algo = 2,
+                                            b'5' if algo == 2 => algo = 25,
+                                            b'6' if algo == 25 => algo = 256,
+                                            b';' => {
+                                                break;
+                                            }
+                                            _ => {
+                                                if !ch.is_ascii_whitespace() {
+                                                    return Err(Error::UnsupportedAlgorithm);
+                                                }
+                                            }
+                                        }
                                     }
+
+                                    signature.a = match algo {
+                                        256 => Algorithm::RsaSha256,
+                                        1 => Algorithm::RsaSha1,
+                                        _ => return Err(Error::UnsupportedAlgorithm),
+                                    };
+                                } else {
+                                    return Err(Error::UnsupportedAlgorithm);
                                 }
                             }
+                            b'e' | b'E' => {
+                                if header.match_bytes(b"d25519-sha256") && header.skip_whitespaces()
+                                {
+                                    signature.a = Algorithm::Ed25519Sha256;
+                                } else {
+                                    return Err(Error::UnsupportedAlgorithm);
+                                }
+                            }
+                            b';' => (),
+                            _ => {
+                                return Err(Error::UnsupportedAlgorithm);
+                            }
                         }
-
-                        signature.a = match algo {
-                            256 => Algorithm::Sha256,
-                            1 => Algorithm::Sha1,
-                            _ => return Err(Error::UnsupportedAlgorithm),
-                        };
-                    } else {
-                        return Err(Error::UnsupportedAlgorithm);
                     }
                 }
                 Key::B => {
@@ -221,6 +242,12 @@ impl Key {
     }
 }
 
+enum KeyType {
+    Rsa,
+    Ed25519,
+    None,
+}
+
 impl Record {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &[u8]) -> super::Result<Self> {
@@ -230,10 +257,11 @@ impl Record {
         let mut record = Record {
             v: Version::Dkim1,
             h: Vec::new(),
-            p: super::Key::Revoked,
+            p: PublicKey::Revoked,
             s: Vec::new(),
             t: Vec::new(),
         };
+        let mut k = KeyType::None;
         let mut public_key = Vec::new();
 
         while let Some(&ch) = header.next() {
@@ -254,8 +282,29 @@ impl Record {
                         b's' | b'S' => record.s = header.get_items(b':'),
                         b't' | b'T' => record.t = header.get_items(b':'),
                         b'k' | b'K' => {
-                            if !header.match_bytes(b"rsa") || !header.skip_whitespaces() {
-                                return Err(Error::UnsupportedKeyType);
+                            if let Some(ch) = header.next_skip_whitespaces() {
+                                match ch {
+                                    b'r' | b'R' => {
+                                        if header.match_bytes(b"sa") && header.skip_whitespaces() {
+                                            k = KeyType::Rsa;
+                                        } else {
+                                            return Err(Error::UnsupportedKeyType);
+                                        }
+                                    }
+                                    b'e' | b'E' => {
+                                        if header.match_bytes(b"d25519")
+                                            && header.skip_whitespaces()
+                                        {
+                                            k = KeyType::Ed25519;
+                                        } else {
+                                            return Err(Error::UnsupportedKeyType);
+                                        }
+                                    }
+                                    b';' => (),
+                                    _ => {
+                                        return Err(Error::UnsupportedKeyType);
+                                    }
+                                }
                             }
                         }
                         _ => {
@@ -278,21 +327,29 @@ impl Record {
         }
 
         if !public_key.is_empty() {
-            record.p = super::Key::Rsa(
-                RsaPublicKey::from_public_key_der(&public_key).map_err(Error::SPKI)?,
-            )
+            record.p = match k {
+                KeyType::Rsa | KeyType::None => PublicKey::Rsa(
+                    <RsaPublicKey as rsa::pkcs8::DecodePublicKey>::from_public_key_der(&public_key)
+                        .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(&public_key))
+                        .map_err(Error::PKCS)?,
+                ),
+                KeyType::Ed25519 => PublicKey::Ed25519(
+                    ed25519_dalek::PublicKey::from_bytes(&public_key)
+                        .map_err(Error::Ed25519Signature)?,
+                ),
+            }
         }
 
         Ok(record)
     }
 }
 
-impl ItemParser for Algorithm {
+impl ItemParser for HashAlgorithm {
     fn parse(bytes: &[u8]) -> Option<Self> {
         if bytes.eq_ignore_ascii_case(b"sha256") {
-            Algorithm::Sha256.into()
+            HashAlgorithm::Sha256.into()
         } else if bytes.eq_ignore_ascii_case(b"sha1") {
-            Algorithm::Sha1.into()
+            HashAlgorithm::Sha1.into()
         } else {
             None
         }
@@ -329,7 +386,8 @@ mod test {
     use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 
     use crate::dkim::{
-        Algorithm, Canonicalization, Flag, Key, Record, Service, Signature, Version,
+        Algorithm, Canonicalization, Flag, HashAlgorithm, PublicKey, Record, Service, Signature,
+        Version,
     };
 
     #[test]
@@ -346,7 +404,7 @@ mod test {
                 ),
                 Signature {
                     v: 1,
-                    a: Algorithm::Sha256,
+                    a: Algorithm::RsaSha256,
                     d: (b"stalw.art"[..]).into(),
                     s: (b"default"[..]).into(),
                     i: (b""[..]).into(),
@@ -382,7 +440,7 @@ mod test {
                 ),
                 Signature {
                     v: 1,
-                    a: Algorithm::Sha1,
+                    a: Algorithm::RsaSha1,
                     d: (b"example.net"[..]).into(),
                     s: (b"brisbane"[..]).into(),
                     i: (b"@eng.example.net"[..]).into(),
@@ -428,7 +486,7 @@ mod test {
                 ),
                 Signature {
                     v: 1,
-                    a: Algorithm::Sha256,
+                    a: Algorithm::RsaSha256,
                     d: (b"example.com"[..]).into(),
                     s: (b"brisbane"[..]).into(),
                     i: (b"joe @football.example.com"[..]).into(),
@@ -492,7 +550,7 @@ mod test {
                 Record {
                     v: Version::Dkim1,
                     h: Vec::new(),
-                    p: Key::Rsa(
+                    p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
                                 concat!(
@@ -527,8 +585,8 @@ mod test {
                 ),
                 Record {
                     v: Version::Dkim1,
-                    h: vec![Algorithm::Sha1, Algorithm::Sha256],
-                    p: Key::Rsa(
+                    h: vec![HashAlgorithm::Sha1, HashAlgorithm::Sha256],
+                    p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
                                 concat!(
@@ -562,7 +620,7 @@ mod test {
                 Record {
                     v: Version::Dkim1,
                     h: vec![],
-                    p: Key::Rsa(
+                    p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
                                 concat!(

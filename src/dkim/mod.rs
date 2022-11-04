@@ -16,6 +16,7 @@ use rsa::{RsaPrivateKey, RsaPublicKey};
 pub mod canonicalize;
 pub mod parse;
 pub mod sign;
+pub mod verify;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Canonicalization {
@@ -24,9 +25,16 @@ pub enum Canonicalization {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Algorithm {
+pub enum HashAlgorithm {
     Sha1,
     Sha256,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Algorithm {
+    RsaSha1,
+    RsaSha256,
+    Ed25519Sha256,
 }
 
 #[derive(Debug)]
@@ -36,7 +44,8 @@ pub enum Error {
     NoHeadersFound,
     RSA(rsa::errors::Error),
     PKCS(rsa::pkcs1::Error),
-    SPKI(rsa::pkcs8::spki::Error),
+    Ed25519Signature(ed25519_dalek::SignatureError),
+    Ed25519(ed25519_dalek::ed25519::Error),
 
     /// I/O error
     Io(std::io::Error),
@@ -50,13 +59,18 @@ pub enum Error {
 
     UnsupportedRecordVersion,
     UnsupportedKeyType,
+
+    FailedBodyHashMatch,
+    RevokedPublicKey,
+    IncompatibleAlgorithms,
+    FailedVerification,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Clone)]
+#[derive(Debug)]
 pub struct DKIMSigner<'x> {
-    private_key: RsaPrivateKey,
+    private_key: PrivateKey,
     sign_headers: Vec<Cow<'x, [u8]>>,
     a: Algorithm,
     d: Cow<'x, [u8]>,
@@ -87,10 +101,10 @@ pub struct Signature<'x> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct Record {
+pub struct Record {
     v: Version,
-    h: Vec<Algorithm>,
-    p: Key,
+    h: Vec<HashAlgorithm>,
+    p: PublicKey,
     s: Vec<Service>,
     t: Vec<Flag>,
 }
@@ -112,9 +126,17 @@ pub(crate) enum Flag {
     MatchDomain,
 }
 
+#[derive(Debug)]
+pub(crate) enum PrivateKey {
+    Rsa(RsaPrivateKey),
+    Ed25519(ed25519_dalek::Keypair),
+    None,
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Key {
+pub(crate) enum PublicKey {
     Rsa(RsaPublicKey),
+    Ed25519(ed25519_dalek::PublicKey),
     Revoked,
 }
 
@@ -126,7 +148,6 @@ impl Display for Error {
             Error::NoHeadersFound => write!(f, "No headers found"),
             Error::RSA(err) => write!(f, "RSA error: {}", err),
             Error::PKCS(err) => write!(f, "PKCS error: {}", err),
-            Error::SPKI(err) => write!(f, "SPKI error: {}", err),
             Error::Io(e) => write!(f, "I/O error: {}", e),
             Error::Base64 => write!(f, "Base64 encode or decode error."),
             Error::UnsupportedVersion => write!(f, "Unsupported version in DKIM Signature."),
@@ -140,6 +161,17 @@ impl Display for Error {
             Error::UnsupportedKeyType => {
                 write!(f, "Unsupported key type in DKIM DNS record.")
             }
+            Error::Ed25519Signature(err) => write!(f, "Ed25519 signature error: {}", err),
+            Error::Ed25519(err) => write!(f, "Ed25519 error: {}", err),
+            Error::FailedBodyHashMatch => {
+                write!(f, "Calculated body hash does not match signature hash.")
+            }
+            Error::RevokedPublicKey => write!(f, "Public key for this signature has been revoked."),
+            Error::IncompatibleAlgorithms => write!(
+                f,
+                "Incompatible algorithms used in signature and DKIM DNS record."
+            ),
+            Error::FailedVerification => write!(f, "Signature verification failed."),
         }
     }
 }
