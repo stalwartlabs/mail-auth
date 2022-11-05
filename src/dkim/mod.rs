@@ -25,9 +25,10 @@ pub enum Canonicalization {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u64)]
 pub enum HashAlgorithm {
-    Sha1,
-    Sha256,
+    Sha1 = R_HASH_SHA1,
+    Sha256 = R_HASH_SHA256,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +65,8 @@ pub enum Error {
     RevokedPublicKey,
     IncompatibleAlgorithms,
     FailedVerification,
+    SignatureExpired,
+    FailedAUIDMatch,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -103,11 +106,16 @@ pub struct Signature<'x> {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Record {
     v: Version,
-    h: Vec<HashAlgorithm>,
     p: PublicKey,
-    s: Vec<Service>,
-    t: Vec<Flag>,
+    f: u64,
 }
+
+pub(crate) const R_HASH_SHA1: u64 = 0x01;
+pub(crate) const R_HASH_SHA256: u64 = 0x02;
+pub(crate) const R_SVC_ALL: u64 = 0x04;
+pub(crate) const R_SVC_EMAIL: u64 = 0x08;
+pub(crate) const R_FLAG_TESTING: u64 = 0x10;
+pub(crate) const R_FLAG_MATCH_DOMAIN: u64 = 0x20;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Version {
@@ -115,15 +123,35 @@ pub(crate) enum Version {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[repr(u64)]
 pub(crate) enum Service {
-    All,
-    Email,
+    All = R_SVC_ALL,
+    Email = R_SVC_EMAIL,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+#[repr(u64)]
 pub(crate) enum Flag {
-    Testing,
-    MatchDomain,
+    Testing = R_FLAG_TESTING,
+    MatchDomain = R_FLAG_MATCH_DOMAIN,
+}
+
+impl From<Flag> for u64 {
+    fn from(v: Flag) -> Self {
+        v as u64
+    }
+}
+
+impl From<HashAlgorithm> for u64 {
+    fn from(v: HashAlgorithm) -> Self {
+        v as u64
+    }
+}
+
+impl From<Service> for u64 {
+    fn from(v: Service) -> Self {
+        v as u64
+    }
 }
 
 #[derive(Debug)]
@@ -172,6 +200,8 @@ impl Display for Error {
                 "Incompatible algorithms used in signature and DKIM DNS record."
             ),
             Error::FailedVerification => write!(f, "Signature verification failed."),
+            Error::SignatureExpired => write!(f, "Signature expired."),
+            Error::FailedAUIDMatch => write!(f, "AUID does not match domain name."),
         }
     }
 }

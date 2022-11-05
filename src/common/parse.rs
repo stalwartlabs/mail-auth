@@ -9,6 +9,7 @@ pub(crate) trait TagParser: Sized {
     fn get_headers_qp(&mut self) -> Vec<Vec<u8>>;
     fn get_number(&mut self) -> u64;
     fn get_items<T: ItemParser>(&mut self, separator: u8) -> Vec<T>;
+    fn get_flags<T: ItemParser + Into<u64>>(&mut self, separator: u8) -> u64;
     fn ignore(&mut self);
     fn skip_whitespaces(&mut self) -> bool;
     fn next_skip_whitespaces(&mut self) -> Option<u8>;
@@ -20,24 +21,22 @@ pub(crate) trait ItemParser: Sized {
 
 impl TagParser for Iter<'_, u8> {
     #[inline(always)]
+    #[allow(clippy::while_let_on_iterator)]
     fn match_bytes(&mut self, bytes: &[u8]) -> bool {
-        let mut pos = 0;
-
-        for ch in self {
-            if !ch.is_ascii_whitespace() {
-                if bytes[pos].eq_ignore_ascii_case(ch) {
-                    if pos < bytes.len() - 1 {
-                        pos += 1;
+        'outer: for byte in bytes {
+            while let Some(&ch) = self.next() {
+                if !ch.is_ascii_whitespace() {
+                    if ch.eq_ignore_ascii_case(byte) {
+                        continue 'outer;
                     } else {
-                        break;
+                        return false;
                     }
-                } else {
-                    return false;
                 }
             }
+            return false;
         }
 
-        pos == bytes.len() - 1
+        true
     }
 
     #[inline(always)]
@@ -208,6 +207,31 @@ impl TagParser for Iter<'_, u8> {
             }
         }
         items
+    }
+
+    fn get_flags<T: ItemParser + Into<u64>>(&mut self, separator: u8) -> u64 {
+        let mut buf = Vec::with_capacity(10);
+        let mut flags = 0;
+        for &ch in self {
+            if ch == separator {
+                if !buf.is_empty() {
+                    if let Some(item) = T::parse(&buf) {
+                        flags |= item.into();
+                    }
+                    buf.clear();
+                }
+            } else if ch == b';' {
+                break;
+            } else if !ch.is_ascii_whitespace() {
+                buf.push(ch);
+            }
+        }
+        if !buf.is_empty() {
+            if let Some(item) = T::parse(&buf) {
+                flags |= item.into();
+            }
+        }
+        flags
     }
 }
 

@@ -256,10 +256,8 @@ impl Record {
         let mut key = 0;
         let mut record = Record {
             v: Version::Dkim1,
-            h: Vec::new(),
             p: PublicKey::Revoked,
-            s: Vec::new(),
-            t: Vec::new(),
+            f: 0,
         };
         let mut k = KeyType::None;
         let mut public_key = Vec::new();
@@ -274,13 +272,13 @@ impl Record {
                                 return Err(Error::UnsupportedRecordVersion);
                             }
                         }
-                        b'h' | b'H' => record.h = header.get_items(b':'),
+                        b'h' | b'H' => record.f |= header.get_flags::<HashAlgorithm>(b':'),
                         b'p' | b'P' => {
                             public_key = base64_decode_stream(&mut header, header_len, b';')
                                 .unwrap_or_default()
                         }
-                        b's' | b'S' => record.s = header.get_items(b':'),
-                        b't' | b'T' => record.t = header.get_items(b':'),
+                        b's' | b'S' => record.f |= header.get_flags::<Service>(b':'),
+                        b't' | b'T' => record.f |= header.get_flags::<Flag>(b':'),
                         b'k' | b'K' => {
                             if let Some(ch) = header.next_skip_whitespaces() {
                                 match ch {
@@ -342,6 +340,10 @@ impl Record {
 
         Ok(record)
     }
+
+    pub fn has_flag(&self, flag: impl Into<u64>) -> bool {
+        (self.f & flag.into()) != 0
+    }
 }
 
 impl ItemParser for HashAlgorithm {
@@ -386,8 +388,8 @@ mod test {
     use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 
     use crate::dkim::{
-        Algorithm, Canonicalization, Flag, HashAlgorithm, PublicKey, Record, Service, Signature,
-        Version,
+        Algorithm, Canonicalization, PublicKey, Record, Signature, Version, R_FLAG_MATCH_DOMAIN,
+        R_FLAG_TESTING, R_HASH_SHA1, R_HASH_SHA256, R_SVC_ALL, R_SVC_EMAIL,
     };
 
     #[test]
@@ -549,7 +551,6 @@ mod test {
                 ),
                 Record {
                     v: Version::Dkim1,
-                    h: Vec::new(),
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
@@ -566,8 +567,7 @@ mod test {
                         )
                         .unwrap(),
                     ),
-                    s: Vec::new(),
-                    t: Vec::new(),
+                    f: 0,
                 },
             ),
             (
@@ -585,7 +585,6 @@ mod test {
                 ),
                 Record {
                     v: Version::Dkim1,
-                    h: vec![HashAlgorithm::Sha1, HashAlgorithm::Sha256],
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
@@ -606,8 +605,12 @@ mod test {
                         )
                         .unwrap(),
                     ),
-                    s: vec![Service::All, Service::Email],
-                    t: vec![Flag::Testing, Flag::MatchDomain],
+                    f: R_HASH_SHA1
+                        | R_HASH_SHA256
+                        | R_SVC_ALL
+                        | R_SVC_EMAIL
+                        | R_FLAG_MATCH_DOMAIN
+                        | R_FLAG_TESTING,
                 },
             ),
             (
@@ -619,7 +622,6 @@ mod test {
                 ),
                 Record {
                     v: Version::Dkim1,
-                    h: vec![],
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
@@ -635,8 +637,7 @@ mod test {
                         )
                         .unwrap(),
                     ),
-                    s: vec![],
-                    t: vec![],
+                    f: 0,
                 },
             ),
         ] {

@@ -1,0 +1,95 @@
+ietf1 k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDNzNnjKTd5cczd2CDzHflCZuv1tMWYwd7zE+deoJ6s/fXR7/n9ZIBnDS5egt7HAHjNjZrmjcoRlfSsNxRJvUQFyYvaU1BT1s8R+mkPgSOqZ4t9HqAVjiczn2B9+dbjdNN+S/zvSyMMuSCSJDKKAXhBpDeQTpeY7/UdP9s6ws0yjQIDAQAB
+
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
+	t=1667592145; bh=M3BM66+ux2IbqyOhw6XrN0rYwgjbrSbsG7H+29IL9UQ=;
+	h=Date:From:To:Subject:List-Id:List-Unsubscribe:List-Archive:
+	 List-Post:List-Help:List-Subscribe;
+	b=QmIyawDUToz+fNTD9NUhb3S2jSSGpzsvQvvxhL1pTVgpmT+6f+eFLK3CHbPVpjxat
+	 ZrbpzMAopEXPvGZzX9kTDtjtuePS9ai7Y7ZOh7mRA0YBf8pm9OHfuROZdxLQeOBSBd
+	 OYMZ3+NBJ2nVMcP2quGK08xKRf2x6w8vjf80vRMk=
+X-Mailbox-Line: From emailcore-bounces@ietf.org  Fri Nov  4 13:02:25 2022
+Received: from ietfa.amsl.com (localhost [IPv6:::1])
+	by ietfa.amsl.com (Postfix) with ESMTP id 5E112C1522AC;
+	Fri,  4 Nov 2022 13:02:25 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
+	t=1667592145; bh=M3BM66+ux2IbqyOhw6XrN0rYwgjbrSbsG7H+29IL9UQ=;
+	h=Date:From:To:Subject:List-Id:List-Unsubscribe:List-Archive:
+	 List-Post:List-Help:List-Subscribe;
+	b=QmIyawDUToz+fNTD9NUhb3S2jSSGpzsvQvvxhL1pTVgpmT+6f+eFLK3CHbPVpjxat
+	 ZrbpzMAopEXPvGZzX9kTDtjtuePS9ai7Y7ZOh7mRA0YBf8pm9OHfuROZdxLQeOBSBd
+	 OYMZ3+NBJ2nVMcP2quGK08xKRf2x6w8vjf80vRMk=
+X-Original-To: emailcore@ietfa.amsl.com
+Delivered-To: emailcore@ietfa.amsl.com
+Received: from localhost (localhost [127.0.0.1])
+ by ietfa.amsl.com (Postfix) with ESMTP id 45488C14CE2D
+ for <emailcore@ietfa.amsl.com>; Fri,  4 Nov 2022 13:02:24 -0700 (PDT)
+X-Virus-Scanned: amavisd-new at amsl.com
+X-Spam-Flag: NO
+X-Spam-Score: -1.906
+X-Spam-Level: 
+X-Spam-Status: No, score=-1.906 tagged_above=-999 required=5
+ tests=[BAYES_00=-1.9, RCVD_IN_DNSWL_BLOCKED=0.001,
+ RCVD_IN_ZEN_BLOCKED_OPENDNS=0.001, SPF_HELO_NONE=0.001,
+ SPF_NONE=0.001, T_SCC_BODY_TEXT_LINE=-0.01]
+ autolearn=ham autolearn_force=no
+Received: from mail.ietf.org ([50.223.129.194])
+ by localhost (ietfa.amsl.com [127.0.0.1]) (amavisd-new, port 10024)
+ with ESMTP id TPvKqVQ91cB6 for <emailcore@ietfa.amsl.com>;
+ Fri,  4 Nov 2022 13:02:23 -0700 (PDT)
+Received: from bsa2.jck.com (bsa2.jck.com [70.88.254.51])
+ (using TLSv1 with cipher DHE-RSA-AES256-SHA (256/256 bits))
+ (No client certificate requested)
+ by ietfa.amsl.com (Postfix) with ESMTPS id 6E964C14CF0D
+ for <emailcore@ietf.org>; Fri,  4 Nov 2022 13:02:22 -0700 (PDT)
+Received: from [198.252.137.10] (helo=PSB)
+ by bsa2.jck.com with esmtp (Exim 4.82 (FreeBSD))
+ (envelope-from <john-ietf@jck.com>) id 1or2tR-000LNT-Uq
+ for emailcore@ietf.org; Fri, 04 Nov 2022 16:02:21 -0400
+Date: Fri, 04 Nov 2022 16:02:16 -0400
+From: John C Klensin <john-ietf@jck.com>
+To: emailcore@ietf.org
+Message-ID: <A407959F1EB2B03E01506613@PSB>
+X-Mailer: Mulberry/4.0.8 (Win32)
+MIME-Version: 1.0
+Content-Disposition: inline
+X-SA-Exim-Connect-IP: 198.252.137.10
+X-SA-Exim-Mail-From: john-ietf@jck.com
+X-SA-Exim-Scanned: No (on bsa2.jck.com); SAEximRunCond expanded to false
+Archived-At: <https://mailarchive.ietf.org/arch/msg/emailcore/IPZm3afZr9EgYa0SbNjGfQ0od0A>
+Subject: [Emailcore] rfc5321bis appendix I.2 (eighth item in -14;
+ bullet 8 in -15)
+X-BeenThere: emailcore@ietf.org
+X-Mailman-Version: 2.1.39
+Precedence: list
+List-Id: EMAILCORE proposed working group list <emailcore.ietf.org>
+List-Unsubscribe: <https://www.ietf.org/mailman/options/emailcore>,
+ <mailto:emailcore-request@ietf.org?subject=unsubscribe>
+List-Archive: <https://mailarchive.ietf.org/arch/browse/emailcore/>
+List-Post: <mailto:emailcore@ietf.org>
+List-Help: <mailto:emailcore-request@ietf.org?subject=help>
+List-Subscribe: <https://www.ietf.org/mailman/listinfo/emailcore>,
+ <mailto:emailcore-request@ietf.org?subject=subscribe>
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 7bit
+Errors-To: emailcore-bounces@ietf.org
+Sender: "Emailcore" <emailcore-bounces@ietf.org>
+
+Hi.
+
+This bullet item is about whether this document should
+explicitly obsolete RFCs 1846 and 7504, as reflected in drafts
+up to this point.   There have been no comments in response.  
+
+The changes due to those documents are discussed in Section 1.2.
+
+Unless there are comments (and, presumably at least the
+beginning of a decision) to the contrary between and shortly
+after IETF 115, I will treat the question as settled and remove
+the comments in rfc5321bis-16.
+
+   john
+
+-- 
+Emailcore mailing list
+Emailcore@ietf.org
+https://www.ietf.org/mailman/listinfo/emailcore

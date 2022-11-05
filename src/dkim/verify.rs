@@ -1,10 +1,10 @@
-use std::{iter::Enumerate, slice::Iter};
+use std::{iter::Enumerate, slice::Iter, time::SystemTime};
 
 use rsa::PaddingScheme;
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
-use super::{Algorithm, Canonicalization, HashAlgorithm, PublicKey, Record, Signature};
+use super::{Algorithm, Canonicalization, Flag, HashAlgorithm, PublicKey, Record, Signature};
 
 pub struct DKIMVerifier<'x> {
     headers: &'x [(&'x [u8], &'x [u8])],
@@ -16,8 +16,8 @@ pub struct DKIMVerifier<'x> {
 
 #[derive(Debug)]
 pub struct Error<'x> {
-    error: super::Error,
-    header: &'x [u8],
+    pub(crate) error: super::Error,
+    pub(crate) header: &'x [u8],
 }
 
 impl<'x> DKIMVerifier<'x> {
@@ -31,9 +31,45 @@ impl<'x> DKIMVerifier<'x> {
         }
     }
 
+    #[allow(clippy::while_let_on_iterator)]
     pub fn verify(&mut self, signature: &Signature, record: &Record) -> Result<(), Error> {
-        // Canonicalize the message body and calculate its hash
         let raw_signature = self.headers[self.headers_pos];
+
+        // Make sure the signature has not expired
+        if signature.x > 0 && signature.t > 0 {
+            let now = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if signature.x < signature.t || signature.x < now {
+                return Err(Error::new(super::Error::SignatureExpired, raw_signature.1));
+            }
+        }
+
+        // Enforce t=s flag
+        if !signature.i.is_empty() && record.has_flag(Flag::MatchDomain) {
+            let mut auid = signature.i.as_ref().iter();
+            let mut domain = signature.d.as_ref().iter();
+            while let Some(&ch) = auid.next() {
+                if ch == b'@' {
+                    break;
+                }
+            }
+            while let Some(ch) = auid.next() {
+                if let Some(dch) = domain.next() {
+                    if !ch.eq_ignore_ascii_case(dch) {
+                        return Err(Error::new(super::Error::FailedAUIDMatch, raw_signature.1));
+                    }
+                } else {
+                    break;
+                }
+            }
+            if domain.next().is_some() {
+                return Err(Error::new(super::Error::FailedAUIDMatch, raw_signature.1));
+            }
+        }
+
+        // Canonicalize the message body and calculate its hash
         let bh = if let Some((_, _, _, bh)) = self.body_hashes.iter().find(|(c, h, l, _)| {
             c == &signature.cb
                 && (matches!(
@@ -269,12 +305,16 @@ mod test {
                 .and_then(|pos| message.as_bytes().get(pos..))
                 .unwrap_or_default();
             let mut verifier = DKIMVerifier::new(&headers, body);
+            let mut num_signatures = 0;
 
             while let Some(signature) = verifier.next_signature() {
                 let signature = signature.unwrap();
                 let record = Record::parse(dns_records.get(signature.s.as_ref()).unwrap()).unwrap();
                 verifier.verify(&signature, &record).unwrap();
+                num_signatures += 1;
             }
+
+            assert_ne!(num_signatures, 0);
         }
     }
 

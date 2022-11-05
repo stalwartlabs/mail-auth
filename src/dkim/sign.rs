@@ -16,7 +16,7 @@ use std::{
     time::SystemTime,
 };
 
-use ed25519_dalek::ed25519::signature::SignerMut;
+use ed25519_dalek::Signer;
 use mail_builder::encoders::base64::base64_encode;
 use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::AssociatedOid, PaddingScheme, RsaPrivateKey};
 use sha1::Sha1;
@@ -201,10 +201,7 @@ impl<'x> DKIMSigner<'x> {
                 )
                 .map_err(Error::RSA)?,
             PrivateKey::Ed25519(key_pair) => {
-                ed25519_dalek::ExpandedSecretKey::from(&key_pair.secret)
-                    .sign(&header_hasher.finalize(), &key_pair.public)
-                    .to_bytes()
-                    .to_vec()
+                key_pair.sign(&header_hasher.finalize()).to_bytes().to_vec()
             }
             PrivateKey::None => return Err(Error::MissingParameters),
         };
@@ -218,60 +215,100 @@ impl<'x> DKIMSigner<'x> {
 
 impl<'x> Signature<'x> {
     pub(crate) fn write(&self, mut writer: impl Write, as_header: bool) -> std::io::Result<()> {
-        writer.write_all(match self.ch {
-            Canonicalization::Relaxed if !as_header => b"dkim-signature:",
-            _ => b"DKIM-Signature: ",
-        })?;
+        let (header, new_line) = match self.ch {
+            Canonicalization::Relaxed if !as_header => (&b"dkim-signature:"[..], &b" "[..]),
+            _ => (&b"DKIM-Signature: "[..], &b"\r\n\t"[..]),
+        };
+        writer.write_all(header)?;
         writer.write_all(b"v=1; a=")?;
         writer.write_all(match self.a {
             Algorithm::RsaSha256 => b"rsa-sha256",
             Algorithm::RsaSha1 => b"rsa-sha1",
             Algorithm::Ed25519Sha256 => b"ed25519-sha256",
         })?;
-        writer.write_all(b"; s=")?;
-        writer.write_all(&self.s)?;
-        writer.write_all(b"; d=")?;
-        writer.write_all(&self.d)?;
+        for (tag, value) in [(&b"; s="[..], &self.s), (&b"; d="[..], &self.d)] {
+            writer.write_all(tag)?;
+            writer.write_all(value)?;
+        }
         writer.write_all(b"; c=")?;
-
         self.ch.serialize_name(&mut writer)?;
         writer.write_all(b"/")?;
         self.cb.serialize_name(&mut writer)?;
 
-        writer.write_all(b"; h=")?;
+        writer.write_all(b";")?;
+        writer.write_all(new_line)?;
+
+        let mut bw = 1;
         for (num, h) in self.h.iter().enumerate() {
-            if num > 0 {
-                writer.write_all(b":")?;
+            if bw + h.len() + 1 >= 76 {
+                writer.write_all(new_line)?;
+                bw = 1;
             }
-            writer.write_all(h)?;
+            if num > 0 {
+                bw += writer.write(b":")?;
+            } else {
+                bw += writer.write(b"h=")?;
+            }
+            bw += writer.write(h)?;
         }
-        writer.write_all(b"; t=")?;
-        writer.write_all(self.t.to_string().as_bytes())?;
-        if self.x > 0 {
-            writer.write_all(b"; x=")?;
-            writer.write_all(self.x.to_string().as_bytes())?;
-        }
-        writer.write_all(b"; bh=")?;
-        writer.write_all(&self.bh)?;
-        writer.write_all(b"; b=")?;
-        writer.write_all(&self.b)?;
+
         if !self.i.is_empty() {
-            writer.write_all(b"; i=")?;
+            if bw + self.i.len() + 3 >= 76 {
+                writer.write_all(b";")?;
+                writer.write_all(new_line)?;
+                bw = 1;
+            } else {
+                bw += writer.write(b"; ")?;
+            }
+            bw += writer.write(b"i=")?;
+
             for &ch in self.i.iter() {
                 match ch {
                     0..=0x20 | b';' | 0x7f..=u8::MAX => {
-                        writer.write_all(format!("={:02X}", ch).as_bytes())?;
+                        bw += writer.write(format!("={:02X}", ch).as_bytes())?;
                     }
                     _ => {
-                        writer.write_all(&[ch])?;
+                        bw += writer.write(&[ch])?;
                     }
+                }
+                if bw >= 76 {
+                    writer.write_all(new_line)?;
+                    bw = 1;
                 }
             }
         }
-        if self.l > 0 {
-            writer.write_all(b"; l=")?;
-            writer.write_all(self.l.to_string().as_bytes())?;
+
+        for (tag, value) in [
+            (&b"t="[..], self.t),
+            (&b"x="[..], self.x),
+            (&b"l="[..], self.l),
+        ] {
+            if value > 0 {
+                let value = value.to_string();
+                bw += writer.write(b";")?;
+                if bw + tag.len() + value.len() >= 76 {
+                    writer.write_all(new_line)?;
+                    bw = 1;
+                } else {
+                    bw += writer.write(b" ")?;
+                }
+
+                bw += writer.write(tag)?;
+                bw += writer.write(value.as_bytes())?;
+            }
         }
+
+        for (tag, value) in [(&b"; bh="[..], &self.bh), (&b"; b="[..], &self.b)] {
+            bw += writer.write(tag)?;
+            for &byte in value {
+                bw += writer.write(&[byte])?;
+                if bw >= 76 {
+                    writer.write_all(new_line)?;
+                    bw = 1;
+                }
+            }
+        }
+
         writer.write_all(b";")?;
         if as_header {
             writer.write_all(b"\r\n")?;
@@ -306,9 +343,15 @@ impl<'x> Display for Signature<'x> {
 
 #[cfg(test)]
 mod test {
+    use mail_parser::decoders::base64::base64_decode;
     use sha2::Sha256;
 
-    const TEST_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
+    use crate::{
+        common::headers::HeaderIterator,
+        dkim::{verify::DKIMVerifier, Canonicalization, Record, Signature},
+    };
+
+    const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
 MIICXwIBAAKBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYtIxN2SnFC
 jxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v/RtdC2UzJ1lWT947qR+Rcac2gb
 to/NMqJ0fzfVjH4OuKhitdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB
@@ -324,10 +367,22 @@ eAYXunajbBSOLlx4D+TunwJBANkPI5S9iylsbLs6NkaMHV6k5ioHBBmgCak95JGX
 GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 -----END RSA PRIVATE KEY-----"#;
 
+    const RSA_PUBLIC_KEY: &str = concat!(
+        "v=DKIM1; t=s; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQ",
+        "KBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYt",
+        "IxN2SnFCjxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v",
+        "/RtdC2UzJ1lWT947qR+Rcac2gbto/NMqJ0fzfVjH4OuKhi",
+        "tdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB",
+    );
+
+    const ED25519_PRIVATE_KEY: &str = "nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=";
+    const ED25519_PUBLIC_KEY: &str =
+        "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
+
     #[test]
     fn dkim_sign() {
         let dkim = super::DKIMSigner::new()
-            .rsa_pem(TEST_KEY)
+            .rsa_pem(RSA_PRIVATE_KEY)
             .unwrap()
             .headers(["From", "To", "Subject"])
             .domain("stalw.art")
@@ -346,14 +401,180 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             .unwrap();
         assert_eq!(
             concat!(
-                "v=1; a=rsa-sha256; s=default; d=stalw.art; c=relaxed/relaxed; ",
-                "h=Subject:To:From; t=311923920; ",
-                "bh=QoiUNYyUV+1tZ/xUPRcE+gST2zAStvJx1OK078Ylm5s=; ",
-                "b=Du0rvdzNodI6b5bhlUaZZ+gpXJi0VwjY/3qL7lS0wzKutNVCbvdJuZObGdAcv",
-                "eVI/RNQh2gxW4H2ynMS3B+Unse1YLJQwdjuGxsCEKBqReKlsEKT8JlO/7b2AvxR",
-                "9Q+M2aHD5kn9dbNIKnN/PKouutaXmm18QwL5EPEN9DHXSqQ=;",
+                "dkim-signature:v=1; a=rsa-sha256; s=default; d=stalw.art; ",
+                "c=relaxed/relaxed; h=Subject:To:From; t=311923920; ",
+                "bh=QoiUNYyUV+1tZ/xUPRcE+gST2zAStvJx1OK078Yl m5s=; ",
+                "b=F5fBuwEyirUQRZwpEP1fKGil5rNqxL2e5kExeyGdByAvS2lp5",
+                "M5CqGNzoJ9Pj8sGuGG rdD18uL0xOduqYN7uxifmD4u0BuTzaUSBQ",
+                "hONWZxFq/BZ8rn6ylZCBS3NDuxFcRkcBtMAuZtGKO wito563yyb+",
+                "Ujgtpc0DOZtntjyQGc=;",
             ),
             signature.to_string()
         );
+    }
+
+    #[test]
+    fn dkim_sign_verify() {
+        let message = concat!(
+            "From: bill@example.com\r\n",
+            "To: jdoe@example.com\r\n",
+            "Subject: TPS Report\r\n",
+            "\r\n",
+            "I'm going to need those TPS reports ASAP. ",
+            "So, if you could do that, that'd be great.\r\n"
+        );
+        let message_multiheader = concat!(
+            "X-Duplicate-Header: 4\r\n",
+            "From: bill@example.com\r\n",
+            "X-Duplicate-Header: 3\r\n",
+            "To: jdoe@example.com\r\n",
+            "X-Duplicate-Header: 2\r\n",
+            "Subject: TPS Report\r\n",
+            "X-Duplicate-Header: 1\r\n",
+            "To: jane@example.com\r\n",
+            "\r\n",
+            "I'm going to need those TPS reports ASAP. ",
+            "So, if you could do that, that'd be great.\r\n"
+        );
+
+        // Test RSA-SHA256 relaxed/relaxed
+        verify(
+            super::DKIMSigner::new()
+                .rsa_pem(RSA_PRIVATE_KEY)
+                .unwrap()
+                .headers(["From", "To", "Subject"])
+                .domain("example.com")
+                .selector("default")
+                .agent_user_identifier("\"John Doe\" <jdoe@example.com>")
+                .sign(message.as_bytes())
+                .unwrap(),
+            message,
+            RSA_PUBLIC_KEY,
+            Ok(()),
+        );
+
+        // Test ED25519-SHA256 relaxed/relaxed
+        verify(
+            super::DKIMSigner::new()
+                .ed25519(
+                    &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes())
+                        .unwrap(),
+                    &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
+                )
+                .unwrap()
+                .headers(["From", "To", "Subject"])
+                .domain("example.com")
+                .selector("default")
+                .sign(message.as_bytes())
+                .unwrap(),
+            message,
+            ED25519_PUBLIC_KEY,
+            Ok(()),
+        );
+
+        // Test RSA-SHA256 simple/simple with duplicated headers
+        verify(
+            super::DKIMSigner::new()
+                .rsa_pem(RSA_PRIVATE_KEY)
+                .unwrap()
+                .headers([
+                    "From",
+                    "To",
+                    "Subject",
+                    "X-Duplicate-Header",
+                    "X-Does-Not-Exist",
+                ])
+                .domain("example.com")
+                .selector("default")
+                .header_canonicalization(Canonicalization::Simple)
+                .body_canonicalization(Canonicalization::Simple)
+                .sign(message_multiheader.as_bytes())
+                .unwrap(),
+            message_multiheader,
+            RSA_PUBLIC_KEY,
+            Ok(()),
+        );
+
+        // Test RSA-SHA256 simple/relaxed with fixed body length
+        verify(
+            super::DKIMSigner::new()
+                .rsa_pem(RSA_PRIVATE_KEY)
+                .unwrap()
+                .headers(["From", "To", "Subject"])
+                .domain("example.com")
+                .selector("default")
+                .header_canonicalization(Canonicalization::Simple)
+                .body_length(true)
+                .sign(message.as_bytes())
+                .unwrap(),
+            &(message.to_string() + "\r\n----- Mailing list"),
+            RSA_PUBLIC_KEY,
+            Ok(()),
+        );
+
+        // Test AUID not matching domain
+        verify(
+            super::DKIMSigner::new()
+                .rsa_pem(RSA_PRIVATE_KEY)
+                .unwrap()
+                .headers(["From", "To", "Subject"])
+                .domain("example.com")
+                .selector("default")
+                .agent_user_identifier("@wrongdomain.com")
+                .sign(message.as_bytes())
+                .unwrap(),
+            message,
+            RSA_PUBLIC_KEY,
+            Err(super::Error::FailedAUIDMatch),
+        );
+
+        // Test expired signature
+        verify(
+            super::DKIMSigner::new()
+                .rsa_pem(RSA_PRIVATE_KEY)
+                .unwrap()
+                .headers(["From", "To", "Subject"])
+                .domain("example.com")
+                .selector("default")
+                .expiration(12345)
+                .sign_::<Sha256>(message.as_bytes(), 12345)
+                .unwrap(),
+            message,
+            RSA_PUBLIC_KEY,
+            Err(super::Error::SignatureExpired),
+        );
+    }
+
+    fn verify(
+        signature: Signature,
+        message_: &str,
+        public_key: &str,
+        expect: Result<(), super::Error>,
+    ) {
+        let mut message = Vec::with_capacity(message_.len() + 100);
+        signature.write(&mut message, true).unwrap();
+        message.extend_from_slice(message_.as_bytes());
+        //println!("[{}]", String::from_utf8_lossy(&message));
+
+        let mut headers_it = HeaderIterator::new(&message);
+        let headers = (&mut headers_it).collect::<Vec<_>>();
+        let body = headers_it
+            .body_offset()
+            .and_then(|pos| message.get(pos..))
+            .unwrap_or_default();
+        let mut verifier = DKIMVerifier::new(&headers, body);
+        let mut num_signatures = 0;
+
+        while let Some(signature) = verifier.next_signature() {
+            let signature = signature.unwrap();
+            let record = Record::parse(public_key.as_bytes()).unwrap();
+            match (verifier.verify(&signature, &record), &expect) {
+                (Ok(_), Ok(_)) | (Err(_), Err(_)) => (),
+                (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
+            }
+            num_signatures += 1;
+        }
+
+        assert_ne!(num_signatures, 0);
     }
 }
