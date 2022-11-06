@@ -2,8 +2,25 @@ use std::slice::Iter;
 
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 
+pub(crate) const V: u16 = b'v' as u16;
+pub(crate) const A: u16 = b'a' as u16;
+pub(crate) const B: u16 = b'b' as u16;
+pub(crate) const BH: u16 = (b'b' as u16) | ((b'h' as u16) << 8);
+pub(crate) const C: u16 = b'c' as u16;
+pub(crate) const D: u16 = b'd' as u16;
+pub(crate) const H: u16 = b'h' as u16;
+pub(crate) const I: u16 = b'i' as u16;
+pub(crate) const K: u16 = b'k' as u16;
+pub(crate) const L: u16 = b'l' as u16;
+pub(crate) const P: u16 = b'p' as u16;
+pub(crate) const S: u16 = b's' as u16;
+pub(crate) const T: u16 = b't' as u16;
+pub(crate) const X: u16 = b'x' as u16;
+pub(crate) const Z: u16 = b'z' as u16;
+
 pub(crate) trait TagParser: Sized {
     fn match_bytes(&mut self, bytes: &[u8]) -> bool;
+    fn get_key(&mut self) -> Option<u16>;
     fn get_tag(&mut self) -> Vec<u8>;
     fn get_tag_qp(&mut self) -> Vec<u8>;
     fn get_headers_qp(&mut self) -> Vec<Vec<u8>>;
@@ -11,7 +28,7 @@ pub(crate) trait TagParser: Sized {
     fn get_items<T: ItemParser>(&mut self, separator: u8) -> Vec<T>;
     fn get_flags<T: ItemParser + Into<u64>>(&mut self, separator: u8) -> u64;
     fn ignore(&mut self);
-    fn skip_whitespaces(&mut self) -> bool;
+    fn seek_tag_end(&mut self) -> bool;
     fn next_skip_whitespaces(&mut self) -> Option<u8>;
 }
 
@@ -20,6 +37,51 @@ pub(crate) trait ItemParser: Sized {
 }
 
 impl TagParser for Iter<'_, u8> {
+    #[allow(clippy::while_let_on_iterator)]
+    fn get_key(&mut self) -> Option<u16> {
+        let mut key1: u8 = 0;
+        let mut key2: u8 = 0;
+
+        while let Some(&ch) = self.next() {
+            match ch {
+                b'a'..=b'z' => {
+                    if key1 == 0 {
+                        key1 = ch;
+                    } else if key2 == 0 {
+                        key2 = ch;
+                    } else {
+                        key1 = 0x7f;
+                        key2 = 0x7f;
+                    }
+                }
+                b' ' | b'\t' | b'\r' | b'\n' => (),
+                b'=' => {
+                    return (key1 as u16 | ((key2 as u16) << 8)).into();
+                }
+                b'A'..=b'Z' => {
+                    if key1 == 0 {
+                        key1 = ch - b'A' + b'a';
+                    } else if key2 == 0 {
+                        key2 = ch - b'A' + b'a';
+                    } else {
+                        key1 = 0x7f;
+                        key2 = 0x7f;
+                    }
+                }
+                b';' => {
+                    key1 = 0;
+                    key2 = 0;
+                }
+                _ => {
+                    key1 = 0x7f;
+                    key2 = 0x7f;
+                }
+            }
+        }
+
+        None
+    }
+
     #[inline(always)]
     #[allow(clippy::while_let_on_iterator)]
     fn match_bytes(&mut self, bytes: &[u8]) -> bool {
@@ -163,7 +225,7 @@ impl TagParser for Iter<'_, u8> {
     }
 
     #[inline(always)]
-    fn skip_whitespaces(&mut self) -> bool {
+    fn seek_tag_end(&mut self) -> bool {
         for &ch in self {
             if ch == b';' {
                 return true;

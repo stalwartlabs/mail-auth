@@ -11,6 +11,7 @@
 
 pub mod common;
 pub mod dkim;
+pub mod spf;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right

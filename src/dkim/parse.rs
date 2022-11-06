@@ -1,32 +1,12 @@
-use std::slice::Iter;
-
 use mail_parser::decoders::base64::base64_decode_stream;
 use rsa::RsaPublicKey;
 
-use crate::common::parse::{ItemParser, TagParser};
+use crate::common::parse::*;
 
 use super::{
     Algorithm, Canonicalization, Error, Flag, HashAlgorithm, PublicKey, Record, Service, Signature,
     Version,
 };
-
-enum Key {
-    V,
-    A,
-    B,
-    BH,
-    C,
-    D,
-    H,
-    I,
-    L,
-    Q,
-    S,
-    T,
-    X,
-    Z,
-    Unknown,
-}
 
 impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
@@ -50,9 +30,9 @@ impl<'x> Signature<'x> {
         let header_len = header.len();
         let mut header = header.iter();
 
-        while let Some(key) = Key::parse(&mut header) {
+        while let Some(key) = header.get_key() {
             match key {
-                Key::V => {
+                V => {
                     while let Some(&ch) = header.next() {
                         match ch {
                             b'1' if signature.v == 0 => {
@@ -72,7 +52,7 @@ impl<'x> Signature<'x> {
                         return Err(Error::UnsupportedVersion);
                     }
                 }
-                Key::A => {
+                A => {
                     if let Some(ch) = header.next_skip_whitespaces() {
                         match ch {
                             b'r' | b'R' => {
@@ -106,8 +86,7 @@ impl<'x> Signature<'x> {
                                 }
                             }
                             b'e' | b'E' => {
-                                if header.match_bytes(b"d25519-sha256") && header.skip_whitespaces()
-                                {
+                                if header.match_bytes(b"d25519-sha256") && header.seek_tag_end() {
                                     signature.a = Algorithm::Ed25519Sha256;
                                 } else {
                                     return Err(Error::UnsupportedAlgorithm);
@@ -120,15 +99,15 @@ impl<'x> Signature<'x> {
                         }
                     }
                 }
-                Key::B => {
+                B => {
                     signature.b =
                         base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
                 }
-                Key::BH => {
+                BH => {
                     signature.bh =
                         base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
                 }
-                Key::C => {
+                C => {
                     let mut has_header = false;
                     let mut c = None;
 
@@ -172,15 +151,15 @@ impl<'x> Signature<'x> {
                         }
                     }
                 }
-                Key::D => signature.d = header.get_tag().into(),
-                Key::H => signature.h = header.get_items(b':'),
-                Key::I => signature.i = header.get_tag_qp().into(),
-                Key::L => signature.l = header.get_number(),
-                Key::S => signature.s = header.get_tag().into(),
-                Key::T => signature.t = header.get_number(),
-                Key::X => signature.x = header.get_number(),
-                Key::Z => signature.z = header.get_headers_qp(),
-                Key::Q | Key::Unknown => header.ignore(),
+                D => signature.d = header.get_tag().into(),
+                H => signature.h = header.get_items(b':'),
+                I => signature.i = header.get_tag_qp().into(),
+                L => signature.l = header.get_number(),
+                S => signature.s = header.get_tag().into(),
+                T => signature.t = header.get_number(),
+                X => signature.x = header.get_number(),
+                Z => signature.z = header.get_headers_qp(),
+                _ => header.ignore(),
             }
         }
 
@@ -197,51 +176,6 @@ impl<'x> Signature<'x> {
     }
 }
 
-impl Key {
-    #[allow(clippy::while_let_on_iterator)]
-    fn parse(header: &mut Iter<'_, u8>) -> Option<Self> {
-        let mut key = Key::Unknown;
-
-        while let Some(ch) = header.next() {
-            key = match ch {
-                b'v' | b'V' => Key::V,
-                b'a' | b'A' => Key::A,
-                b'b' | b'B' => Key::B,
-                b'c' | b'C' => Key::C,
-                b'd' | b'D' => Key::D,
-                b'h' | b'H' => Key::H,
-                b'i' | b'I' => Key::I,
-                b'l' | b'L' => Key::L,
-                b'q' | b'Q' => Key::Q,
-                b's' | b'S' => Key::S,
-                b't' | b'T' => Key::T,
-                b'x' | b'X' => Key::X,
-                b'z' | b'Z' => Key::Z,
-                b' ' | b'\t' | b'\r' | b'\n' | b';' => continue,
-                _ => Key::Unknown,
-            };
-            break;
-        }
-
-        while let Some(ch) = header.next() {
-            match ch {
-                b'=' => {
-                    return key.into();
-                }
-                b' ' | b'\t' | b'\r' | b'\n' => (),
-                b'h' | b'H' if matches!(key, Key::B) => {
-                    key = Key::BH;
-                }
-                _ => {
-                    key = Key::Unknown;
-                }
-            }
-        }
-
-        None
-    }
-}
-
 enum KeyType {
     Rsa,
     Ed25519,
@@ -253,7 +187,6 @@ impl Record {
     pub fn parse(header: &[u8]) -> super::Result<Self> {
         let header_len = header.len();
         let mut header = header.iter();
-        let mut key = 0;
         let mut record = Record {
             v: Version::Dkim1,
             p: PublicKey::Revoked,
@@ -262,64 +195,46 @@ impl Record {
         let mut k = KeyType::None;
         let mut public_key = Vec::new();
 
-        while let Some(&ch) = header.next() {
-            match ch {
-                b' ' | b'\t' | b'\r' | b'\n' => (),
-                b'=' => {
-                    match key {
-                        b'v' | b'V' => {
-                            if !header.match_bytes(b"DKIM1") || !header.skip_whitespaces() {
-                                return Err(Error::UnsupportedRecordVersion);
-                            }
-                        }
-                        b'h' | b'H' => record.f |= header.get_flags::<HashAlgorithm>(b':'),
-                        b'p' | b'P' => {
-                            public_key = base64_decode_stream(&mut header, header_len, b';')
-                                .unwrap_or_default()
-                        }
-                        b's' | b'S' => record.f |= header.get_flags::<Service>(b':'),
-                        b't' | b'T' => record.f |= header.get_flags::<Flag>(b':'),
-                        b'k' | b'K' => {
-                            if let Some(ch) = header.next_skip_whitespaces() {
-                                match ch {
-                                    b'r' | b'R' => {
-                                        if header.match_bytes(b"sa") && header.skip_whitespaces() {
-                                            k = KeyType::Rsa;
-                                        } else {
-                                            return Err(Error::UnsupportedKeyType);
-                                        }
-                                    }
-                                    b'e' | b'E' => {
-                                        if header.match_bytes(b"d25519")
-                                            && header.skip_whitespaces()
-                                        {
-                                            k = KeyType::Ed25519;
-                                        } else {
-                                            return Err(Error::UnsupportedKeyType);
-                                        }
-                                    }
-                                    b';' => (),
-                                    _ => {
-                                        return Err(Error::UnsupportedKeyType);
-                                    }
+        while let Some(key) = header.get_key() {
+            match key {
+                V => {
+                    if !header.match_bytes(b"DKIM1") || !header.seek_tag_end() {
+                        return Err(Error::UnsupportedRecordVersion);
+                    }
+                }
+                H => record.f |= header.get_flags::<HashAlgorithm>(b':'),
+                P => {
+                    public_key =
+                        base64_decode_stream(&mut header, header_len, b';').unwrap_or_default()
+                }
+                S => record.f |= header.get_flags::<Service>(b':'),
+                T => record.f |= header.get_flags::<Flag>(b':'),
+                K => {
+                    if let Some(ch) = header.next_skip_whitespaces() {
+                        match ch {
+                            b'r' | b'R' => {
+                                if header.match_bytes(b"sa") && header.seek_tag_end() {
+                                    k = KeyType::Rsa;
+                                } else {
+                                    return Err(Error::UnsupportedKeyType);
                                 }
                             }
-                        }
-                        _ => {
-                            header.ignore();
+                            b'e' | b'E' => {
+                                if header.match_bytes(b"d25519") && header.seek_tag_end() {
+                                    k = KeyType::Ed25519;
+                                } else {
+                                    return Err(Error::UnsupportedKeyType);
+                                }
+                            }
+                            b';' => (),
+                            _ => {
+                                return Err(Error::UnsupportedKeyType);
+                            }
                         }
                     }
-                    key = 0;
-                }
-                b';' => {
-                    key = 0;
                 }
                 _ => {
-                    if key == 0 {
-                        key = ch;
-                    } else {
-                        key = u8::MAX;
-                    }
+                    header.ignore();
                 }
             }
         }
