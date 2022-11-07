@@ -5,7 +5,7 @@ use std::{
 
 use crate::common::parse::{TagParser, V};
 
-use super::{Directive, DomainSpec, Error, Macro, Mechanism, Modifier, Qualifier, Term, SPF};
+use super::{Directive, Error, Macro, Mechanism, Modifier, Qualifier, Variable, SPF};
 
 impl SPF {
     pub fn parse(bytes: &[u8]) -> super::Result<SPF> {
@@ -20,7 +20,8 @@ impl SPF {
 
         let mut spf = SPF {
             version: super::Version::Spf1,
-            terms: Vec::new(),
+            directives: Vec::new(),
+            modifiers: Vec::new(),
         };
 
         while let Some((term, qualifier, mut stop_char)) = record.next_term() {
@@ -28,13 +29,13 @@ impl SPF {
                 A | MX => {
                     let mut ip4_cidr_length = 32;
                     let mut ip6_cidr_length = 128;
-                    let mut domain_spec = DomainSpec::None;
+                    let mut macro_string = Macro::None;
 
                     match stop_char {
                         b' ' => (),
                         b':' | b'=' => {
-                            let (ds, stop_char) = record.domain_spec()?;
-                            domain_spec = ds;
+                            let (ds, stop_char) = record.macro_string(false)?;
+                            macro_string = ds;
                             if stop_char == b'/' {
                                 let (l1, l2) = record.dual_cidr_length()?;
                                 ip4_cidr_length = l1;
@@ -51,27 +52,27 @@ impl SPF {
                         _ => return Err(Error::ParseFailed),
                     }
 
-                    spf.terms.push(Term::Directive(Directive::new(
+                    spf.directives.push(Directive::new(
                         qualifier,
                         if term == A {
                             Mechanism::A {
-                                domain_spec,
+                                macro_string,
                                 ip4_cidr_length,
                                 ip6_cidr_length,
                             }
                         } else {
                             Mechanism::Mx {
-                                domain_spec,
+                                macro_string,
                                 ip4_cidr_length,
                                 ip6_cidr_length,
                             }
                         },
-                    )));
+                    ));
                 }
                 ALL => {
                     if stop_char == b' ' {
-                        spf.terms
-                            .push(Term::Directive(Directive::new(qualifier, Mechanism::All)))
+                        spf.directives
+                            .push(Directive::new(qualifier, Mechanism::All))
                     } else {
                         return Err(Error::ParseFailed);
                     }
@@ -80,16 +81,16 @@ impl SPF {
                     if stop_char != b':' {
                         return Err(Error::ParseFailed);
                     }
-                    let (domain_spec, stop_char) = record.domain_spec()?;
+                    let (macro_string, stop_char) = record.macro_string(false)?;
                     if stop_char == b' ' {
-                        spf.terms.push(Term::Directive(Directive::new(
+                        spf.directives.push(Directive::new(
                             qualifier,
                             if term == INCLUDE {
-                                Mechanism::Include { domain_spec }
+                                Mechanism::Include { macro_string }
                             } else {
-                                Mechanism::Exists { domain_spec }
+                                Mechanism::Exists { macro_string }
                             },
-                        )));
+                        ));
                     } else {
                         return Err(Error::ParseFailed);
                     }
@@ -102,13 +103,13 @@ impl SPF {
                     let (addr, stop_char) = record.ip4()?;
                     if stop_char == b'/' {
                         cidr_length = std::cmp::min(cidr_length, record.cidr_length()?);
-                    } else if stop_char != b':' {
+                    } else if stop_char != b' ' {
                         return Err(Error::ParseFailed);
                     }
-                    spf.terms.push(Term::Directive(Directive::new(
+                    spf.directives.push(Directive::new(
                         qualifier,
                         Mechanism::Ip4 { addr, cidr_length },
-                    )));
+                    ));
                 }
                 IP6 => {
                     if stop_char != b':' {
@@ -118,27 +119,25 @@ impl SPF {
                     let (addr, stop_char) = record.ip6()?;
                     if stop_char == b'/' {
                         cidr_length = std::cmp::min(cidr_length, record.cidr_length()?);
-                    } else if stop_char != b':' {
+                    } else if stop_char != b' ' {
                         return Err(Error::ParseFailed);
                     }
-                    spf.terms.push(Term::Directive(Directive::new(
+                    spf.directives.push(Directive::new(
                         qualifier,
                         Mechanism::Ip6 { addr, cidr_length },
-                    )));
+                    ));
                 }
                 PTR => {
-                    let mut domain_spec = DomainSpec::None;
+                    let mut macro_string = Macro::None;
                     if stop_char == b':' {
-                        let (ds, stop_char_) = record.domain_spec()?;
-                        domain_spec = ds;
+                        let (ds, stop_char_) = record.macro_string(false)?;
+                        macro_string = ds;
                         stop_char = stop_char_;
                     }
 
                     if stop_char == b' ' {
-                        spf.terms.push(Term::Directive(Directive::new(
-                            qualifier,
-                            Mechanism::Ptr { domain_spec },
-                        )));
+                        spf.directives
+                            .push(Directive::new(qualifier, Mechanism::Ptr { macro_string }));
                     } else {
                         return Err(Error::ParseFailed);
                     }
@@ -147,18 +146,18 @@ impl SPF {
                     if stop_char != b'=' {
                         return Err(Error::ParseFailed);
                     }
-                    let (domain_spec, stop_char) = record.domain_spec()?;
+                    let (macro_string, stop_char) = record.macro_string(false)?;
                     if stop_char != b' ' {
                         return Err(Error::ParseFailed);
                     }
-                    spf.terms.push(Term::Modifier(if term == REDIRECT {
-                        Modifier::Redirect(domain_spec)
+                    spf.modifiers.push(if term == REDIRECT {
+                        Modifier::Redirect(macro_string)
                     } else {
-                        Modifier::Explanation(domain_spec)
-                    }));
+                        Modifier::Explanation(macro_string)
+                    });
                 }
                 _ => {
-                    let (_, stop_char) = record.domain_spec()?;
+                    let (_, stop_char) = record.macro_string(false)?;
                     if stop_char != b' ' {
                         return Err(Error::ParseFailed);
                     }
@@ -199,9 +198,9 @@ const REDIRECT: u64 = (b't' as u64) << 56
     | (b'e' as u64) << 8
     | (b'r' as u64);
 
-trait SPFParser: Sized {
+pub(crate) trait SPFParser: Sized {
     fn next_term(&mut self) -> Option<(u64, Qualifier, u8)>;
-    fn domain_spec(&mut self) -> super::Result<(DomainSpec, u8)>;
+    fn macro_string(&mut self, is_exp: bool) -> super::Result<(Macro, u8)>;
     fn ip4(&mut self) -> super::Result<(Ipv4Addr, u8)>;
     fn ip6(&mut self) -> super::Result<(Ipv6Addr, u8)>;
     fn cidr_length(&mut self) -> super::Result<u8>;
@@ -237,7 +236,7 @@ impl SPFParser for Iter<'_, u8> {
                 b'?' if shift == 0 => {
                     qualifier = Qualifier::Neutral;
                 }
-                b':' | b'=' => {
+                b':' | b'=' | b'/' => {
                     stop_char = ch;
                     break;
                 }
@@ -263,11 +262,11 @@ impl SPFParser for Iter<'_, u8> {
     }
 
     #[allow(clippy::while_let_on_iterator)]
-    fn domain_spec(&mut self) -> super::Result<(DomainSpec, u8)> {
+    fn macro_string(&mut self, is_exp: bool) -> super::Result<(Macro, u8)> {
         let mut stop_char = b' ';
         let mut last_is_pct = false;
         let mut literal = Vec::with_capacity(16);
-        let mut domain_spec = Vec::new();
+        let mut macro_string = Vec::new();
 
         while let Some(&ch) = self.next() {
             match ch {
@@ -287,18 +286,24 @@ impl SPFParser for Iter<'_, u8> {
                 }
                 b'{' if last_is_pct => {
                     if !literal.is_empty() {
-                        domain_spec.push(DomainSpec::Literal(literal.to_vec()));
+                        macro_string.push(Macro::Literal(literal.to_vec()));
                         literal.clear();
                     }
 
-                    let letter = self
+                    let (letter, escape) = self
                         .next()
                         .copied()
-                        .and_then(Macro::parse)
+                        .and_then(|l| {
+                            if !is_exp {
+                                Variable::parse(l)
+                            } else {
+                                Variable::parse_exp(l)
+                            }
+                        })
                         .ok_or(Error::InvalidMacro)?;
                     let mut num_parts: u32 = 0;
                     let mut reverse = false;
-                    let mut delimiters = Vec::new();
+                    let mut delimiters = 0;
 
                     while let Some(&ch) = self.next() {
                         match ch {
@@ -314,7 +319,7 @@ impl SPFParser for Iter<'_, u8> {
                                 break;
                             }
                             b'.' | b'-' | b'+' | b',' | b'/' | b'_' | b'=' => {
-                                delimiters.push(ch);
+                                delimiters |= 1u64 << (ch - b'+');
                             }
                             _ => {
                                 return Err(Error::InvalidMacro);
@@ -322,21 +327,26 @@ impl SPFParser for Iter<'_, u8> {
                         }
                     }
 
-                    domain_spec.push(DomainSpec::Macro {
+                    if delimiters == 0 {
+                        delimiters = 1u64 << (b'.' - b'+');
+                    }
+
+                    macro_string.push(Macro::Variable {
                         letter,
                         num_parts,
                         reverse,
+                        escape,
                         delimiters,
                     });
                 }
-                b'/' => {
+                b'/' if !is_exp => {
                     stop_char = ch;
                     break;
                 }
                 _ => {
                     if last_is_pct {
                         return Err(Error::InvalidMacro);
-                    } else if !ch.is_ascii_whitespace() {
+                    } else if !ch.is_ascii_whitespace() || is_exp {
                         literal.push(ch);
                     } else {
                         break;
@@ -348,13 +358,13 @@ impl SPFParser for Iter<'_, u8> {
         }
 
         if !literal.is_empty() {
-            domain_spec.push(DomainSpec::Literal(literal));
+            macro_string.push(Macro::Literal(literal));
         }
 
-        match domain_spec.len() {
-            1 => Ok((domain_spec.pop().unwrap(), stop_char)),
+        match macro_string.len() {
+            1 => Ok((macro_string.pop().unwrap(), stop_char)),
             0 => Err(Error::ParseFailed),
-            _ => Ok((DomainSpec::List(domain_spec), stop_char)),
+            _ => Ok((Macro::List(macro_string), stop_char)),
         }
     }
 
@@ -554,20 +564,56 @@ impl SPFParser for Iter<'_, u8> {
     }
 }
 
-impl Macro {
-    fn parse(ch: u8) -> Option<Self> {
+impl Variable {
+    fn parse(ch: u8) -> Option<(Self, bool)> {
         match ch {
-            b's' | b'S' => Macro::Sender,
-            b'l' | b'L' => Macro::SenderLocalPart,
-            b'o' | b'O' => Macro::SenderDomainPart,
-            b'd' | b'D' => Macro::Domain,
-            b'i' | b'I' => Macro::Ip,
-            b'p' | b'P' => Macro::ValidatedDomain,
-            b'v' | b'V' => Macro::IpVersion,
-            b'h' | b'H' => Macro::HeloDomain,
-            b'c' | b'C' => Macro::SmtpIp,
-            b'r' | b'R' => Macro::HostDomain,
-            b't' | b'T' => Macro::CurrentTime,
+            b's' => (Variable::Sender, false),
+            b'l' => (Variable::SenderLocalPart, false),
+            b'o' => (Variable::SenderDomainPart, false),
+            b'd' => (Variable::Domain, false),
+            b'i' => (Variable::Ip, false),
+            b'p' => (Variable::ValidatedDomain, false),
+            b'v' => (Variable::IpVersion, false),
+            b'h' => (Variable::HeloDomain, false),
+
+            b'S' => (Variable::Sender, true),
+            b'L' => (Variable::SenderLocalPart, true),
+            b'O' => (Variable::SenderDomainPart, true),
+            b'D' => (Variable::Domain, true),
+            b'I' => (Variable::Ip, true),
+            b'P' => (Variable::ValidatedDomain, true),
+            b'V' => (Variable::IpVersion, true),
+            b'H' => (Variable::HeloDomain, true),
+            _ => return None,
+        }
+        .into()
+    }
+
+    fn parse_exp(ch: u8) -> Option<(Self, bool)> {
+        match ch {
+            b's' => (Variable::Sender, false),
+            b'l' => (Variable::SenderLocalPart, false),
+            b'o' => (Variable::SenderDomainPart, false),
+            b'd' => (Variable::Domain, false),
+            b'i' => (Variable::Ip, false),
+            b'p' => (Variable::ValidatedDomain, false),
+            b'v' => (Variable::IpVersion, false),
+            b'h' => (Variable::HeloDomain, false),
+            b'c' => (Variable::SmtpIp, false),
+            b'r' => (Variable::HostDomain, false),
+            b't' => (Variable::CurrentTime, false),
+
+            b'S' => (Variable::Sender, true),
+            b'L' => (Variable::SenderLocalPart, true),
+            b'O' => (Variable::SenderDomainPart, true),
+            b'D' => (Variable::Domain, true),
+            b'I' => (Variable::Ip, true),
+            b'P' => (Variable::ValidatedDomain, true),
+            b'V' => (Variable::IpVersion, true),
+            b'H' => (Variable::HeloDomain, true),
+            b'C' => (Variable::SmtpIp, true),
+            b'R' => (Variable::HostDomain, true),
+            b'T' => (Variable::CurrentTime, true),
             _ => return None,
         }
         .into()
@@ -578,7 +624,620 @@ impl Macro {
 mod test {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
+    use crate::spf::{Directive, Macro, Mechanism, Modifier, Qualifier, Variable, Version, SPF};
+
     use super::SPFParser;
+
+    #[test]
+    fn parse_spf() {
+        for (record, expected_result) in [
+            (
+                "v=spf1 +mx a:colo.example.com/28 -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::A {
+                                macro_string: Macro::Literal(b"colo.example.com".to_vec()),
+                                ip4_cidr_length: 28,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 a:A.EXAMPLE.COM -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::A {
+                                macro_string: Macro::Literal(b"A.EXAMPLE.COM".to_vec()),
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 +mx -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 +mx redirect=_spf.example.com",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![Modifier::Redirect(Macro::Literal(
+                        b"_spf.example.com".to_vec(),
+                    ))],
+                    directives: vec![Directive::new(
+                        Qualifier::Pass,
+                        Mechanism::Mx {
+                            macro_string: Macro::None,
+                            ip4_cidr_length: 32,
+                            ip6_cidr_length: 128,
+                        },
+                    )],
+                },
+            ),
+            (
+                "v=spf1 a mx -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::A {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 include:example.com include:example.org -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Include {
+                                macro_string: Macro::Literal(b"example.com".to_vec()),
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Include {
+                                macro_string: Macro::Literal(b"example.org".to_vec()),
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 exists:%{ir}.%{l1r+-}._spf.%{d} -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Exists {
+                                macro_string: Macro::List(vec![
+                                    Macro::Variable {
+                                        letter: Variable::Ip,
+                                        num_parts: 0,
+                                        reverse: true,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                    Macro::Literal(b".".to_vec()),
+                                    Macro::Variable {
+                                        letter: Variable::SenderLocalPart,
+                                        num_parts: 1,
+                                        reverse: true,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'+' - b'+') | 1u64 << (b'-' - b'+'),
+                                    },
+                                    Macro::Literal(b"._spf.".to_vec()),
+                                    Macro::Variable {
+                                        letter: Variable::Domain,
+                                        num_parts: 0,
+                                        reverse: false,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                ]),
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 mx -all exp=explain._spf.%{d}",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![Modifier::Explanation(Macro::List(vec![
+                        Macro::Literal(b"explain._spf.".to_vec()),
+                        Macro::Variable {
+                            letter: Variable::Domain,
+                            num_parts: 0,
+                            reverse: false,
+                            escape: false,
+                            delimiters: 1u64 << (b'.' - b'+'),
+                        },
+                    ]))],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 ip4:192.0.2.1 ip4:192.0.2.129 -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Ip4 {
+                                addr: "192.0.2.1".parse().unwrap(),
+                                cidr_length: 32,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Ip4 {
+                                addr: "192.0.2.129".parse().unwrap(),
+                                cidr_length: 32,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 ip4:192.0.2.0/24 mx -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Ip4 {
+                                addr: "192.0.2.0".parse().unwrap(),
+                                cidr_length: 24,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 mx/30 mx:example.org/30 -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 30,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::Literal(b"example.org".to_vec()),
+                                ip4_cidr_length: 30,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 ptr -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Ptr {
+                                macro_string: Macro::None,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 exists:%{l1r+}.%{d}",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![Directive::new(
+                        Qualifier::Pass,
+                        Mechanism::Exists {
+                            macro_string: Macro::List(vec![
+                                Macro::Variable {
+                                    letter: Variable::SenderLocalPart,
+                                    num_parts: 1,
+                                    reverse: true,
+                                    escape: false,
+                                    delimiters: 1u64 << (b'+' - b'+'),
+                                },
+                                Macro::Literal(b".".to_vec()),
+                                Macro::Variable {
+                                    letter: Variable::Domain,
+                                    num_parts: 0,
+                                    reverse: false,
+                                    escape: false,
+                                    delimiters: 1u64 << (b'.' - b'+'),
+                                },
+                            ]),
+                        },
+                    )],
+                },
+            ),
+            (
+                "v=spf1 exists:%{ir}.%{l1r+}.%{d}",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![Directive::new(
+                        Qualifier::Pass,
+                        Mechanism::Exists {
+                            macro_string: Macro::List(vec![
+                                Macro::Variable {
+                                    letter: Variable::Ip,
+                                    num_parts: 0,
+                                    reverse: true,
+                                    escape: false,
+                                    delimiters: 1u64 << (b'.' - b'+'),
+                                },
+                                Macro::Literal(b".".to_vec()),
+                                Macro::Variable {
+                                    letter: Variable::SenderLocalPart,
+                                    num_parts: 1,
+                                    reverse: true,
+                                    escape: false,
+                                    delimiters: 1u64 << (b'+' - b'+'),
+                                },
+                                Macro::Literal(b".".to_vec()),
+                                Macro::Variable {
+                                    letter: Variable::Domain,
+                                    num_parts: 0,
+                                    reverse: false,
+                                    escape: false,
+                                    delimiters: 1u64 << (b'.' - b'+'),
+                                },
+                            ]),
+                        },
+                    )],
+                },
+            ),
+            (
+                "v=spf1 exists:_h.%{h}._l.%{l}._o.%{o}._i.%{i}._spf.%{d} ?all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Exists {
+                                macro_string: Macro::List(vec![
+                                    Macro::Literal(b"_h.".to_vec()),
+                                    Macro::Variable {
+                                        letter: Variable::HeloDomain,
+                                        num_parts: 0,
+                                        reverse: false,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                    Macro::Literal(b"._l.".to_vec()),
+                                    Macro::Variable {
+                                        letter: Variable::SenderLocalPart,
+                                        num_parts: 0,
+                                        reverse: false,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                    Macro::Literal(b"._o.".to_vec()),
+                                    Macro::Variable {
+                                        letter: Variable::SenderDomainPart,
+                                        num_parts: 0,
+                                        reverse: false,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                    Macro::Literal(b"._i.".to_vec()),
+                                    Macro::Variable {
+                                        letter: Variable::Ip,
+                                        num_parts: 0,
+                                        reverse: false,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                    Macro::Literal(b"._spf.".to_vec()),
+                                    Macro::Variable {
+                                        letter: Variable::Domain,
+                                        num_parts: 0,
+                                        reverse: false,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                ]),
+                            },
+                        ),
+                        Directive::new(Qualifier::Neutral, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 mx ?exists:%{ir}.whitelist.example.org -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Neutral,
+                            Mechanism::Exists {
+                                macro_string: Macro::List(vec![
+                                    Macro::Variable {
+                                        letter: Variable::Ip,
+                                        num_parts: 0,
+                                        reverse: true,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                    Macro::Literal(b".whitelist.example.org".to_vec()),
+                                ]),
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 mx exists:%{l}._%-spf_%_verify%%.%{d} -all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Exists {
+                                macro_string: Macro::List(vec![
+                                    Macro::Variable {
+                                        letter: Variable::SenderLocalPart,
+                                        num_parts: 0,
+                                        reverse: false,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                    Macro::Literal(b"._%20spf_ verify%.".to_vec()),
+                                    Macro::Variable {
+                                        letter: Variable::Domain,
+                                        num_parts: 0,
+                                        reverse: false,
+                                        escape: false,
+                                        delimiters: 1u64 << (b'.' - b'+'),
+                                    },
+                                ]),
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                "v=spf1 mx redirect=%{l1r+}._at_.%{o,=_/}._spf.%{d}",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![Modifier::Redirect(Macro::List(vec![
+                        Macro::Variable {
+                            letter: Variable::SenderLocalPart,
+                            num_parts: 1,
+                            reverse: true,
+                            escape: false,
+                            delimiters: 1u64 << (b'+' - b'+'),
+                        },
+                        Macro::Literal(b"._at_.".to_vec()),
+                        Macro::Variable {
+                            letter: Variable::SenderDomainPart,
+                            num_parts: 0,
+                            reverse: false,
+                            escape: false,
+                            delimiters: 1u64 << (b',' - b'+')
+                                | 1u64 << (b'=' - b'+')
+                                | 1u64 << (b'_' - b'+')
+                                | 1u64 << (b'/' - b'+'),
+                        },
+                        Macro::Literal(b"._spf.".to_vec()),
+                        Macro::Variable {
+                            letter: Variable::Domain,
+                            num_parts: 0,
+                            reverse: false,
+                            escape: false,
+                            delimiters: 1u64 << (b'.' - b'+'),
+                        },
+                    ]))],
+                    directives: vec![Directive::new(
+                        Qualifier::Pass,
+                        Mechanism::Mx {
+                            macro_string: Macro::None,
+                            ip4_cidr_length: 32,
+                            ip6_cidr_length: 128,
+                        },
+                    )],
+                },
+            ),
+            (
+                "v=spf1 -ip4:192.0.2.0/24 a//96 +all",
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Fail,
+                            Mechanism::Ip4 {
+                                addr: "192.0.2.0".parse().unwrap(),
+                                cidr_length: 24,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::A {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 32,
+                                ip6_cidr_length: 96,
+                            },
+                        ),
+                        Directive::new(Qualifier::Pass, Mechanism::All),
+                    ],
+                },
+            ),
+            (
+                concat!(
+                    "v=spf1 +mx/11//100 ~a:domain.com/12/123 ?ip6:::1 ",
+                    "-ip6:a::b/111 ip6:1080::8:800:68.0.3.1/96 "
+                ),
+                SPF {
+                    version: Version::Spf1,
+                    modifiers: vec![],
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::None,
+                                ip4_cidr_length: 11,
+                                ip6_cidr_length: 100,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::SoftFail,
+                            Mechanism::A {
+                                macro_string: Macro::Literal(b"domain.com".to_vec()),
+                                ip4_cidr_length: 12,
+                                ip6_cidr_length: 123,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Neutral,
+                            Mechanism::Ip6 {
+                                addr: "::1".parse().unwrap(),
+                                cidr_length: 128,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Fail,
+                            Mechanism::Ip6 {
+                                addr: "a::b".parse().unwrap(),
+                                cidr_length: 111,
+                            },
+                        ),
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Ip6 {
+                                addr: "1080::8:800:68.0.3.1".parse().unwrap(),
+                                cidr_length: 96,
+                            },
+                        ),
+                    ],
+                },
+            ),
+        ] {
+            assert_eq!(
+                SPF::parse(record.as_bytes())
+                    .unwrap_or_else(|err| panic!("{:?} : {:?}", record, err)),
+                expected_result,
+                "{}",
+                record
+            );
+        }
+    }
 
     #[test]
     fn parse_ip6() {

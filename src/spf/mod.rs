@@ -1,6 +1,10 @@
+pub mod macros;
 pub mod parse;
 
-use std::net::{Ipv4Addr, Ipv6Addr};
+use std::{
+    borrow::Cow,
+    net::{Ipv4Addr, Ipv6Addr},
+};
 
 /*
       "+" pass
@@ -25,20 +29,20 @@ pub(crate) enum Qualifier {
 pub(crate) enum Mechanism {
     All,
     Include {
-        domain_spec: DomainSpec,
+        macro_string: Macro,
     },
     A {
-        domain_spec: DomainSpec,
+        macro_string: Macro,
         ip4_cidr_length: u8,
         ip6_cidr_length: u8,
     },
     Mx {
-        domain_spec: DomainSpec,
+        macro_string: Macro,
         ip4_cidr_length: u8,
         ip6_cidr_length: u8,
     },
     Ptr {
-        domain_spec: DomainSpec,
+        macro_string: Macro,
     },
     Ip4 {
         addr: Ipv4Addr,
@@ -49,7 +53,7 @@ pub(crate) enum Mechanism {
         cidr_length: u8,
     },
     Exists {
-        domain_spec: DomainSpec,
+        macro_string: Macro,
     },
 }
 
@@ -67,8 +71,8 @@ pub(crate) struct Directive {
 */
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Modifier {
-    Redirect(DomainSpec),
-    Explanation(DomainSpec),
+    Redirect(Macro),
+    Explanation(Macro),
 }
 
 /*
@@ -87,47 +91,46 @@ pub(crate) enum Modifier {
       t = current timestamp
 */
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[repr(u8)]
+pub(crate) enum Variable {
+    Sender = 0,
+    SenderLocalPart = 1,
+    SenderDomainPart = 2,
+    Domain = 3,
+    Ip = 4,
+    ValidatedDomain = 5,
+    IpVersion = 6,
+    HeloDomain = 7,
+    SmtpIp = 8,
+    HostDomain = 9,
+    CurrentTime = 10,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub(crate) struct Variables<'x> {
+    vars: [Cow<'x, [u8]>; 11],
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Macro {
-    Sender,
-    SenderLocalPart,
-    SenderDomainPart,
-    Domain,
-    Ip,
-    ValidatedDomain,
-    IpVersion,
-    HeloDomain,
-    SmtpIp,
-    HostDomain,
-    CurrentTime,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum DomainSpec {
     Literal(Vec<u8>),
-    Macro {
-        letter: Macro,
+    Variable {
+        letter: Variable,
         num_parts: u32,
         reverse: bool,
-        delimiters: Vec<u8>,
+        escape: bool,
+        delimiters: u64,
     },
-    List(Vec<DomainSpec>),
+    List(Vec<Macro>),
     None,
-}
-
-/*
-    terms            = *( 1*SP ( directive / modifier ) )
-*/
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Term {
-    Directive(Directive),
-    Modifier(Modifier),
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) struct SPF {
     version: Version,
-    terms: Vec<Term>,
+    directives: Vec<Directive>,
+    modifiers: Vec<Modifier>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
