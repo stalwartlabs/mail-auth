@@ -20,13 +20,14 @@ pub(crate) const Z: u16 = b'z' as u16;
 
 pub(crate) trait TagParser: Sized {
     fn match_bytes(&mut self, bytes: &[u8]) -> bool;
-    fn get_key(&mut self) -> Option<u16>;
-    fn get_tag(&mut self) -> Vec<u8>;
-    fn get_tag_qp(&mut self) -> Vec<u8>;
-    fn get_headers_qp(&mut self) -> Vec<Vec<u8>>;
-    fn get_number(&mut self) -> u64;
-    fn get_items<T: ItemParser>(&mut self, separator: u8) -> Vec<T>;
-    fn get_flags<T: ItemParser + Into<u64>>(&mut self, separator: u8) -> u64;
+    fn key(&mut self) -> Option<u16>;
+    fn long_key(&mut self) -> Option<u64>;
+    fn tag(&mut self) -> Vec<u8>;
+    fn tag_qp(&mut self) -> Vec<u8>;
+    fn headers_qp(&mut self) -> Vec<Vec<u8>>;
+    fn number(&mut self) -> Option<u64>;
+    fn items<T: ItemParser>(&mut self) -> Vec<T>;
+    fn flags<T: ItemParser + Into<u64>>(&mut self) -> u64;
     fn ignore(&mut self);
     fn seek_tag_end(&mut self) -> bool;
     fn next_skip_whitespaces(&mut self) -> Option<u8>;
@@ -38,43 +39,62 @@ pub(crate) trait ItemParser: Sized {
 
 impl TagParser for Iter<'_, u8> {
     #[allow(clippy::while_let_on_iterator)]
-    fn get_key(&mut self) -> Option<u16> {
-        let mut key1: u8 = 0;
-        let mut key2: u8 = 0;
+    fn key(&mut self) -> Option<u16> {
+        let mut key: u16 = 0;
+        let mut shift = 0;
 
         while let Some(&ch) = self.next() {
             match ch {
-                b'a'..=b'z' => {
-                    if key1 == 0 {
-                        key1 = ch;
-                    } else if key2 == 0 {
-                        key2 = ch;
-                    } else {
-                        key1 = 0x7f;
-                        key2 = 0x7f;
-                    }
+                b'a'..=b'z' if shift < 16 => {
+                    key |= (ch as u16) << shift;
+                    shift += 8;
                 }
                 b' ' | b'\t' | b'\r' | b'\n' => (),
                 b'=' => {
-                    return (key1 as u16 | ((key2 as u16) << 8)).into();
+                    return key.into();
                 }
-                b'A'..=b'Z' => {
-                    if key1 == 0 {
-                        key1 = ch - b'A' + b'a';
-                    } else if key2 == 0 {
-                        key2 = ch - b'A' + b'a';
-                    } else {
-                        key1 = 0x7f;
-                        key2 = 0x7f;
-                    }
+                b'A'..=b'Z' if shift < 16 => {
+                    key |= ((ch - b'A' + b'a') as u16) << shift;
+                    shift += 8;
                 }
                 b';' => {
-                    key1 = 0;
-                    key2 = 0;
+                    key = 0;
                 }
                 _ => {
-                    key1 = 0x7f;
-                    key2 = 0x7f;
+                    key = u16::MAX;
+                    shift = 16;
+                }
+            }
+        }
+
+        None
+    }
+
+    #[allow(clippy::while_let_on_iterator)]
+    fn long_key(&mut self) -> Option<u64> {
+        let mut key: u64 = 0;
+        let mut shift = 0;
+
+        while let Some(&ch) = self.next() {
+            match ch {
+                b'a'..=b'z' if shift < 64 => {
+                    key |= (ch as u64) << shift;
+                    shift += 8;
+                }
+                b' ' | b'\t' | b'\r' | b'\n' => (),
+                b'=' => {
+                    return key.into();
+                }
+                b'A'..=b'Z' if shift < 64 => {
+                    key |= ((ch - b'A' + b'a') as u64) << shift;
+                    shift += 8;
+                }
+                b';' => {
+                    key = 0;
+                }
+                _ => {
+                    key = u64::MAX;
+                    shift = 64;
                 }
             }
         }
@@ -102,7 +122,7 @@ impl TagParser for Iter<'_, u8> {
     }
 
     #[inline(always)]
-    fn get_tag(&mut self) -> Vec<u8> {
+    fn tag(&mut self) -> Vec<u8> {
         let mut tag = Vec::with_capacity(20);
         for &ch in self {
             if ch == b';' {
@@ -116,7 +136,7 @@ impl TagParser for Iter<'_, u8> {
 
     #[inline(always)]
     #[allow(clippy::while_let_on_iterator)]
-    fn get_tag_qp(&mut self) -> Vec<u8> {
+    fn tag_qp(&mut self) -> Vec<u8> {
         let mut tag = Vec::with_capacity(20);
         'outer: while let Some(&ch) = self.next() {
             if ch == b';' {
@@ -125,7 +145,7 @@ impl TagParser for Iter<'_, u8> {
                 let mut hex1 = 0;
 
                 while let Some(&ch) = self.next() {
-                    if ch.is_ascii_digit() {
+                    if ch.is_ascii_hexdigit() {
                         if hex1 != 0 {
                             if let Some(ch) = quoted_printable_decode_char(hex1, ch) {
                                 tag.push(ch);
@@ -149,7 +169,7 @@ impl TagParser for Iter<'_, u8> {
 
     #[inline(always)]
     #[allow(clippy::while_let_on_iterator)]
-    fn get_headers_qp(&mut self) -> Vec<Vec<u8>> {
+    fn headers_qp(&mut self) -> Vec<Vec<u8>> {
         let mut tags = Vec::new();
         let mut tag = Vec::with_capacity(20);
 
@@ -165,7 +185,7 @@ impl TagParser for Iter<'_, u8> {
                 let mut hex1 = 0;
 
                 while let Some(&ch) = self.next() {
-                    if ch.is_ascii_digit() {
+                    if ch.is_ascii_hexdigit() {
                         if hex1 != 0 {
                             if let Some(ch) = quoted_printable_decode_char(hex1, ch) {
                                 tag.push(ch);
@@ -199,20 +219,26 @@ impl TagParser for Iter<'_, u8> {
     }
 
     #[inline(always)]
-    fn get_number(&mut self) -> u64 {
+    fn number(&mut self) -> Option<u64> {
         let mut num: u64 = 0;
+        let mut has_digits = false;
 
         for &ch in self {
             if ch == b';' {
                 break;
             } else if ch.is_ascii_digit() {
-                num = (num.saturating_mul(10)) + (ch - b'0') as u64;
+                num = (num.saturating_mul(10)).saturating_add((ch - b'0') as u64);
+                has_digits = true;
             } else if !ch.is_ascii_whitespace() {
-                return 0;
+                return None;
             }
         }
 
-        num
+        if has_digits {
+            num.into()
+        } else {
+            None
+        }
     }
 
     #[inline(always)]
@@ -246,11 +272,11 @@ impl TagParser for Iter<'_, u8> {
         None
     }
 
-    fn get_items<T: ItemParser>(&mut self, separator: u8) -> Vec<T> {
+    fn items<T: ItemParser>(&mut self) -> Vec<T> {
         let mut buf = Vec::with_capacity(10);
         let mut items = Vec::new();
         for &ch in self {
-            if ch == separator {
+            if ch == b':' {
                 if !buf.is_empty() {
                     if let Some(item) = T::parse(&buf) {
                         items.push(item);
@@ -271,11 +297,11 @@ impl TagParser for Iter<'_, u8> {
         items
     }
 
-    fn get_flags<T: ItemParser + Into<u64>>(&mut self, separator: u8) -> u64 {
+    fn flags<T: ItemParser + Into<u64>>(&mut self) -> u64 {
         let mut buf = Vec::with_capacity(10);
         let mut flags = 0;
         for &ch in self {
-            if ch == separator {
+            if ch == b':' {
                 if !buf.is_empty() {
                     if let Some(item) = T::parse(&buf) {
                         flags |= item.into();

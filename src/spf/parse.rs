@@ -10,7 +10,7 @@ use super::{Directive, Error, Macro, Mechanism, Modifier, Qualifier, Variable, S
 impl SPF {
     pub fn parse(bytes: &[u8]) -> super::Result<SPF> {
         let mut record = bytes.iter();
-        if !matches!(record.get_key(), Some(k) if k == V) {
+        if !matches!(record.key(), Some(k) if k == V) {
             return Err(Error::InvalidRecord);
         } else if !record.match_bytes(b"spf1")
             || record.next().map_or(false, |v| !v.is_ascii_whitespace())

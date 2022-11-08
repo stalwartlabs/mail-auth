@@ -1,3 +1,5 @@
+use std::slice::Iter;
+
 use mail_parser::decoders::base64::base64_decode_stream;
 use rsa::RsaPublicKey;
 
@@ -30,74 +32,16 @@ impl<'x> Signature<'x> {
         let header_len = header.len();
         let mut header = header.iter();
 
-        while let Some(key) = header.get_key() {
+        while let Some(key) = header.key() {
             match key {
                 V => {
-                    while let Some(&ch) = header.next() {
-                        match ch {
-                            b'1' if signature.v == 0 => {
-                                signature.v = 1;
-                            }
-                            b';' => {
-                                break;
-                            }
-                            _ => {
-                                if !ch.is_ascii_whitespace() {
-                                    return Err(Error::UnsupportedVersion);
-                                }
-                            }
-                        }
-                    }
+                    signature.v = header.number().unwrap_or(0) as u32;
                     if signature.v != 1 {
                         return Err(Error::UnsupportedVersion);
                     }
                 }
                 A => {
-                    if let Some(ch) = header.next_skip_whitespaces() {
-                        match ch {
-                            b'r' | b'R' => {
-                                if header.match_bytes(b"sa-sha") {
-                                    let mut algo = 0;
-
-                                    while let Some(ch) = header.next() {
-                                        match ch {
-                                            b'1' if algo == 0 => algo = 1,
-                                            b'2' if algo == 0 => algo = 2,
-                                            b'5' if algo == 2 => algo = 25,
-                                            b'6' if algo == 25 => algo = 256,
-                                            b';' => {
-                                                break;
-                                            }
-                                            _ => {
-                                                if !ch.is_ascii_whitespace() {
-                                                    return Err(Error::UnsupportedAlgorithm);
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    signature.a = match algo {
-                                        256 => Algorithm::RsaSha256,
-                                        1 => Algorithm::RsaSha1,
-                                        _ => return Err(Error::UnsupportedAlgorithm),
-                                    };
-                                } else {
-                                    return Err(Error::UnsupportedAlgorithm);
-                                }
-                            }
-                            b'e' | b'E' => {
-                                if header.match_bytes(b"d25519-sha256") && header.seek_tag_end() {
-                                    signature.a = Algorithm::Ed25519Sha256;
-                                } else {
-                                    return Err(Error::UnsupportedAlgorithm);
-                                }
-                            }
-                            b';' => (),
-                            _ => {
-                                return Err(Error::UnsupportedAlgorithm);
-                            }
-                        }
-                    }
+                    signature.a = header.algorithm()?;
                 }
                 B => {
                     signature.b =
@@ -108,63 +52,24 @@ impl<'x> Signature<'x> {
                         base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
                 }
                 C => {
-                    let mut has_header = false;
-                    let mut c = None;
-
-                    while let Some(ch) = header.next() {
-                        match (ch, c) {
-                            (b's' | b'S', None) => {
-                                if header.match_bytes(b"imple") {
-                                    c = Canonicalization::Simple.into();
-                                } else {
-                                    return Err(Error::UnsupportedAlgorithm);
-                                }
-                            }
-                            (b'r' | b'R', None) => {
-                                if header.match_bytes(b"elaxed") {
-                                    c = Canonicalization::Relaxed.into();
-                                } else {
-                                    return Err(Error::UnsupportedAlgorithm);
-                                }
-                            }
-                            (b'/', Some(c_)) => {
-                                signature.ch = c_;
-                                c = None;
-                                has_header = true;
-                            }
-                            (b';', _) => {
-                                break;
-                            }
-                            (_, _) => {
-                                if !ch.is_ascii_whitespace() {
-                                    return Err(Error::UnsupportedCanonicalization);
-                                }
-                            }
-                        }
-                    }
-
-                    if let Some(c) = c {
-                        if has_header {
-                            signature.cb = c;
-                        } else {
-                            signature.ch = c;
-                        }
-                    }
+                    let (ch, cb) = header.canonicalization(Canonicalization::Simple)?;
+                    signature.ch = ch;
+                    signature.cb = cb;
                 }
-                D => signature.d = header.get_tag().into(),
-                H => signature.h = header.get_items(b':'),
-                I => signature.i = header.get_tag_qp().into(),
-                L => signature.l = header.get_number(),
-                S => signature.s = header.get_tag().into(),
-                T => signature.t = header.get_number(),
-                X => signature.x = header.get_number(),
-                Z => signature.z = header.get_headers_qp(),
+                D => signature.d = header.tag().into(),
+                H => signature.h = header.items(),
+                I => signature.i = header.tag_qp().into(),
+                L => signature.l = header.number().unwrap_or(0),
+                S => signature.s = header.tag().into(),
+                T => signature.t = header.number().unwrap_or(0),
+                X => signature.x = header.number().unwrap_or(0),
+                Z => signature.z = header.headers_qp(),
                 _ => header.ignore(),
             }
         }
 
         if !signature.d.is_empty()
-            && !signature.d.is_empty()
+            && !signature.s.is_empty()
             && !signature.b.is_empty()
             && !signature.bh.is_empty()
             && !signature.h.is_empty()
@@ -172,6 +77,112 @@ impl<'x> Signature<'x> {
             Ok(signature)
         } else {
             Err(Error::MissingParameters)
+        }
+    }
+}
+
+pub(crate) trait SignatureParser: Sized {
+    fn canonicalization(
+        &mut self,
+        default: Canonicalization,
+    ) -> super::Result<(Canonicalization, Canonicalization)>;
+    fn algorithm(&mut self) -> super::Result<Algorithm>;
+}
+
+impl SignatureParser for Iter<'_, u8> {
+    fn canonicalization(
+        &mut self,
+        default: Canonicalization,
+    ) -> super::Result<(Canonicalization, Canonicalization)> {
+        let mut cb = default;
+        let mut ch = default;
+
+        let mut has_header = false;
+        let mut c = None;
+
+        while let Some(char) = self.next() {
+            match (char, c) {
+                (b's' | b'S', None) => {
+                    if self.match_bytes(b"imple") {
+                        c = Canonicalization::Simple.into();
+                    } else {
+                        return Err(Error::UnsupportedCanonicalization);
+                    }
+                }
+                (b'r' | b'R', None) => {
+                    if self.match_bytes(b"elaxed") {
+                        c = Canonicalization::Relaxed.into();
+                    } else {
+                        return Err(Error::UnsupportedCanonicalization);
+                    }
+                }
+                (b'/', Some(c_)) => {
+                    ch = c_;
+                    c = None;
+                    has_header = true;
+                }
+                (b';', _) => {
+                    break;
+                }
+                (_, _) => {
+                    if !char.is_ascii_whitespace() {
+                        return Err(Error::UnsupportedCanonicalization);
+                    }
+                }
+            }
+        }
+
+        if let Some(c) = c {
+            if has_header {
+                cb = c;
+            } else {
+                ch = c;
+            }
+        }
+
+        Ok((ch, cb))
+    }
+
+    fn algorithm(&mut self) -> super::Result<Algorithm> {
+        match self.next_skip_whitespaces().unwrap_or(0) {
+            b'r' | b'R' => {
+                if self.match_bytes(b"sa-sha") {
+                    let mut algo = 0;
+
+                    for ch in self {
+                        match ch {
+                            b'1' if algo == 0 => algo = 1,
+                            b'2' if algo == 0 => algo = 2,
+                            b'5' if algo == 2 => algo = 25,
+                            b'6' if algo == 25 => algo = 256,
+                            b';' => {
+                                break;
+                            }
+                            _ => {
+                                if !ch.is_ascii_whitespace() {
+                                    return Err(Error::UnsupportedAlgorithm);
+                                }
+                            }
+                        }
+                    }
+
+                    match algo {
+                        256 => Ok(Algorithm::RsaSha256),
+                        1 => Ok(Algorithm::RsaSha1),
+                        _ => Err(Error::UnsupportedAlgorithm),
+                    }
+                } else {
+                    Err(Error::UnsupportedAlgorithm)
+                }
+            }
+            b'e' | b'E' => {
+                if self.match_bytes(b"d25519-sha256") && self.seek_tag_end() {
+                    Ok(Algorithm::Ed25519Sha256)
+                } else {
+                    Err(Error::UnsupportedAlgorithm)
+                }
+            }
+            _ => Err(Error::UnsupportedAlgorithm),
         }
     }
 }
@@ -195,20 +206,20 @@ impl Record {
         let mut k = KeyType::None;
         let mut public_key = Vec::new();
 
-        while let Some(key) = header.get_key() {
+        while let Some(key) = header.key() {
             match key {
                 V => {
                     if !header.match_bytes(b"DKIM1") || !header.seek_tag_end() {
                         return Err(Error::UnsupportedRecordVersion);
                     }
                 }
-                H => record.f |= header.get_flags::<HashAlgorithm>(b':'),
+                H => record.f |= header.flags::<HashAlgorithm>(),
                 P => {
                     public_key =
                         base64_decode_stream(&mut header, header_len, b';').unwrap_or_default()
                 }
-                S => record.f |= header.get_flags::<Service>(b':'),
-                T => record.f |= header.get_flags::<Flag>(b':'),
+                S => record.f |= header.flags::<Service>(),
+                T => record.f |= header.flags::<Flag>(),
                 K => {
                     if let Some(ch) = header.next_skip_whitespaces() {
                         match ch {

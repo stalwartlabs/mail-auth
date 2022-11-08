@@ -9,8 +9,10 @@
  * except according to those terms.
  */
 
+pub mod arc;
 pub mod common;
 pub mod dkim;
+pub mod dmarc;
 pub mod spf;
 
 pub fn add(left: usize, right: usize) -> usize {
