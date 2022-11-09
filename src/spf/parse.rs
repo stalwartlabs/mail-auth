@@ -3,12 +3,15 @@ use std::{
     slice::Iter,
 };
 
-use crate::common::parse::{TagParser, V};
+use crate::{
+    common::parse::{TagParser, V},
+    Error,
+};
 
-use super::{Directive, Error, Macro, Mechanism, Modifier, Qualifier, Variable, SPF};
+use super::{Directive, Macro, Mechanism, Modifier, Qualifier, Variable, SPF};
 
 impl SPF {
-    pub fn parse(bytes: &[u8]) -> super::Result<SPF> {
+    pub fn parse(bytes: &[u8]) -> crate::Result<SPF> {
         let mut record = bytes.iter();
         if !matches!(record.key(), Some(k) if k == V) {
             return Err(Error::InvalidRecord);
@@ -41,7 +44,7 @@ impl SPF {
                                 ip4_cidr_length = l1;
                                 ip6_cidr_length = l2;
                             } else if stop_char != b' ' {
-                                return Err(Error::ParseFailed);
+                                return Err(Error::ParseError);
                             }
                         }
                         b'/' => {
@@ -49,7 +52,7 @@ impl SPF {
                             ip4_cidr_length = l1;
                             ip6_cidr_length = l2;
                         }
-                        _ => return Err(Error::ParseFailed),
+                        _ => return Err(Error::ParseError),
                     }
 
                     spf.directives.push(Directive::new(
@@ -74,12 +77,12 @@ impl SPF {
                         spf.directives
                             .push(Directive::new(qualifier, Mechanism::All))
                     } else {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                 }
                 INCLUDE | EXISTS => {
                     if stop_char != b':' {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                     let (macro_string, stop_char) = record.macro_string(false)?;
                     if stop_char == b' ' {
@@ -92,19 +95,19 @@ impl SPF {
                             },
                         ));
                     } else {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                 }
                 IP4 => {
                     if stop_char != b':' {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                     let mut cidr_length = 32;
                     let (addr, stop_char) = record.ip4()?;
                     if stop_char == b'/' {
                         cidr_length = std::cmp::min(cidr_length, record.cidr_length()?);
                     } else if stop_char != b' ' {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                     spf.directives.push(Directive::new(
                         qualifier,
@@ -113,14 +116,14 @@ impl SPF {
                 }
                 IP6 => {
                     if stop_char != b':' {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                     let mut cidr_length = 128;
                     let (addr, stop_char) = record.ip6()?;
                     if stop_char == b'/' {
                         cidr_length = std::cmp::min(cidr_length, record.cidr_length()?);
                     } else if stop_char != b' ' {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                     spf.directives.push(Directive::new(
                         qualifier,
@@ -139,16 +142,16 @@ impl SPF {
                         spf.directives
                             .push(Directive::new(qualifier, Mechanism::Ptr { macro_string }));
                     } else {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                 }
                 EXP | REDIRECT => {
                     if stop_char != b'=' {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                     let (macro_string, stop_char) = record.macro_string(false)?;
                     if stop_char != b' ' {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                     spf.modifiers.push(if term == REDIRECT {
                         Modifier::Redirect(macro_string)
@@ -159,7 +162,7 @@ impl SPF {
                 _ => {
                     let (_, stop_char) = record.macro_string(false)?;
                     if stop_char != b' ' {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                 }
             }
@@ -200,11 +203,11 @@ const REDIRECT: u64 = (b't' as u64) << 56
 
 pub(crate) trait SPFParser: Sized {
     fn next_term(&mut self) -> Option<(u64, Qualifier, u8)>;
-    fn macro_string(&mut self, is_exp: bool) -> super::Result<(Macro, u8)>;
-    fn ip4(&mut self) -> super::Result<(Ipv4Addr, u8)>;
-    fn ip6(&mut self) -> super::Result<(Ipv6Addr, u8)>;
-    fn cidr_length(&mut self) -> super::Result<u8>;
-    fn dual_cidr_length(&mut self) -> super::Result<(u8, u8)>;
+    fn macro_string(&mut self, is_exp: bool) -> crate::Result<(Macro, u8)>;
+    fn ip4(&mut self) -> crate::Result<(Ipv4Addr, u8)>;
+    fn ip6(&mut self) -> crate::Result<(Ipv6Addr, u8)>;
+    fn cidr_length(&mut self) -> crate::Result<u8>;
+    fn dual_cidr_length(&mut self) -> crate::Result<(u8, u8)>;
 }
 
 impl SPFParser for Iter<'_, u8> {
@@ -262,7 +265,7 @@ impl SPFParser for Iter<'_, u8> {
     }
 
     #[allow(clippy::while_let_on_iterator)]
-    fn macro_string(&mut self, is_exp: bool) -> super::Result<(Macro, u8)> {
+    fn macro_string(&mut self, is_exp: bool) -> crate::Result<(Macro, u8)> {
         let mut stop_char = b' ';
         let mut last_is_pct = false;
         let mut literal = Vec::with_capacity(16);
@@ -363,12 +366,12 @@ impl SPFParser for Iter<'_, u8> {
 
         match macro_string.len() {
             1 => Ok((macro_string.pop().unwrap(), stop_char)),
-            0 => Err(Error::ParseFailed),
+            0 => Err(Error::ParseError),
             _ => Ok((Macro::List(macro_string), stop_char)),
         }
     }
 
-    fn ip4(&mut self) -> super::Result<(Ipv4Addr, u8)> {
+    fn ip4(&mut self) -> crate::Result<(Ipv4Addr, u8)> {
         let mut stop_char = b' ';
         let mut pos = 0;
         let mut ip = [0u8; 4];
@@ -395,7 +398,7 @@ impl SPFParser for Iter<'_, u8> {
         }
     }
 
-    fn ip6(&mut self) -> super::Result<(Ipv6Addr, u8)> {
+    fn ip6(&mut self) -> crate::Result<(Ipv6Addr, u8)> {
         let mut stop_char = b' ';
         let mut ip = [0u16; 8];
         let mut ip_pos = 0;
@@ -498,7 +501,7 @@ impl SPFParser for Iter<'_, u8> {
         }
     }
 
-    fn cidr_length(&mut self) -> super::Result<u8> {
+    fn cidr_length(&mut self) -> crate::Result<u8> {
         let mut cidr_length: u8 = 0;
         for &ch in self {
             match ch {
@@ -509,7 +512,7 @@ impl SPFParser for Iter<'_, u8> {
                     if ch.is_ascii_whitespace() {
                         break;
                     } else {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                 }
             }
@@ -518,7 +521,7 @@ impl SPFParser for Iter<'_, u8> {
         Ok(cidr_length)
     }
 
-    fn dual_cidr_length(&mut self) -> super::Result<(u8, u8)> {
+    fn dual_cidr_length(&mut self) -> crate::Result<(u8, u8)> {
         let mut ip4_length: u8 = u8::MAX;
         let mut ip6_length: u8 = u8::MAX;
         let mut in_ip6 = false;
@@ -544,14 +547,14 @@ impl SPFParser for Iter<'_, u8> {
                     if !in_ip6 {
                         in_ip6 = true;
                     } else if ip6_length != u8::MAX {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                 }
                 _ => {
                     if ch.is_ascii_whitespace() {
                         break;
                     } else {
-                        return Err(Error::ParseFailed);
+                        return Err(Error::ParseError);
                     }
                 }
             }

@@ -1,0 +1,123 @@
+sysmsg-1._domainkey.topicbox.com v=DKIM1; k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC43V3fV5jD8p3isdDRIz5yXSg85VrZzd7fPCz3q5B2Z3Be/yOyumWmG4hX5UHn0HR/Im5cnzcwZeNu6SnlLJwggN0H664JHTjwQp8YiWKfEcDfOdz4K4kL6OrasDwb1nk5JBuJloGRpK5cTNEa0J0SNG+bhBzFfLvG5qp3p86RZwIDAQAB
+
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed; d=topicbox.com; h=from:to
+	:subject:date:mime-version:content-type
+	:content-transfer-encoding:message-id; s=sysmsg-1; t=1667843664;
+	 x=1667930064; bh=FuZLEu0Dc6ZvRmafp+d/dAFzxmaVkLWLgzk8S9wR6Ro=; b=
+	sEM2Pfv1NVwlnGJ5t15xPJdipz4HLJPMMr92LzU2yTrrtcHxiATbyENUZlLwomca
+	8MLlGDtVvsVMqPqoTRUipuwICkCbMVnn0fqyv64YQcr74kwuv5pmgUyyHJpK7dzu
+	BwdcpbBp7yBQ+vi5xwtcCEdsRqALNEhWrGAir6ExzrE=
+From: Topicbox <topicbox@topicbox.com>
+To: "Mauro D." <mauro@stalw.art>
+Subject: Your Topicbox login code: YKPMYE
+Date: Mon, 7 Nov 2022 12:54:24 -0500
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary=16678436640.cBEEbcFd.41169
+Content-Transfer-Encoding: 7bit
+Message-ID: <373C5876-5EC5-11ED-849C-F948292D11B0@lc.jmap.topicbox.com>
+Auto-Submitted: auto-generated
+
+
+--16678436640.cBEEbcFd.41169
+Date: Mon, 7 Nov 2022 12:54:24 -0500
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+# Single-use login code for mauro@stalw.art is:
+
+### YKPMYE
+
+
+
+---
+
+**This code is valid for 10 minutes.** If more than 10 minutes have passed,
+please request a new code at [your organization=E2=80=99s login page](https=
+://jmap.topicbox.com/login).
+
+
+
+
+--16678436640.cBEEbcFd.41169
+Date: Mon, 7 Nov 2022 12:54:24 -0500
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html>
+<html lang=3D"en" xmlns:v=3D"urn:schemas-microsoft-com:vml" xmlns:o=3D"urn:=
+schemas-microsoft-com:office:office" xmlns:w=3D"urn:schemas-microsoft-com:o=
+ffice:word">
+<meta charset=3D"utf-8">
+<meta name=3D"viewport" content=3D"width=3Ddevice-width">
+<!--[if gte mso 9]><xml><o:OfficeDocumentSettings><o:AllowPNG/><o:PixelsPer=
+Inch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml><![endif]-->
+<style>
+h1,h2,h3,p,pre,ul,ol,hr{margin-top:0;margin-bottom:0;padding-bottom:20px}
+h1{font-size:25px;line-height:1.2;color:#078277}
+h2{font:inherit}
+.main h2 a{text-decoration:none;text-align:center;display:inline-block;bord=
+er:1px solid #007c67;border-color:rgba(0,89,74,.62745);border-radius:4px;pa=
+dding:12px 30px;line-height:1.4;background-color:#078277;background-image:l=
+inear-gradient(#4db5ac,#007c67);background-position:-1px -1px;background-si=
+ze:auto 104%;background-size:auto calc(100% + 2px);box-shadow:0 1px 1.5px r=
+gba(0,0,0,.25);color:#fff;font-weight:600}
+.button:active,.main h2 a:active{background-color:#078277;background-image:=
+linear-gradient(#45a59d,#006151);border-color:#006151;border-color:rgba(0,6=
+1,51,.62745)}
+h3{text-align:center;font-size:40px;line-height:1.5}
+hr{border:0;border-top:1px solid #e0e2e3;height:0;background:transparent}
+.main a{color:#3f5db2}
+h1,h3,.main a,strong{font-weight:600}
+@media(max-width:500px){.main{padding:10px 10px 0 10px!important}.logo{padd=
+ing:10px!important} }
+@media(max-width:400px){.button,.main h2 a{display:block} }
+@media screen{
+@import url("https://fonts.googleapis.com/css?family=3DSource+Sans+Pro:400,=
+600");
+}
+</style>
+<body bgcolor=3D"#ebeced" style=3D"padding:0;margin:0;background:#ebeced;co=
+lor:#333e48;font:16px/25px 'Source Sans Pro','Helvetica Neue',Arial,sans-se=
+rif;text-align:center;-webkit-text-size-adjust:none">
+
+<header>
+<a href=3D"https://www.topicbox.com" class=3D"logo" style=3D"border:none;te=
+xt-decoration:none;display:inline-block;padding:15px;color:inherit"><img sr=
+c=3D"https://www.topicbox.com/_email-logo-v1-1x.png" srcset=3D"https://www.=
+topicbox.com/_email-logo-v1-2x.png 2x" width=3D"120" height=3D"30" alt=3D"T=
+opicbox" style=3D"font-size:23px;line-height:30px;font-weight:600;vertical-=
+align:top"></a>
+</header>
+
+<div style=3D"background:#fff;width:600px;max-width:100%;margin:auto;text-a=
+lign:left">
+<div class=3D"main" style=3D"padding:40px 30px 30px">
+<h1>Single-use login code for mauro@stalw.art is:</h1>
+
+<h3>YKPMYE</h3>
+
+<hr />
+
+<p><strong>This code is valid for 10 minutes.</strong> If more than 10 minu=
+tes have passed,
+please request a new code at <a href=3D"https://jmap.topicbox.com/login">yo=
+ur organization&rsquo;s login page</a>.</p>
+
+</div>
+<div style=3D"height:6px;background:linear-gradient(90deg,#009688,#3f5db2)"=
+></div>
+</div>
+
+<footer>
+<p style=3D"padding:25px;line-height:20px;font-size:14px;color:#858b91">
+<a href=3D"https://www.topicbox.help/hc/en-us" style=3D"padding:0 4px;color=
+:#858b91">Help</a>
+
+
+<br>Powered by <a href=3D"https://www.topicbox.com" style=3D"color:#858b91;=
+font-weight:600">Topicbox</a></p>
+</footer>
+
+--16678436640.cBEEbcFd.41169--

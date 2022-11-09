@@ -1,0 +1,97 @@
+s1024-2013-q3._domainkey.facebookmail.com k=rsa; t=s; h=sha256; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDAUemE56fSDRo+H9Cu8u0uEIOXKON0YbB5A10wuWvNc7bUFIjL0tiUIzhktZjhAXc5CWw2/TZnTZaLZtmtJ2MRfd2e+ty7LylkRAiZUWaT3dcDGVVibWn27DIz3+oCnbL7CFiLzxCZnxHx8B7BC/UM7UCCJMrAgaJWJR6tYwz0MwIDAQAB
+
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=facebookmail.com;
+	s=s1024-2013-q3; t=1667862801;
+	bh=WD7cPh9RpkUGmkO18mzurJGvkR3KhuxeMfs8TP7zhXo=;
+	h=Date:To:Subject:From:MIME-Version:Content-Type;
+	b=gKG3clziu1BwjHb4J5MWWs9j40JK+uZ9zAZlXyTykDLBxK8+Mh0oN96q8LiL11I9a
+	 zhcUt/wP8Svjg2aaRnFfl1IQvrnmAMfsNQcRRRaiAOadBEVUfPwfFokUKjO5Q8/MmH
+	 JiK9cNz78PAB4X3MR/biV4phSSlRymGUkzmmK9ns=
+X-Facebook: from 2401:db00:116c:4513:face:0:1c0:0 ([MTI3LjAuMC4x]) 
+	by www.facebook.com with HTTPS (ZuckMail);
+Date: Mon, 7 Nov 2022 15:13:21 -0800
+To: Mauro DG <mauro@minter.ltd>
+Subject: The new Pages experience is replacing classic Pages
+X-Priority: 3
+X-Mailer: ZuckMail [version 1.00]
+From: "Facebook" <notification@facebookmail.com>
+Reply-to: noreply <noreply@facebookmail.com>
+Errors-To: notification@facebookmail.com
+X-Facebook-Notify: aymt_profile_plus_preemptive_transition_tip_notif:aymt_profile_plus_rollback_removal_email_tip; mailid=U1U5ece94830d9aeG29d41ac9G5ece991c6dc80G2dcf
+List-Unsubscribe: <https://facebook.com/aymt/unsubscribe/?c=510530525742901&n=1667862800817280&t=4503113996480200>
+Feedback-ID: 30:aymt_profile_plus_preemptive_transition_tip_notif:Facebook
+X-FACEBOOK-PRIORITY: 0
+X-Auto-Response-Suppress: All
+MIME-Version: 1.0
+Content-Transfer-Encoding: quoted-printable
+Content-Type: text/html; charset="UTF-8"
+Message-ID: <c578a5be-5ef1-11ed-8284-2b57b60ab540@facebookmail.com>
+
+<html><head><meta http-equiv=3D"Content-Type" content=3D"text/html; =
+charset=3DUTF-8" /><meta name=3D"viewport" =
+content=3D"width=3Ddevice-width, initial-scale=3D1.0" /><title>Facebook =
+for Business</title></head><body><table style=3D"background-color: =
+#ffffff" border=3D"0" cellpadding=3D"0" cellspacing=3D"0" =
+width=3D"100%"><tr><td align=3D"center"><!--[if (gte mso 9)|(IE)]>
+                  <table
+                    align=3D"center"
+                    border=3D"0"
+                    cellspacing=3D"0"
+                    cellpadding=3D"0"
+                    width=3D"720">
+                    <tr>
+                      <td align=3D"center" valign=3D"top" width=3D"720">
+                  <![endif]--><table align=3D"left" border=3D"0" =
+cellpadding=3D"0" cellspacing=3D"0" style=3D"max-width: 720px;" =
+width=3D"100%"><tr><td><div style=3D"display:none; font-size:1px; =
+color:#333333; line-height:1px; max-height:0px; max-width:0px; opacity:0; =
+overflow:hidden;"></div></td></tr><tr><td align=3D"left" =
+valign=3D"top"><table bgcolor=3D"#ffffff" style=3D"padding: 5px 0px; =
+width: 100%;"><tr><td><table><tr><td><img width=3D"32" height=3D"32" =
+src=3D"https://static.xx.fbcdn.net/rsrc.php/v3/yc/r/I92GqZOkKcu.png" =
+style=3D"border:0;max-width:100%;" alt=3D"Header" title=3D"Image" =
+/></td><td width=3D"2px"></td><td style=3D"font: 22px Helvetica, =
+Arial;"><span class=3D"mb_text" style=3D"font-family:Helvetica =
+Neue,Helvetica,Lucida Grande,tahoma,verdana,arial,sans-serif;font-size:16p=
+x;line-height:21px;font-weight:bold;color:#141823;">Switching back to =
+classic Pages will no longer be available for your =
+Page(s).</span></td></tr></table></td></tr></table></td></tr><tr><td><div =
+align=3D"center"><table cellpadding=3D"0" cellspacing=3D"0" =
+align=3D"center" style=3D"background-color: #e5e5e5; max-width: 100%; =
+padding: 0px"><tr><td align=3D"center" style=3D"background-color: #e5e5e5; =
+max-width: 100%; padding: 0px" height=3D"1px" =
+width=3D"720px"></td></tr></table></div></td></tr><tr><td align=3D"center" =
+style=3D"padding: 10px 0px 10px 0px; text-align:center; font: 16px =
+Helvetica, Arial; " valign=3D"top"><p style=3D"text-align:left; =
+color:#000000; font-size:14pt;">Mauro, </p><div style=3D"text-align:left; =
+margin-top: 20px">Starting soon, the option to switch back to the classic =
+Pages experience will no longer be available for your Page(s). Over the =
+coming months, all Pages will be updated to the new Pages experience and =
+the classic Pages experience will no longer be available.</div><div =
+style=3D"text-align:left;"><p style=3D"text-align:left;">Thanks,<br />The =
+Facebook Pages Team</p></div></td></tr><tr><td style=3D"padding: =
+10px"></td></tr><tr><td><div align=3D"center"><table cellpadding=3D"0" =
+cellspacing=3D"0" align=3D"center" style=3D"background-color: #e5e5e5; =
+max-width: 100%; padding: 0px"><tr><td align=3D"center" =
+style=3D"background-color: #e5e5e5; max-width: 100%; padding: 0px" =
+height=3D"1px" width=3D"720px"></td></tr></table></div></td></tr><tr><td =
+style=3D"padding: 10px"></td></tr><tr><td><table align=3D"left" =
+style=3D""><tr><td align=3D"left"><div align=3D"left">This message was =
+sent to <a =
+style=3D"color:#1b74e4;text-decoration:none;">mauro&#064;minter.ltd</a>. =
+If you don&#039;t want to receive these emails from Meta in the future, =
+please <a href=3D"https://facebook.com/aymt/unsubscribe/?c=3D5105305257429=
+01&amp;n=3D1667862800817280&amp;t=3D4503113996480200" =
+style=3D"color:#1b74e4;text-decoration:none;">unsubscribe here</a>.<br =
+/>Meta Platforms Ireland Ltd., Attention: Community Operations, 4 Grand =
+Canal Square, Dublin 2, =
+Ireland</div></td></tr></table></td></tr></table><!--[if (gte mso =
+9)|(IE)]>
+                      </td>
+                    </tr>
+                  </table>
+                  <![endif]--></td></tr><tr><td><span style=3D""><img =
+src=3D"https://facebook.com/aymt/aa/?e=3D%7B%22c%22%3A%22f1czoo1iezle1%22%=
+2C%22t%22%3A%224446%3D4z44_atc%22%2C%22n%22%3A%22z%3D9%3D06jfs9ca6%22%7D" =
+style=3D"border:0;width:1px;height:1px;" =
+/></span></td></tr></table></body></html>

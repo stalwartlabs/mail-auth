@@ -9,9 +9,11 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, fmt::Display};
+use std::borrow::Cow;
 
 use rsa::{RsaPrivateKey, RsaPublicKey};
+
+use crate::common::verify::VerifySignature;
 
 pub mod canonicalize;
 pub mod parse;
@@ -37,40 +39,6 @@ pub enum Algorithm {
     RsaSha256,
     Ed25519Sha256,
 }
-
-#[derive(Debug)]
-pub enum Error {
-    ParseError,
-    MissingParameters,
-    NoHeadersFound,
-    RSA(rsa::errors::Error),
-    PKCS(rsa::pkcs1::Error),
-    Ed25519Signature(ed25519_dalek::SignatureError),
-    Ed25519(ed25519_dalek::ed25519::Error),
-
-    /// I/O error
-    Io(std::io::Error),
-
-    /// Base64 decode/encode error
-    Base64,
-
-    UnsupportedVersion,
-    UnsupportedAlgorithm,
-    UnsupportedCanonicalization,
-
-    UnsupportedRecordVersion,
-    UnsupportedKeyType,
-
-    FailedBodyHashMatch,
-    RevokedPublicKey,
-    IncompatibleAlgorithms,
-    FailedVerification,
-    SignatureExpired,
-    FailedAUIDMatch,
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
 #[derive(Debug)]
 pub struct DKIMSigner<'x> {
     private_key: PrivateKey,
@@ -87,27 +55,27 @@ pub struct DKIMSigner<'x> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Signature<'x> {
-    v: u32,
-    a: Algorithm,
-    d: Cow<'x, [u8]>,
-    s: Cow<'x, [u8]>,
-    b: Vec<u8>,
-    bh: Vec<u8>,
-    h: Vec<Vec<u8>>,
-    z: Vec<Vec<u8>>,
-    i: Cow<'x, [u8]>,
-    l: u64,
-    x: u64,
-    t: u64,
-    ch: Canonicalization,
-    cb: Canonicalization,
+    pub(crate) v: u32,
+    pub(crate) a: Algorithm,
+    pub(crate) d: Cow<'x, [u8]>,
+    pub(crate) s: Cow<'x, [u8]>,
+    pub(crate) b: Vec<u8>,
+    pub(crate) bh: Vec<u8>,
+    pub(crate) h: Vec<Vec<u8>>,
+    pub(crate) z: Vec<Vec<u8>>,
+    pub(crate) i: Cow<'x, [u8]>,
+    pub(crate) l: u64,
+    pub(crate) x: u64,
+    pub(crate) t: u64,
+    pub(crate) ch: Canonicalization,
+    pub(crate) cb: Canonicalization,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Record {
-    v: Version,
-    p: PublicKey,
-    f: u64,
+    pub(crate) v: Version,
+    pub(crate) p: PublicKey,
+    pub(crate) f: u64,
 }
 
 pub(crate) const R_HASH_SHA1: u64 = 0x01;
@@ -168,46 +136,21 @@ pub(crate) enum PublicKey {
     Revoked,
 }
 
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Error::ParseError => write!(f, "Parse error"),
-            Error::MissingParameters => write!(f, "Missing parameters"),
-            Error::NoHeadersFound => write!(f, "No headers found"),
-            Error::RSA(err) => write!(f, "RSA error: {}", err),
-            Error::PKCS(err) => write!(f, "PKCS error: {}", err),
-            Error::Io(e) => write!(f, "I/O error: {}", e),
-            Error::Base64 => write!(f, "Base64 encode or decode error."),
-            Error::UnsupportedVersion => write!(f, "Unsupported version in DKIM Signature."),
-            Error::UnsupportedAlgorithm => write!(f, "Unsupported algorithm in DKIM Signature."),
-            Error::UnsupportedCanonicalization => {
-                write!(f, "Unsupported canonicalization method in DKIM Signature.")
-            }
-            Error::UnsupportedRecordVersion => {
-                write!(f, "Unsupported version in DKIM DNS record.")
-            }
-            Error::UnsupportedKeyType => {
-                write!(f, "Unsupported key type in DKIM DNS record.")
-            }
-            Error::Ed25519Signature(err) => write!(f, "Ed25519 signature error: {}", err),
-            Error::Ed25519(err) => write!(f, "Ed25519 error: {}", err),
-            Error::FailedBodyHashMatch => {
-                write!(f, "Calculated body hash does not match signature hash.")
-            }
-            Error::RevokedPublicKey => write!(f, "Public key for this signature has been revoked."),
-            Error::IncompatibleAlgorithms => write!(
-                f,
-                "Incompatible algorithms used in signature and DKIM DNS record."
-            ),
-            Error::FailedVerification => write!(f, "Signature verification failed."),
-            Error::SignatureExpired => write!(f, "Signature expired."),
-            Error::FailedAUIDMatch => write!(f, "AUID does not match domain name."),
+impl From<Algorithm> for HashAlgorithm {
+    fn from(a: Algorithm) -> Self {
+        match a {
+            Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => HashAlgorithm::Sha256,
+            Algorithm::RsaSha1 => HashAlgorithm::Sha1,
         }
     }
 }
 
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
-        Error::Io(err)
+impl<'x> VerifySignature for Signature<'x> {
+    fn b(&self) -> &[u8] {
+        &self.b
+    }
+
+    fn a(&self) -> Algorithm {
+        self.a
     }
 }

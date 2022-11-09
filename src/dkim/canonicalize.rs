@@ -11,19 +11,21 @@
 
 use std::io::Write;
 
+use sha1::Digest;
+
 use crate::common::headers::HeaderIterator;
 
 use super::{Canonicalization, DKIMSigner};
 
 impl Canonicalization {
-    pub fn canonicalize_body(&self, message: &[u8], mut hasher: impl Write) -> std::io::Result<()> {
+    pub fn canonicalize_body(&self, body: &[u8], mut hasher: impl Write) -> std::io::Result<()> {
         let mut crlf_seq = 0;
 
         match self {
             Canonicalization::Relaxed => {
                 let mut last_ch = 0;
 
-                for &ch in message {
+                for &ch in body {
                     match ch {
                         b' ' | b'\t' => {
                             while crlf_seq > 0 {
@@ -53,7 +55,7 @@ impl Canonicalization {
                 }
             }
             Canonicalization::Simple => {
-                for &ch in message {
+                for &ch in body {
                     match ch {
                         b'\n' => {
                             crlf_seq += 1;
@@ -117,6 +119,34 @@ impl Canonicalization {
         Ok(())
     }
 
+    pub fn hash_headers<'x, T>(
+        &self,
+        headers: impl Iterator<Item = (&'x [u8], &'x [u8])>,
+    ) -> std::io::Result<Vec<u8>>
+    where
+        T: Digest + std::io::Write,
+    {
+        let mut hasher = T::new();
+        self.canonicalize_headers(headers, &mut hasher)?;
+        Ok(hasher.finalize().to_vec())
+    }
+
+    pub fn hash_body<T>(&self, body: &[u8], l: u64) -> std::io::Result<Vec<u8>>
+    where
+        T: Digest + std::io::Write,
+    {
+        let mut hasher = T::new();
+        self.canonicalize_body(
+            if l == 0 || body.is_empty() {
+                body
+            } else {
+                &body[..std::cmp::min(l as usize, body.len())]
+            },
+            &mut hasher,
+        )?;
+        Ok(hasher.finalize().to_vec())
+    }
+
     pub fn serialize_name(&self, mut writer: impl Write) -> std::io::Result<()> {
         writer.write_all(match self {
             Canonicalization::Relaxed => b"relaxed",
@@ -132,7 +162,7 @@ impl<'x> DKIMSigner<'x> {
         message: &[u8],
         header_hasher: impl Write,
         body_hasher: impl Write,
-    ) -> super::Result<(usize, Vec<Vec<u8>>)> {
+    ) -> crate::Result<(usize, Vec<Vec<u8>>)> {
         let mut headers_it = HeaderIterator::new(message);
         let mut headers = Vec::with_capacity(self.sign_headers.len());
         let mut found_headers = vec![false; self.sign_headers.len()];

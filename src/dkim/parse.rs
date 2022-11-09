@@ -1,18 +1,18 @@
-use std::slice::Iter;
+use std::{borrow::Cow, slice::Iter};
 
 use mail_parser::decoders::base64::base64_decode_stream;
 use rsa::RsaPublicKey;
 
-use crate::common::parse::*;
+use crate::{common::parse::*, Error};
 
 use super::{
-    Algorithm, Canonicalization, Error, Flag, HashAlgorithm, PublicKey, Record, Service, Signature,
+    Algorithm, Canonicalization, Flag, HashAlgorithm, PublicKey, Record, Service, Signature,
     Version,
 };
 
 impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
-    pub fn parse(header: &'_ [u8]) -> super::Result<Self> {
+    pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
             v: 0,
             a: Algorithm::RsaSha256,
@@ -85,15 +85,15 @@ pub(crate) trait SignatureParser: Sized {
     fn canonicalization(
         &mut self,
         default: Canonicalization,
-    ) -> super::Result<(Canonicalization, Canonicalization)>;
-    fn algorithm(&mut self) -> super::Result<Algorithm>;
+    ) -> crate::Result<(Canonicalization, Canonicalization)>;
+    fn algorithm(&mut self) -> crate::Result<Algorithm>;
 }
 
 impl SignatureParser for Iter<'_, u8> {
     fn canonicalization(
         &mut self,
         default: Canonicalization,
-    ) -> super::Result<(Canonicalization, Canonicalization)> {
+    ) -> crate::Result<(Canonicalization, Canonicalization)> {
         let mut cb = default;
         let mut ch = default;
 
@@ -143,7 +143,7 @@ impl SignatureParser for Iter<'_, u8> {
         Ok((ch, cb))
     }
 
-    fn algorithm(&mut self) -> super::Result<Algorithm> {
+    fn algorithm(&mut self) -> crate::Result<Algorithm> {
         match self.next_skip_whitespaces().unwrap_or(0) {
             b'r' | b'R' => {
                 if self.match_bytes(b"sa-sha") {
@@ -195,7 +195,7 @@ enum KeyType {
 
 impl Record {
     #[allow(clippy::while_let_on_iterator)]
-    pub fn parse(header: &[u8]) -> super::Result<Self> {
+    pub fn parse(header: &[u8]) -> crate::Result<Self> {
         let header_len = header.len();
         let mut header = header.iter();
         let mut record = Record {
@@ -255,11 +255,11 @@ impl Record {
                 KeyType::Rsa | KeyType::None => PublicKey::Rsa(
                     <RsaPublicKey as rsa::pkcs8::DecodePublicKey>::from_public_key_der(&public_key)
                         .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(&public_key))
-                        .map_err(Error::PKCS)?,
+                        .map_err(|err| Error::CryptoError(err.to_string()))?,
                 ),
                 KeyType::Ed25519 => PublicKey::Ed25519(
                     ed25519_dalek::PublicKey::from_bytes(&public_key)
-                        .map_err(Error::Ed25519Signature)?,
+                        .map_err(|err| Error::CryptoError(err.to_string()))?,
                 ),
             }
         }
@@ -269,6 +269,55 @@ impl Record {
 
     pub fn has_flag(&self, flag: impl Into<u64>) -> bool {
         (self.f & flag.into()) != 0
+    }
+}
+
+pub trait TryIntoRecord<'x>: Sized {
+    fn try_into_record(self) -> crate::Result<Cow<'x, Record>>;
+}
+
+impl<'x> TryIntoRecord<'x> for Record {
+    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
+        Ok(Cow::Owned(self))
+    }
+}
+
+impl<'x> TryIntoRecord<'x> for &'x Record {
+    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
+        Ok(Cow::Borrowed(self))
+    }
+}
+
+impl<'x> TryIntoRecord<'x> for String {
+    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
+        Record::parse(self.as_bytes()).map(Cow::Owned)
+    }
+}
+
+impl<'x> TryIntoRecord<'x> for &str {
+    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
+        Record::parse(self.as_bytes()).map(Cow::Owned)
+    }
+}
+
+impl<'x> TryIntoRecord<'x> for &[u8] {
+    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
+        Record::parse(self).map(Cow::Owned)
+    }
+}
+
+impl<'x> TryIntoRecord<'x> for Vec<u8> {
+    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
+        Record::parse(&self).map(Cow::Owned)
+    }
+}
+
+impl<'x, T: TryIntoRecord<'x> + Sized> TryIntoRecord<'x> for Option<T> {
+    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
+        match self {
+            Some(v) => v.try_into_record(),
+            None => Err(Error::DNSFailure),
+        }
     }
 }
 

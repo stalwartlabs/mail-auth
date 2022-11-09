@@ -2,12 +2,15 @@ use std::slice::Iter;
 
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 
-use crate::common::parse::{ItemParser, TagParser, V};
+use crate::{
+    common::parse::{ItemParser, TagParser, V},
+    Error,
+};
 
-use super::{Alignment, Error, Format, Policy, Report, DMARC, URI};
+use super::{Alignment, Format, Policy, Report, DMARC, URI};
 
 impl DMARC {
-    pub fn parse(bytes: &[u8]) -> super::Result<Self> {
+    pub fn parse(bytes: &[u8]) -> crate::Result<Self> {
         let mut record = bytes.iter();
         if record.key().unwrap_or(0) != V {
             return Err(Error::InvalidRecord);
@@ -47,14 +50,13 @@ impl DMARC {
                     dmarc.p = record.policy()?;
                 }
                 PCT => {
-                    dmarc.pct =
-                        std::cmp::min(100, record.number().ok_or(Error::ParseFailed)?) as u8;
+                    dmarc.pct = std::cmp::min(100, record.number().ok_or(Error::ParseError)?) as u8;
                 }
                 RF => {
                     dmarc.rf = record.flags::<Format>() as u8;
                 }
                 RI => {
-                    dmarc.ri = record.number().ok_or(Error::ParseFailed)? as u32;
+                    dmarc.ri = record.number().ok_or(Error::ParseError)? as u32;
                 }
                 RUA => {
                     dmarc.rua = record.uris()?;
@@ -83,57 +85,57 @@ impl DMARC {
 }
 
 pub(crate) trait DMARCParser: Sized {
-    fn alignment(&mut self) -> super::Result<Alignment>;
-    fn report(&mut self) -> super::Result<Report>;
-    fn policy(&mut self) -> super::Result<Policy>;
-    fn uris(&mut self) -> super::Result<Vec<URI>>;
+    fn alignment(&mut self) -> crate::Result<Alignment>;
+    fn report(&mut self) -> crate::Result<Report>;
+    fn policy(&mut self) -> crate::Result<Policy>;
+    fn uris(&mut self) -> crate::Result<Vec<URI>>;
 }
 
 impl DMARCParser for Iter<'_, u8> {
-    fn alignment(&mut self) -> super::Result<Alignment> {
+    fn alignment(&mut self) -> crate::Result<Alignment> {
         let a = match self.next_skip_whitespaces().unwrap_or(0) {
             b'r' | b'R' => Alignment::Relaxed,
             b's' | b'S' => Alignment::Strict,
-            _ => return Err(Error::ParseFailed),
+            _ => return Err(Error::ParseError),
         };
         if self.seek_tag_end() {
             Ok(a)
         } else {
-            Err(Error::ParseFailed)
+            Err(Error::ParseError)
         }
     }
 
-    fn report(&mut self) -> super::Result<Report> {
+    fn report(&mut self) -> crate::Result<Report> {
         let r = match self.next_skip_whitespaces().unwrap_or(0) {
             b'0' => Report::All,
             b'1' => Report::Any,
             b'd' | b'D' => Report::Dkim,
             b's' | b'S' => Report::Spf,
-            _ => return Err(Error::ParseFailed),
+            _ => return Err(Error::ParseError),
         };
         if self.seek_tag_end() {
             Ok(r)
         } else {
-            Err(Error::ParseFailed)
+            Err(Error::ParseError)
         }
     }
 
-    fn policy(&mut self) -> super::Result<Policy> {
+    fn policy(&mut self) -> crate::Result<Policy> {
         let p = match self.next_skip_whitespaces().unwrap_or(0) {
             b'n' | b'N' if self.match_bytes(b"one") => Policy::None,
             b'q' | b'Q' if self.match_bytes(b"uarantine") => Policy::Quarantine,
             b'r' | b'R' if self.match_bytes(b"eject") => Policy::Reject,
-            _ => return Err(Error::ParseFailed),
+            _ => return Err(Error::ParseError),
         };
         if self.seek_tag_end() {
             Ok(p)
         } else {
-            Err(Error::ParseFailed)
+            Err(Error::ParseError)
         }
     }
 
     #[allow(clippy::while_let_on_iterator)]
-    fn uris(&mut self) -> super::Result<Vec<URI>> {
+    fn uris(&mut self) -> crate::Result<Vec<URI>> {
         let mut uris = Vec::new();
         let mut uri = Vec::with_capacity(16);
         let mut size: usize = 0;
@@ -156,7 +158,7 @@ impl DMARCParser for Iter<'_, u8> {
                         } else if ch == b';' {
                             break 'outer;
                         } else if !ch.is_ascii_whitespace() {
-                            return Err(Error::ParseFailed);
+                            return Err(Error::ParseError);
                         }
                     }
                 }
@@ -203,7 +205,7 @@ impl DMARCParser for Iter<'_, u8> {
                             }
                             _ => {
                                 if !ch.is_ascii_whitespace() {
-                                    return Err(Error::ParseFailed);
+                                    return Err(Error::ParseError);
                                 }
                             }
                         }

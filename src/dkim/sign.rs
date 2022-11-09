@@ -22,7 +22,9 @@ use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::AssociatedOid, PaddingScheme, RsaPr
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
-use super::{Algorithm, Canonicalization, DKIMSigner, Error, PrivateKey, Signature};
+use crate::Error;
+
+use super::{Algorithm, Canonicalization, DKIMSigner, PrivateKey, Signature};
 
 impl<'x> DKIMSigner<'x> {
     /// Creates a new DKIM signer from an RsaPrivateKey.
@@ -42,16 +44,20 @@ impl<'x> DKIMSigner<'x> {
     }
 
     /// Creates a new RSA private key from a PKCS1 PEM string.
-    pub fn rsa_pem(mut self, private_key_pem: &str) -> super::Result<Self> {
-        self.private_key =
-            PrivateKey::Rsa(RsaPrivateKey::from_pkcs1_pem(private_key_pem).map_err(Error::PKCS)?);
+    pub fn rsa_pem(mut self, private_key_pem: &str) -> crate::Result<Self> {
+        self.private_key = PrivateKey::Rsa(
+            RsaPrivateKey::from_pkcs1_pem(private_key_pem)
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+        );
         Ok(self)
     }
 
     /// Creates a new RSA private key from a PKCS1 binary slice.
-    pub fn rsa(mut self, private_key_bytes: &[u8]) -> super::Result<Self> {
-        self.private_key =
-            PrivateKey::Rsa(RsaPrivateKey::from_pkcs1_der(private_key_bytes).map_err(Error::PKCS)?);
+    pub fn rsa(mut self, private_key_bytes: &[u8]) -> crate::Result<Self> {
+        self.private_key = PrivateKey::Rsa(
+            RsaPrivateKey::from_pkcs1_der(private_key_bytes)
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+        );
         Ok(self)
     }
 
@@ -60,12 +66,12 @@ impl<'x> DKIMSigner<'x> {
         mut self,
         public_key_bytes: &[u8],
         private_key_bytes: &[u8],
-    ) -> super::Result<Self> {
+    ) -> crate::Result<Self> {
         self.private_key = PrivateKey::Ed25519(ed25519_dalek::Keypair {
             public: ed25519_dalek::PublicKey::from_bytes(public_key_bytes)
-                .map_err(Error::Ed25519)?,
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
             secret: ed25519_dalek::SecretKey::from_bytes(private_key_bytes)
-                .map_err(Error::Ed25519Signature)?,
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
         });
         self.a = Algorithm::Ed25519Sha256;
         Ok(self)
@@ -139,7 +145,7 @@ impl<'x> DKIMSigner<'x> {
 
     /// Signs a message.
     #[inline(always)]
-    pub fn sign(&self, message: &[u8]) -> super::Result<Signature> {
+    pub fn sign(&self, message: &[u8]) -> crate::Result<Signature> {
         if !self.d.is_empty() && !self.s.is_empty() {
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -156,7 +162,7 @@ impl<'x> DKIMSigner<'x> {
         }
     }
 
-    fn sign_<T>(&self, message: &[u8], now: u64) -> super::Result<Signature>
+    fn sign_<T>(&self, message: &[u8], now: u64) -> crate::Result<Signature>
     where
         T: Digest + AssociatedOid + std::io::Write,
     {
@@ -199,7 +205,7 @@ impl<'x> DKIMSigner<'x> {
                     PaddingScheme::new_pkcs1v15_sign::<T>(),
                     &header_hasher.finalize(),
                 )
-                .map_err(Error::RSA)?,
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
             PrivateKey::Ed25519(key_pair) => {
                 key_pair.sign(&header_hasher.finalize()).to_bytes().to_vec()
             }
@@ -347,8 +353,8 @@ mod test {
     use sha2::Sha256;
 
     use crate::{
-        common::headers::HeaderIterator,
-        dkim::{verify::DKIMVerifier, Canonicalization, Record, Signature},
+        common::{AuthResult, AuthenticatedMessage},
+        dkim::{Canonicalization, Signature},
     };
 
     const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -556,25 +562,15 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         message.extend_from_slice(message_.as_bytes());
         //println!("[{}]", String::from_utf8_lossy(&message));
 
-        let mut headers_it = HeaderIterator::new(&message);
-        let headers = (&mut headers_it).collect::<Vec<_>>();
-        let body = headers_it
-            .body_offset()
-            .and_then(|pos| message.get(pos..))
-            .unwrap_or_default();
-        let mut verifier = DKIMVerifier::new(&headers, body);
-        let mut num_signatures = 0;
-
-        while let Some(signature) = verifier.next_signature() {
-            let signature = signature.unwrap();
-            let record = Record::parse(public_key.as_bytes()).unwrap();
-            match (verifier.verify(&signature, &record), &expect) {
-                (Ok(_), Ok(_)) | (Err(_), Err(_)) => (),
-                (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
-            }
-            num_signatures += 1;
+        let mut verifier = AuthenticatedMessage::new(&message).unwrap();
+        while verifier.next_entry().is_some() {
+            verifier.verify(public_key);
         }
 
-        assert_ne!(num_signatures, 0);
+        match (verifier.dkim_result, &expect) {
+            (AuthResult::Pass(_), Ok(_)) => (),
+            (AuthResult::PermFail(hdr), Err(err)) if &hdr.header == err => (),
+            (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
+        }
     }
 }

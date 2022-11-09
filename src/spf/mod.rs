@@ -138,18 +138,6 @@ pub(crate) enum Version {
     Spf1,
 }
 
-#[derive(Debug)]
-pub enum Error {
-    InvalidVersion,
-    InvalidRecord,
-    InvalidIp4,
-    InvalidIp6,
-    InvalidMacro,
-    ParseFailed,
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
 impl Directive {
     pub fn new(qualifier: Qualifier, mechanism: Mechanism) -> Self {
         Directive {

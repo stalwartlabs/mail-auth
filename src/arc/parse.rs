@@ -3,9 +3,10 @@ use mail_parser::decoders::base64::base64_decode_stream;
 use crate::{
     common::parse::TagParser,
     dkim::{parse::SignatureParser, Algorithm, Canonicalization},
+    Error,
 };
 
-use super::{ChainValidation, Error, Results, Seal, Signature};
+use super::{ChainValidation, Results, Seal, Signature};
 
 use crate::common::parse::*;
 
@@ -13,7 +14,7 @@ pub(crate) const CV: u16 = (b'c' as u16) | ((b'v' as u16) << 8);
 
 impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
-    pub fn parse(header: &'_ [u8]) -> super::Result<Self> {
+    pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
             a: Algorithm::RsaSha256,
             d: (b""[..]).into(),
@@ -37,7 +38,7 @@ impl<'x> Signature<'x> {
                 I => {
                     signature.i = header.number().unwrap_or(0) as u32;
                     if !(1..=50).contains(&signature.i) {
-                        return Err(Error::InvalidInstance);
+                        return Err(Error::ARCInvalidInstance);
                     }
                 }
                 A => {
@@ -82,7 +83,7 @@ impl<'x> Signature<'x> {
 
 impl<'x> Seal<'x> {
     #[allow(clippy::while_let_on_iterator)]
-    pub fn parse(header: &'_ [u8]) -> super::Result<Self> {
+    pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut seal = Seal {
             a: Algorithm::RsaSha256,
             d: (b""[..]).into(),
@@ -122,22 +123,22 @@ impl<'x> Seal<'x> {
                         b'p' | b'P' if header.match_bytes(b"ass") => {
                             cv = ChainValidation::Pass.into();
                         }
-                        _ => return Err(Error::InvalidChainValidation),
+                        _ => return Err(Error::ARCInvalidCV),
                     }
                     if !header.seek_tag_end() {
-                        return Err(Error::InvalidChainValidation);
+                        return Err(Error::ARCInvalidCV);
                     }
                 }
                 H => {
-                    return Err(Error::HasHeaderTag);
+                    return Err(Error::ARCHasHeaderTag);
                 }
                 _ => header.ignore(),
             }
         }
-        seal.cv = cv.ok_or(Error::InvalidChainValidation)?;
+        seal.cv = cv.ok_or(Error::ARCInvalidCV)?;
 
         if !(1..=50).contains(&seal.i) {
-            Err(Error::InvalidInstance)
+            Err(Error::ARCInvalidInstance)
         } else if !seal.d.is_empty() && !seal.s.is_empty() && !seal.b.is_empty() {
             Ok(seal)
         } else {
@@ -148,9 +149,8 @@ impl<'x> Seal<'x> {
 
 impl Results {
     #[allow(clippy::while_let_on_iterator)]
-    pub fn parse(header: &'_ [u8]) -> super::Result<Self> {
+    pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut results = Results { i: 0 };
-        let header_len = header.len();
         let mut header = header.iter();
 
         while let Some(key) = header.key() {
@@ -166,7 +166,7 @@ impl Results {
         if (1..=50).contains(&results.i) {
             Ok(results)
         } else {
-            Err(Error::InvalidInstance)
+            Err(Error::ARCInvalidInstance)
         }
     }
 }

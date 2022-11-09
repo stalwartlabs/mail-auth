@@ -1,38 +1,37 @@
 pub mod parse;
-pub mod verify;
 
 use std::borrow::Cow;
 
 use crate::{
-    common::headers::Header,
+    common::{headers::Header, verify::VerifySignature},
     dkim::{Algorithm, Canonicalization},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Signature<'x> {
     pub(crate) i: u32,
-    a: Algorithm,
-    d: Cow<'x, [u8]>,
-    s: Cow<'x, [u8]>,
-    b: Vec<u8>,
-    bh: Vec<u8>,
-    h: Vec<Vec<u8>>,
-    z: Vec<Vec<u8>>,
-    l: u64,
-    x: u64,
-    t: u64,
-    ch: Canonicalization,
-    cb: Canonicalization,
+    pub(crate) a: Algorithm,
+    pub(crate) d: Cow<'x, [u8]>,
+    pub(crate) s: Cow<'x, [u8]>,
+    pub(crate) b: Vec<u8>,
+    pub(crate) bh: Vec<u8>,
+    pub(crate) h: Vec<Vec<u8>>,
+    pub(crate) z: Vec<Vec<u8>>,
+    pub(crate) l: u64,
+    pub(crate) x: u64,
+    pub(crate) t: u64,
+    pub(crate) ch: Canonicalization,
+    pub(crate) cb: Canonicalization,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Seal<'x> {
     pub(crate) i: u32,
-    a: Algorithm,
-    b: Vec<u8>,
-    d: Cow<'x, [u8]>,
-    s: Cow<'x, [u8]>,
-    t: u64,
+    pub(crate) a: Algorithm,
+    pub(crate) b: Vec<u8>,
+    pub(crate) d: Cow<'x, [u8]>,
+    pub(crate) s: Cow<'x, [u8]>,
+    pub(crate) t: u64,
     pub(crate) cv: ChainValidation,
 }
 
@@ -55,22 +54,22 @@ pub enum ChainValidation {
     Pass,
 }
 
-#[derive(Debug)]
-pub enum Error {
-    ParseError,
-    InvalidInstance,
-    InvalidChainValidation,
-    MissingParameters,
-    Base64,
-    HasHeaderTag,
-    BrokenArcChain,
-    DKIM(crate::dkim::Error),
-}
+impl<'x> VerifySignature for Signature<'x> {
+    fn b(&self) -> &[u8] {
+        &self.b
+    }
 
-impl From<crate::dkim::Error> for Error {
-    fn from(err: crate::dkim::Error) -> Self {
-        Error::DKIM(err)
+    fn a(&self) -> Algorithm {
+        self.a
     }
 }
 
-pub type Result<T> = std::result::Result<T, Error>;
+impl<'x> VerifySignature for Seal<'x> {
+    fn b(&self) -> &[u8] {
+        &self.b
+    }
+
+    fn a(&self) -> Algorithm {
+        self.a
+    }
+}

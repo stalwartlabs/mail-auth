@@ -56,6 +56,7 @@ impl From<Format> for u64 {
 }
 
 impl URI {
+    #[cfg(test)]
     pub fn new(uri: impl Into<String>, max_size: usize) -> Self {
         URI {
             uri: uri.into().into_bytes(),
@@ -63,12 +64,3 @@ impl URI {
         }
     }
 }
-
-#[derive(Debug)]
-pub enum Error {
-    InvalidVersion,
-    InvalidRecord,
-    ParseFailed,
-}
-
-pub type Result<T> = std::result::Result<T, Error>;

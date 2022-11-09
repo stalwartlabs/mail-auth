@@ -1,36 +1,41 @@
-use std::borrow::Cow;
+use std::time::SystemTime;
 
 use mail_parser::{parsers::MessageStream, HeaderValue};
+use sha1::Sha1;
+use sha2::Sha256;
 
 use crate::{
-    arc::{self, ChainValidation, Seal, Set},
-    dkim::{self, Canonicalization, HashAlgorithm},
+    arc::{self, ChainValidation, Set},
+    dkim::{self, Algorithm, HashAlgorithm},
+    Error,
 };
 
-use super::headers::{AuthenticatedHeader, Header, HeaderParser};
-
-pub struct AuthenticatedMessage<'x> {
-    pub(crate) headers: Vec<(&'x [u8], &'x [u8])>,
-    pub(crate) from: Vec<Cow<'x, str>>,
-    pub(crate) body: &'x [u8],
-    pub(crate) body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
-    pub(crate) failed: Vec<Header<'x, arc::Error>>,
-    pub(crate) dkim_headers: Vec<Header<'x, dkim::Signature<'x>>>,
-    pub(crate) arc_sets: Vec<Set<'x>>,
-    pub(crate) cv: ChainValidation,
-}
+use super::{
+    headers::{AuthenticatedHeader, Header, HeaderParser},
+    AuthPhase, AuthResult, AuthenticatedMessage,
+};
 
 impl<'x> AuthenticatedMessage<'x> {
+    #[inline(always)]
     pub fn new(raw_message: &'x [u8]) -> Option<Self> {
+        Self::new_(
+            raw_message,
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        )
+    }
+
+    pub(crate) fn new_(raw_message: &'x [u8], now: u64) -> Option<Self> {
         let mut message = AuthenticatedMessage {
             headers: Vec::new(),
             from: Vec::new(),
-            body: raw_message,
-            body_hashes: Vec::new(),
-            failed: Vec::new(),
             dkim_headers: Vec::new(),
             arc_sets: Vec::new(),
-            cv: ChainValidation::None,
+            arc_result: AuthResult::None,
+            dkim_result: AuthResult::None,
+            phase: AuthPhase::Done,
         };
 
         let mut ams_headers = Vec::new();
@@ -38,16 +43,27 @@ impl<'x> AuthenticatedMessage<'x> {
         let mut aar_headers = Vec::new();
 
         let mut headers = HeaderParser::new(raw_message);
+        let mut dkim_headers = Vec::new();
 
         for (header, value) in &mut headers {
             let name = match header {
                 AuthenticatedHeader::Ds(name) => {
                     match dkim::Signature::parse(value) {
-                        Ok(s) => {
-                            message.dkim_headers.push(Header::new(name, value, s));
+                        Ok(signature) => {
+                            if signature.x == 0 || (signature.x > signature.t && signature.x > now)
+                            {
+                                dkim_headers.push(Header::new(name, value, signature));
+                            } else {
+                                message.dkim_result = AuthResult::PermFail(Header::new(
+                                    name,
+                                    value,
+                                    crate::Error::SignatureExpired,
+                                ));
+                            }
                         }
                         Err(err) => {
-                            message.failed.push(Header::new(name, value, err.into()));
+                            message.dkim_result =
+                                AuthResult::PermFail(Header::new(name, value, err));
                         }
                     }
 
@@ -59,7 +75,8 @@ impl<'x> AuthenticatedMessage<'x> {
                             aar_headers.push(Header::new(name, value, r));
                         }
                         Err(err) => {
-                            message.failed.push(Header::new(name, value, err));
+                            message.arc_result =
+                                AuthResult::PermFail(Header::new(name, value, err));
                         }
                     }
 
@@ -71,7 +88,8 @@ impl<'x> AuthenticatedMessage<'x> {
                             ams_headers.push(Header::new(name, value, s));
                         }
                         Err(err) => {
-                            message.failed.push(Header::new(name, value, err));
+                            message.arc_result =
+                                AuthResult::PermFail(Header::new(name, value, err));
                         }
                     }
 
@@ -83,7 +101,8 @@ impl<'x> AuthenticatedMessage<'x> {
                             as_headers.push(Header::new(name, value, s));
                         }
                         Err(err) => {
-                            message.failed.push(Header::new(name, value, err));
+                            message.arc_result =
+                                AuthResult::PermFail(Header::new(name, value, err));
                         }
                     }
                     name
@@ -123,6 +142,17 @@ impl<'x> AuthenticatedMessage<'x> {
             message.headers.push((name, value));
         }
 
+        if message.headers.is_empty() {
+            return None;
+        }
+
+        // Obtain message body
+        let body = headers
+            .body_offset()
+            .and_then(|pos| raw_message.get(pos..))
+            .unwrap_or_default();
+        let mut body_hashes = Vec::new();
+
         // Group ARC headers in sets
         let arc_headers = ams_headers.len();
         if (1..=50).contains(&arc_headers)
@@ -132,7 +162,6 @@ impl<'x> AuthenticatedMessage<'x> {
             as_headers.sort_unstable_by(|a, b| a.header.i.cmp(&b.header.i));
             ams_headers.sort_unstable_by(|a, b| a.header.i.cmp(&b.header.i));
             aar_headers.sort_unstable_by(|a, b| a.header.i.cmp(&b.header.i));
-            let mut success = true;
 
             for (pos, ((seal, signature), results)) in as_headers
                 .into_iter()
@@ -140,64 +169,133 @@ impl<'x> AuthenticatedMessage<'x> {
                 .zip(aar_headers)
                 .enumerate()
             {
-                if success {
-                    success = (seal.header.i as usize == (pos + 1))
-                        && (signature.header.i as usize == (pos + 1))
-                        && (results.header.i as usize == (pos + 1))
-                        && ((pos == 0 && seal.header.cv == ChainValidation::None)
-                            || (pos > 0 && seal.header.cv == ChainValidation::Pass));
-                }
-                message.arc_sets.push(Set {
-                    signature,
-                    seal,
-                    results,
-                });
-            }
+                if (seal.header.i as usize == (pos + 1))
+                    && (signature.header.i as usize == (pos + 1))
+                    && (results.header.i as usize == (pos + 1))
+                    && ((pos == 0 && seal.header.cv == ChainValidation::None)
+                        || (pos > 0 && seal.header.cv == ChainValidation::Pass))
+                {
+                    // Validate last signature in the chain
+                    if pos == arc_headers - 1 {
+                        // Validate expiration
+                        let signature_ = &signature.header;
+                        if signature_.x > 0 && (signature_.x < signature_.t || signature_.x < now) {
+                            message.arc_result = AuthResult::PermFail(Header::new(
+                                signature.name,
+                                signature.value,
+                                Error::SignatureExpired,
+                            ));
+                            break;
+                        }
 
-            if !success {
-                for set in message.arc_sets.drain(..) {
-                    for (name, value) in [
-                        (set.signature.name, set.signature.value),
-                        (set.seal.name, set.seal.value),
-                        (set.results.name, set.results.value),
-                    ] {
-                        message
-                            .failed
-                            .push(Header::new(name, value, arc::Error::BrokenArcChain));
+                        // Validate body hash
+                        let bh = match signature_.a {
+                            Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => {
+                                signature_.cb.hash_body::<Sha256>(body, signature_.l)
+                            }
+                            Algorithm::RsaSha1 => {
+                                signature_.cb.hash_body::<Sha1>(body, signature_.l)
+                            }
+                        }
+                        .unwrap_or_default();
+
+                        let success = bh == signature_.bh;
+                        body_hashes.push((
+                            signature_.cb,
+                            HashAlgorithm::from(signature_.a),
+                            signature_.l,
+                            bh,
+                        ));
+
+                        if !success {
+                            message.arc_result = AuthResult::PermFail(Header::new(
+                                signature.name,
+                                signature.value,
+                                Error::FailedBodyHashMatch,
+                            ));
+                            break;
+                        }
                     }
+
+                    message.arc_sets.push(Set {
+                        signature,
+                        seal,
+                        results,
+                    });
+                } else {
+                    message.arc_result = AuthResult::PermFail(Header::new(
+                        signature.name,
+                        signature.value,
+                        Error::ARCBrokenChain,
+                    ));
+                    break;
                 }
-                message.cv = ChainValidation::Fail;
             }
-        } else if arc_headers > 0 {
+        } else if arc_headers > 0 && message.arc_result == AuthResult::None {
             // Missing ARC headers, fail all.
-            message.failed.extend(
-                ams_headers
-                    .into_iter()
-                    .map(|h| Header::new(h.name, h.value, arc::Error::BrokenArcChain))
-                    .chain(
-                        as_headers
-                            .into_iter()
-                            .map(|h| Header::new(h.name, h.value, arc::Error::BrokenArcChain)),
-                    )
-                    .chain(
-                        aar_headers
-                            .into_iter()
-                            .map(|h| Header::new(h.name, h.value, arc::Error::BrokenArcChain)),
-                    ),
-            );
-            message.cv = ChainValidation::Fail;
+            let header = ams_headers
+                .into_iter()
+                .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain))
+                .chain(
+                    as_headers
+                        .into_iter()
+                        .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain)),
+                )
+                .chain(
+                    aar_headers
+                        .into_iter()
+                        .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain)),
+                )
+                .next()
+                .unwrap();
+            message.arc_result = AuthResult::PermFail(header);
         }
 
-        message.body = headers
-            .body_offset()
-            .and_then(|pos| raw_message.get(pos..))
-            .unwrap_or_default();
+        // Validate body hash of DKIM signatures
+        if !dkim_headers.is_empty() {
+            message.dkim_headers = Vec::with_capacity(dkim_headers.len());
+            for header in dkim_headers {
+                let signature = &header.header;
+                let ha = HashAlgorithm::from(signature.a);
 
-        if !message.headers.is_empty() {
-            message.into()
-        } else {
-            None
+                let bh = if let Some((_, _, _, bh)) = body_hashes
+                    .iter()
+                    .find(|(c, h, l, _)| c == &signature.cb && h == &ha && l == &signature.l)
+                {
+                    bh
+                } else {
+                    let bh = match signature.a {
+                        Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => {
+                            signature.cb.hash_body::<Sha256>(body, signature.l)
+                        }
+                        Algorithm::RsaSha1 => signature.cb.hash_body::<Sha1>(body, signature.l),
+                    }
+                    .unwrap_or_default();
+
+                    body_hashes.push((signature.cb, ha, signature.l, bh));
+                    &body_hashes.last().unwrap().3
+                };
+
+                if bh == &signature.bh {
+                    message.dkim_headers.push(header);
+                } else {
+                    message.dkim_result = AuthResult::PermFail(Header::new(
+                        header.name,
+                        header.value,
+                        crate::Error::FailedBodyHashMatch,
+                    ));
+                }
+            }
         }
+
+        if !message.dkim_headers.is_empty() {
+            message.dkim_headers.reverse();
+            message.phase = AuthPhase::Dkim;
+        } else if !message.arc_sets.is_empty() && message.arc_result == AuthResult::None {
+            message.phase = AuthPhase::Ams;
+        }
+
+        message.into()
     }
 }
 
