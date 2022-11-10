@@ -4,14 +4,14 @@ use std::{
 };
 
 use crate::{
-    common::parse::{TagParser, V},
+    common::parse::{TagParser, TxtRecordParser, V},
     Error,
 };
 
 use super::{Directive, Macro, Mechanism, Modifier, Qualifier, Variable, SPF};
 
-impl SPF {
-    pub fn parse(bytes: &[u8]) -> crate::Result<SPF> {
+impl TxtRecordParser for SPF {
+    fn parse(bytes: &[u8]) -> crate::Result<SPF> {
         let mut record = bytes.iter();
         if !matches!(record.key(), Some(k) if k == V) {
             return Err(Error::InvalidRecord);
@@ -623,11 +623,20 @@ impl Variable {
     }
 }
 
+impl TxtRecordParser for Macro {
+    fn parse(record: &[u8]) -> crate::Result<Self> {
+        record.iter().macro_string(false).map(|(m, _)| m)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::net::{Ipv4Addr, Ipv6Addr};
 
-    use crate::spf::{Directive, Macro, Mechanism, Modifier, Qualifier, Variable, Version, SPF};
+    use crate::{
+        common::parse::TxtRecordParser,
+        spf::{Directive, Macro, Mechanism, Modifier, Qualifier, Variable, Version, SPF},
+    };
 
     use super::SPFParser;
 

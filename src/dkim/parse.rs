@@ -1,4 +1,4 @@
-use std::{borrow::Cow, slice::Iter};
+use std::slice::Iter;
 
 use mail_parser::decoders::base64::base64_decode_stream;
 use rsa::RsaPublicKey;
@@ -6,9 +6,23 @@ use rsa::RsaPublicKey;
 use crate::{common::parse::*, Error};
 
 use super::{
-    Algorithm, Canonicalization, Flag, HashAlgorithm, PublicKey, Record, Service, Signature,
-    Version,
+    Algorithm, Atps, Canonicalization, DomainKey, Flag, HashAlgorithm, PublicKey, Service,
+    Signature, Version,
 };
+
+const ATPSH: u64 = (b'a' as u64)
+    | (b't' as u64) << 8
+    | (b'p' as u64) << 16
+    | (b's' as u64) << 24
+    | (b'h' as u64) << 32;
+const ATPS: u64 = (b'a' as u64) | (b't' as u64) << 8 | (b'p' as u64) << 16 | (b's' as u64) << 24;
+const SHA256: u64 = (b's' as u64)
+    | (b'h' as u64) << 8
+    | (b'a' as u64) << 16
+    | (b'2' as u64) << 24
+    | (b'5' as u64) << 32
+    | (b'6' as u64) << 40;
+const SHA1: u64 = (b's' as u64) | (b'h' as u64) << 8 | (b'a' as u64) << 16 | (b'1' as u64) << 24;
 
 impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
@@ -28,6 +42,8 @@ impl<'x> Signature<'x> {
             t: 0,
             ch: Canonicalization::Simple,
             cb: Canonicalization::Simple,
+            r: false,
+            atps: None,
         };
         let header_len = header.len();
         let mut header = header.iter();
@@ -64,6 +80,30 @@ impl<'x> Signature<'x> {
                 T => signature.t = header.number().unwrap_or(0),
                 X => signature.x = header.number().unwrap_or(0),
                 Z => signature.z = header.headers_qp(),
+                R => signature.r = header.value() == Y,
+                ATPS => {
+                    signature
+                        .atps
+                        .get_or_insert_with(|| Atps {
+                            atps: (b""[..]).into(),
+                            atpsh: HashAlgorithm::Sha256,
+                        })
+                        .atps = header.tag().into()
+                }
+                ATPSH => {
+                    let atpsh = match header.value() {
+                        SHA256 => HashAlgorithm::Sha256,
+                        SHA1 => HashAlgorithm::Sha1,
+                        _ => continue,
+                    };
+                    signature
+                        .atps
+                        .get_or_insert_with(|| Atps {
+                            atps: (b""[..]).into(),
+                            atpsh,
+                        })
+                        .atpsh = atpsh;
+                }
                 _ => header.ignore(),
             }
         }
@@ -193,12 +233,12 @@ enum KeyType {
     None,
 }
 
-impl Record {
+impl TxtRecordParser for DomainKey {
     #[allow(clippy::while_let_on_iterator)]
-    pub fn parse(header: &[u8]) -> crate::Result<Self> {
+    fn parse(header: &[u8]) -> crate::Result<Self> {
         let header_len = header.len();
         let mut header = header.iter();
-        let mut record = Record {
+        let mut record = DomainKey {
             v: Version::Dkim1,
             p: PublicKey::Revoked,
             f: 0,
@@ -210,7 +250,7 @@ impl Record {
             match key {
                 V => {
                     if !header.match_bytes(b"DKIM1") || !header.seek_tag_end() {
-                        return Err(Error::UnsupportedRecordVersion);
+                        return Err(Error::InvalidVersion);
                     }
                 }
                 H => record.f |= header.flags::<HashAlgorithm>(),
@@ -266,58 +306,11 @@ impl Record {
 
         Ok(record)
     }
+}
 
+impl DomainKey {
     pub fn has_flag(&self, flag: impl Into<u64>) -> bool {
         (self.f & flag.into()) != 0
-    }
-}
-
-pub trait TryIntoRecord<'x>: Sized {
-    fn try_into_record(self) -> crate::Result<Cow<'x, Record>>;
-}
-
-impl<'x> TryIntoRecord<'x> for Record {
-    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
-        Ok(Cow::Owned(self))
-    }
-}
-
-impl<'x> TryIntoRecord<'x> for &'x Record {
-    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
-        Ok(Cow::Borrowed(self))
-    }
-}
-
-impl<'x> TryIntoRecord<'x> for String {
-    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
-        Record::parse(self.as_bytes()).map(Cow::Owned)
-    }
-}
-
-impl<'x> TryIntoRecord<'x> for &str {
-    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
-        Record::parse(self.as_bytes()).map(Cow::Owned)
-    }
-}
-
-impl<'x> TryIntoRecord<'x> for &[u8] {
-    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
-        Record::parse(self).map(Cow::Owned)
-    }
-}
-
-impl<'x> TryIntoRecord<'x> for Vec<u8> {
-    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
-        Record::parse(&self).map(Cow::Owned)
-    }
-}
-
-impl<'x, T: TryIntoRecord<'x> + Sized> TryIntoRecord<'x> for Option<T> {
-    fn try_into_record(self) -> crate::Result<Cow<'x, Record>> {
-        match self {
-            Some(v) => v.try_into_record(),
-            None => Err(Error::DNSFailure),
-        }
     }
 }
 
@@ -362,9 +355,13 @@ mod test {
     use mail_parser::decoders::base64::base64_decode;
     use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 
-    use crate::dkim::{
-        Algorithm, Canonicalization, PublicKey, Record, Signature, Version, R_FLAG_MATCH_DOMAIN,
-        R_FLAG_TESTING, R_HASH_SHA1, R_HASH_SHA256, R_SVC_ALL, R_SVC_EMAIL,
+    use crate::{
+        common::parse::TxtRecordParser,
+        dkim::{
+            Algorithm, Canonicalization, DomainKey, PublicKey, Signature, Version,
+            R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_HASH_SHA1, R_HASH_SHA256, R_SVC_ALL,
+            R_SVC_EMAIL,
+        },
     };
 
     #[test]
@@ -402,6 +399,8 @@ mod test {
                     t: 311923920,
                     ch: Canonicalization::Relaxed,
                     cb: Canonicalization::Relaxed,
+                    r: false,
+                    atps: None,
                 },
             ),
             (
@@ -447,6 +446,8 @@ mod test {
                     t: 1117574938,
                     ch: Canonicalization::Simple,
                     cb: Canonicalization::Simple,
+                    r: false,
+                    atps: None,
                 },
             ),
             (
@@ -492,6 +493,8 @@ mod test {
                     t: 0,
                     ch: Canonicalization::Simple,
                     cb: Canonicalization::Relaxed,
+                    r: false,
+                    atps: None,
                 },
             ),
         ] {
@@ -524,7 +527,7 @@ mod test {
                     "/RtdC2UzJ1lWT947qR+Rcac2gbto/NMqJ0fzfVjH4OuKhi",
                     "tdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB",
                 ),
-                Record {
+                DomainKey {
                     v: Version::Dkim1,
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
@@ -558,7 +561,7 @@ mod test {
                     "p5wMedWasaPS74TZ1b7tI39ncp6QIDAQAB ; t= y : s :yy:x;",
                     "s=*:email;; h= sha1:sha 256:other;; n=ignore these notes "
                 ),
-                Record {
+                DomainKey {
                     v: Version::Dkim1,
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
@@ -595,7 +598,7 @@ mod test {
                     "hpV673NdAtaCVGNyx/fTYtvyyFe9DH2tmm/ijLlygDRboSkIJ4NHZjK++48hk",
                     "NP8/htqWHS+CvwWT4Qgs0NtB7Re9bQIDAQAB"
                 ),
-                Record {
+                DomainKey {
                     v: Version::Dkim1,
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
@@ -616,7 +619,10 @@ mod test {
                 },
             ),
         ] {
-            assert_eq!(Record::parse(record.as_bytes()).unwrap(), expected_result);
+            assert_eq!(
+                DomainKey::parse(record.as_bytes()).unwrap(),
+                expected_result
+            );
         }
     }
 }

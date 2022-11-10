@@ -10,7 +10,7 @@ use super::{ChainValidation, Results, Seal, Signature};
 
 use crate::common::parse::*;
 
-pub(crate) const CV: u16 = (b'c' as u16) | ((b'v' as u16) << 8);
+pub(crate) const CV: u64 = (b'c' as u64) | ((b'v' as u64) << 8);
 
 impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]

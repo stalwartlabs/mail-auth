@@ -12,3 +12,10 @@ rsa = {version = "0.7.0"}
 ed25519-dalek = "1.0.1"
 sha1 = {version = "0.10", features = ["oid"]}
 sha2 = {version = "0.10.6", features = ["oid"]}
+trust-dns-resolver = { version = "0.22.0", features = ["dns-over-rustls"] }
+lru-cache = "0.1.2"
+parking_lot = "0.12.0"
+ahash = "0.8.0"
+
+[dev-dependencies]
+tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }

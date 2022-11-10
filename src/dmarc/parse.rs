@@ -3,14 +3,14 @@ use std::slice::Iter;
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 
 use crate::{
-    common::parse::{ItemParser, TagParser, V},
+    common::parse::{ItemParser, TagParser, TxtRecordParser, V},
     Error,
 };
 
 use super::{Alignment, Format, Policy, Report, DMARC, URI};
 
-impl DMARC {
-    pub fn parse(bytes: &[u8]) -> crate::Result<Self> {
+impl TxtRecordParser for DMARC {
+    fn parse(bytes: &[u8]) -> crate::Result<Self> {
         let mut record = bytes.iter();
         if record.key().unwrap_or(0) != V {
             return Err(Error::InvalidRecord);
@@ -32,7 +32,7 @@ impl DMARC {
             sp: Policy::Unspecified,
         };
 
-        while let Some(key) = record.long_key() {
+        while let Some(key) = record.key() {
             match key {
                 ADKIM => {
                     dmarc.adkim = record.alignment()?;
@@ -271,7 +271,10 @@ const SP: u64 = (b's' as u64) | (b'p' as u64) << 8;
 
 #[cfg(test)]
 mod test {
-    use crate::dmarc::{Alignment, Format, Policy, Report, DMARC, URI};
+    use crate::{
+        common::parse::TxtRecordParser,
+        dmarc::{Alignment, Format, Policy, Report, DMARC, URI},
+    };
 
     #[test]
     fn parse_dmarc() {

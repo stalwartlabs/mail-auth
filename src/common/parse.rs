@@ -2,26 +2,32 @@ use std::slice::Iter;
 
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 
-pub(crate) const V: u16 = b'v' as u16;
-pub(crate) const A: u16 = b'a' as u16;
-pub(crate) const B: u16 = b'b' as u16;
-pub(crate) const BH: u16 = (b'b' as u16) | ((b'h' as u16) << 8);
-pub(crate) const C: u16 = b'c' as u16;
-pub(crate) const D: u16 = b'd' as u16;
-pub(crate) const H: u16 = b'h' as u16;
-pub(crate) const I: u16 = b'i' as u16;
-pub(crate) const K: u16 = b'k' as u16;
-pub(crate) const L: u16 = b'l' as u16;
-pub(crate) const P: u16 = b'p' as u16;
-pub(crate) const S: u16 = b's' as u16;
-pub(crate) const T: u16 = b't' as u16;
-pub(crate) const X: u16 = b'x' as u16;
-pub(crate) const Z: u16 = b'z' as u16;
+pub(crate) const V: u64 = b'v' as u64;
+pub(crate) const A: u64 = b'a' as u64;
+pub(crate) const B: u64 = b'b' as u64;
+pub(crate) const BH: u64 = (b'b' as u64) | ((b'h' as u64) << 8);
+pub(crate) const C: u64 = b'c' as u64;
+pub(crate) const D: u64 = b'd' as u64;
+pub(crate) const H: u64 = b'h' as u64;
+pub(crate) const I: u64 = b'i' as u64;
+pub(crate) const K: u64 = b'k' as u64;
+pub(crate) const L: u64 = b'l' as u64;
+pub(crate) const P: u64 = b'p' as u64;
+pub(crate) const R: u64 = b'r' as u64;
+pub(crate) const S: u64 = b's' as u64;
+pub(crate) const T: u64 = b't' as u64;
+pub(crate) const X: u64 = b'x' as u64;
+pub(crate) const Y: u64 = b'y' as u64;
+pub(crate) const Z: u64 = b'z' as u64;
+
+pub(crate) trait TxtRecordParser: Sized {
+    fn parse(record: &[u8]) -> crate::Result<Self>;
+}
 
 pub(crate) trait TagParser: Sized {
     fn match_bytes(&mut self, bytes: &[u8]) -> bool;
-    fn key(&mut self) -> Option<u16>;
-    fn long_key(&mut self) -> Option<u64>;
+    fn key(&mut self) -> Option<u64>;
+    fn value(&mut self) -> u64;
     fn tag(&mut self) -> Vec<u8>;
     fn tag_qp(&mut self) -> Vec<u8>;
     fn headers_qp(&mut self) -> Vec<Vec<u8>>;
@@ -39,39 +45,7 @@ pub(crate) trait ItemParser: Sized {
 
 impl TagParser for Iter<'_, u8> {
     #[allow(clippy::while_let_on_iterator)]
-    fn key(&mut self) -> Option<u16> {
-        let mut key: u16 = 0;
-        let mut shift = 0;
-
-        while let Some(&ch) = self.next() {
-            match ch {
-                b'a'..=b'z' if shift < 16 => {
-                    key |= (ch as u16) << shift;
-                    shift += 8;
-                }
-                b' ' | b'\t' | b'\r' | b'\n' => (),
-                b'=' => {
-                    return key.into();
-                }
-                b'A'..=b'Z' if shift < 16 => {
-                    key |= ((ch - b'A' + b'a') as u16) << shift;
-                    shift += 8;
-                }
-                b';' => {
-                    key = 0;
-                }
-                _ => {
-                    key = u16::MAX;
-                    shift = 16;
-                }
-            }
-        }
-
-        None
-    }
-
-    #[allow(clippy::while_let_on_iterator)]
-    fn long_key(&mut self) -> Option<u64> {
+    fn key(&mut self) -> Option<u64> {
         let mut key: u64 = 0;
         let mut shift = 0;
 
@@ -100,6 +74,35 @@ impl TagParser for Iter<'_, u8> {
         }
 
         None
+    }
+
+    #[allow(clippy::while_let_on_iterator)]
+    fn value(&mut self) -> u64 {
+        let mut value: u64 = 0;
+        let mut shift = 0;
+
+        while let Some(&ch) = self.next() {
+            match ch {
+                b'a'..=b'z' if shift < 64 => {
+                    value |= (ch as u64) << shift;
+                    shift += 8;
+                }
+                b' ' | b'\t' | b'\r' | b'\n' => (),
+                b'A'..=b'Z' if shift < 64 => {
+                    value |= ((ch - b'A' + b'a') as u64) << shift;
+                    shift += 8;
+                }
+                b';' => {
+                    break;
+                }
+                _ => {
+                    value = u64::MAX;
+                    shift = 64;
+                }
+            }
+        }
+
+        value
     }
 
     #[inline(always)]

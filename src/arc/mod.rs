@@ -62,6 +62,14 @@ impl<'x> VerifySignature for Signature<'x> {
     fn a(&self) -> Algorithm {
         self.a
     }
+
+    fn s(&self) -> &[u8] {
+        &self.s
+    }
+
+    fn d(&self) -> &[u8] {
+        &self.d
+    }
 }
 
 impl<'x> VerifySignature for Seal<'x> {
@@ -71,5 +79,13 @@ impl<'x> VerifySignature for Seal<'x> {
 
     fn a(&self) -> Algorithm {
         self.a
+    }
+
+    fn s(&self) -> &[u8] {
+        &self.s
+    }
+
+    fn d(&self) -> &[u8] {
+        &self.d
     }
 }

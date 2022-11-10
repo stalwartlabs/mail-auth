@@ -24,7 +24,7 @@ use sha2::{Digest, Sha256};
 
 use crate::Error;
 
-use super::{Algorithm, Canonicalization, DKIMSigner, PrivateKey, Signature};
+use super::{Algorithm, Canonicalization, DKIMSigner, HashAlgorithm, PrivateKey, Signature};
 
 impl<'x> DKIMSigner<'x> {
     /// Creates a new DKIM signer from an RsaPrivateKey.
@@ -193,6 +193,8 @@ impl<'x> DKIMSigner<'x> {
             a: self.a,
             z: Vec::new(),
             l: if self.l { body_len as u64 } else { 0 },
+            r: false,
+            atps: None,
         };
 
         // Add signature to hash
@@ -240,6 +242,19 @@ impl<'x> Signature<'x> {
         self.ch.serialize_name(&mut writer)?;
         writer.write_all(b"/")?;
         self.cb.serialize_name(&mut writer)?;
+
+        if let Some(atps) = &self.atps {
+            writer.write_all(b"; atps=")?;
+            writer.write_all(&atps.atps)?;
+            writer.write_all(b"; atpsh=")?;
+            writer.write_all(match atps.atpsh {
+                HashAlgorithm::Sha256 => b"sha256",
+                HashAlgorithm::Sha1 => b"sha1",
+            })?;
+        }
+        if self.r {
+            writer.write_all(b"; r=y")?;
+        }
 
         writer.write_all(b";")?;
         writer.write_all(new_line)?;
@@ -349,12 +364,15 @@ impl<'x> Display for Signature<'x> {
 
 #[cfg(test)]
 mod test {
+    use std::time::{Duration, Instant};
+
     use mail_parser::decoders::base64::base64_decode;
     use sha2::Sha256;
 
     use crate::{
-        common::{AuthResult, AuthenticatedMessage},
-        dkim::{Canonicalization, Signature},
+        common::{parse::TxtRecordParser, AuthResult, AuthenticatedMessage},
+        dkim::{Canonicalization, DomainKey, Signature},
+        Resolver,
     };
 
     const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -419,8 +437,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
     }
 
-    #[test]
-    fn dkim_sign_verify() {
+    #[tokio::test]
+    async fn dkim_sign_verify() {
         let message = concat!(
             "From: bill@example.com\r\n",
             "To: jdoe@example.com\r\n",
@@ -457,7 +475,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             message,
             RSA_PUBLIC_KEY,
             Ok(()),
-        );
+        )
+        .await;
 
         // Test ED25519-SHA256 relaxed/relaxed
         verify(
@@ -476,7 +495,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             message,
             ED25519_PUBLIC_KEY,
             Ok(()),
-        );
+        )
+        .await;
 
         // Test RSA-SHA256 simple/simple with duplicated headers
         verify(
@@ -499,7 +519,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             message_multiheader,
             RSA_PUBLIC_KEY,
             Ok(()),
-        );
+        )
+        .await;
 
         // Test RSA-SHA256 simple/relaxed with fixed body length
         verify(
@@ -516,7 +537,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             &(message.to_string() + "\r\n----- Mailing list"),
             RSA_PUBLIC_KEY,
             Ok(()),
-        );
+        )
+        .await;
 
         // Test AUID not matching domain
         verify(
@@ -532,7 +554,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             message,
             RSA_PUBLIC_KEY,
             Err(super::Error::FailedAUIDMatch),
-        );
+        )
+        .await;
 
         // Test expired signature
         verify(
@@ -548,11 +571,12 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             message,
             RSA_PUBLIC_KEY,
             Err(super::Error::SignatureExpired),
-        );
+        )
+        .await;
     }
 
-    fn verify(
-        signature: Signature,
+    async fn verify(
+        signature: Signature<'_>,
         message_: &str,
         public_key: &str,
         expect: Result<(), super::Error>,
@@ -562,14 +586,18 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         message.extend_from_slice(message_.as_bytes());
         //println!("[{}]", String::from_utf8_lossy(&message));
 
-        let mut verifier = AuthenticatedMessage::new(&message).unwrap();
-        while verifier.next_entry().is_some() {
-            verifier.verify(public_key);
-        }
+        let resolver = Resolver::new_system_conf().unwrap();
+        resolver.txt_add(
+            "default._domainkey.example.com.".to_string(),
+            DomainKey::parse(public_key.as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
+        let mut verifier = AuthenticatedMessage::parse(&message).unwrap();
+        verifier.verify(&resolver).await;
 
-        match (verifier.dkim_result, &expect) {
-            (AuthResult::Pass(_), Ok(_)) => (),
-            (AuthResult::PermFail(hdr), Err(err)) if &hdr.header == err => (),
+        match (verifier.dkim_result(), &expect) {
+            (AuthResult::Pass, Ok(_)) => (),
+            (AuthResult::PermFail(hdr), Err(err)) if &hdr == err => (),
             (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
         }
     }

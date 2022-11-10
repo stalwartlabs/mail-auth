@@ -67,12 +67,20 @@ pub struct Signature<'x> {
     pub(crate) l: u64,
     pub(crate) x: u64,
     pub(crate) t: u64,
+    pub(crate) r: bool,                // RFC 6651
+    pub(crate) atps: Option<Atps<'x>>, // RFC 6541
     pub(crate) ch: Canonicalization,
     pub(crate) cb: Canonicalization,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Record {
+pub struct Atps<'x> {
+    pub(crate) atps: Cow<'x, [u8]>,
+    pub(crate) atpsh: HashAlgorithm,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DomainKey {
     pub(crate) v: Version,
     pub(crate) p: PublicKey,
     pub(crate) f: u64,
@@ -152,5 +160,13 @@ impl<'x> VerifySignature for Signature<'x> {
 
     fn a(&self) -> Algorithm {
         self.a
+    }
+
+    fn s(&self) -> &[u8] {
+        &self.s
+    }
+
+    fn d(&self) -> &[u8] {
+        &self.d
     }
 }

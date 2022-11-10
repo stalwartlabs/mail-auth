@@ -9,13 +9,48 @@
  * except according to those terms.
  */
 
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
+
+use common::lru::LruCache;
+use dkim::DomainKey;
+use dmarc::DMARC;
+use spf::{Macro, SPF};
+use trust_dns_resolver::TokioAsyncResolver;
 
 pub mod arc;
 pub mod common;
 pub mod dkim;
 pub mod dmarc;
 pub mod spf;
+
+#[derive(Debug)]
+pub struct Resolver {
+    pub(crate) resolver: TokioAsyncResolver,
+    pub(crate) cache_txt: LruCache<String, Txt>,
+    pub(crate) cache_mx: LruCache<String, Arc<Vec<MX>>>,
+    pub(crate) cache_ipv4: LruCache<String, Arc<Vec<Ipv4Addr>>>,
+    pub(crate) cache_ipv6: LruCache<String, Arc<Vec<Ipv6Addr>>>,
+    pub(crate) cache_ptr: LruCache<IpAddr, Arc<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Txt {
+    SPF(Arc<SPF>),
+    SPFMacro(Arc<Macro>),
+    DomainKey(Arc<DomainKey>),
+    DMARC(Arc<DMARC>),
+    Error(Error),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MX {
+    exchange: String,
+    preference: u16,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -28,7 +63,6 @@ pub enum Error {
     UnsupportedVersion,
     UnsupportedAlgorithm,
     UnsupportedCanonicalization,
-    UnsupportedRecordVersion,
     UnsupportedKeyType,
     FailedBodyHashMatch,
     RevokedPublicKey,
@@ -36,7 +70,7 @@ pub enum Error {
     FailedVerification,
     SignatureExpired,
     FailedAUIDMatch,
-    DNSFailure,
+    DNSFailure(String),
 
     ARCInvalidInstance,
     ARCInvalidCV,
@@ -67,9 +101,6 @@ impl Display for Error {
             Error::UnsupportedCanonicalization => {
                 write!(f, "Unsupported canonicalization method in DKIM Signature.")
             }
-            Error::UnsupportedRecordVersion => {
-                write!(f, "Unsupported version in DKIM DNS record.")
-            }
             Error::UnsupportedKeyType => {
                 write!(f, "Unsupported key type in DKIM DNS record.")
             }
@@ -93,7 +124,7 @@ impl Display for Error {
             Error::InvalidIp4 => write!(f, "Invalid IPv4."),
             Error::InvalidIp6 => write!(f, "Invalid IPv6."),
             Error::InvalidMacro => write!(f, "Invalid SPF macro."),
-            Error::DNSFailure => write!(f, "DNS failure."),
+            Error::DNSFailure(err) => write!(f, "DNS failure: {}", err),
         }
     }
 }
@@ -116,17 +147,31 @@ impl From<ed25519_dalek::ed25519::Error> for Error {
     }
 }
 
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use trust_dns_resolver::{
+        config::{ResolverConfig, ResolverOpts},
+        AsyncResolver,
+    };
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+    #[tokio::test]
+    async fn it_works() {
+        let resolver =
+            AsyncResolver::tokio(ResolverConfig::cloudflare_tls(), ResolverOpts::default())
+                .unwrap();
+        let c = resolver
+            .reverse_lookup("135.181.195.209".parse().unwrap())
+            .await
+            .unwrap();
+
+        println!(
+            "{:#?}",
+            c /*c.as_lookup().records()[0]
+              .data()
+              .unwrap()
+              .as_txt()
+              .unwrap()
+              .to_string()*/
+        );
     }
 }

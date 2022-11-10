@@ -1,5 +1,7 @@
 use crate::common::AuthenticatedMessage;
 
+use super::{DomainKey, Flag, Signature};
+
 impl<'x> AuthenticatedMessage<'x> {
     pub fn signed_headers<'z: 'x>(
         &'z self,
@@ -36,6 +38,36 @@ impl<'x> AuthenticatedMessage<'x> {
                 }
             })
             .chain([(dkim_hdr_name, dkim_hdr_value)])
+    }
+}
+
+impl<'x> Signature<'x> {
+    #[allow(clippy::while_let_on_iterator)]
+    pub fn validate_auid(&self, record: &DomainKey) -> bool {
+        // Enforce t=s flag
+        if !self.i.is_empty() && record.has_flag(Flag::MatchDomain) {
+            let mut auid = self.i.as_ref().iter();
+            let mut domain = self.d.as_ref().iter();
+            while let Some(&ch) = auid.next() {
+                if ch == b'@' {
+                    break;
+                }
+            }
+            while let Some(ch) = auid.next() {
+                if let Some(dch) = domain.next() {
+                    if !ch.eq_ignore_ascii_case(dch) {
+                        return false;
+                    }
+                } else {
+                    break;
+                }
+            }
+            if domain.next().is_some() {
+                return false;
+            }
+        }
+
+        true
     }
 }
 

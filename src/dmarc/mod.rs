@@ -1,7 +1,7 @@
 pub mod parse;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct DMARC {
+pub struct DMARC {
     adkim: Alignment,
     aspf: Alignment,
     fo: Report,
@@ -16,6 +16,7 @@ pub(crate) struct DMARC {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub(crate) struct URI {
     uri: Vec<u8>,
     max_size: usize,

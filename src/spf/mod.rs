@@ -127,7 +127,7 @@ pub(crate) enum Macro {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct SPF {
+pub struct SPF {
     version: Version,
     directives: Vec<Directive>,
     modifiers: Vec<Modifier>,

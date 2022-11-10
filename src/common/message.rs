@@ -12,13 +12,13 @@ use crate::{
 
 use super::{
     headers::{AuthenticatedHeader, Header, HeaderParser},
-    AuthPhase, AuthResult, AuthenticatedMessage,
+    AuthenticatedMessage,
 };
 
 impl<'x> AuthenticatedMessage<'x> {
     #[inline(always)]
-    pub fn new(raw_message: &'x [u8]) -> Option<Self> {
-        Self::new_(
+    pub fn parse(raw_message: &'x [u8]) -> Option<Self> {
+        Self::parse_(
             raw_message,
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -27,15 +27,14 @@ impl<'x> AuthenticatedMessage<'x> {
         )
     }
 
-    pub(crate) fn new_(raw_message: &'x [u8], now: u64) -> Option<Self> {
+    pub(crate) fn parse_(raw_message: &'x [u8], now: u64) -> Option<Self> {
         let mut message = AuthenticatedMessage {
             headers: Vec::new(),
             from: Vec::new(),
-            dkim_headers: Vec::new(),
-            arc_sets: Vec::new(),
-            arc_result: AuthResult::None,
-            dkim_result: AuthResult::None,
-            phase: AuthPhase::Done,
+            dkim_pass: Vec::new(),
+            dkim_fail: Vec::new(),
+            arc_pass: Vec::new(),
+            arc_fail: Vec::new(),
         };
 
         let mut ams_headers = Vec::new();
@@ -54,7 +53,7 @@ impl<'x> AuthenticatedMessage<'x> {
                             {
                                 dkim_headers.push(Header::new(name, value, signature));
                             } else {
-                                message.dkim_result = AuthResult::PermFail(Header::new(
+                                message.dkim_fail.push(Header::new(
                                     name,
                                     value,
                                     crate::Error::SignatureExpired,
@@ -62,8 +61,7 @@ impl<'x> AuthenticatedMessage<'x> {
                             }
                         }
                         Err(err) => {
-                            message.dkim_result =
-                                AuthResult::PermFail(Header::new(name, value, err));
+                            message.dkim_fail.push(Header::new(name, value, err));
                         }
                     }
 
@@ -75,8 +73,7 @@ impl<'x> AuthenticatedMessage<'x> {
                             aar_headers.push(Header::new(name, value, r));
                         }
                         Err(err) => {
-                            message.arc_result =
-                                AuthResult::PermFail(Header::new(name, value, err));
+                            message.arc_fail.push(Header::new(name, value, err));
                         }
                     }
 
@@ -88,8 +85,7 @@ impl<'x> AuthenticatedMessage<'x> {
                             ams_headers.push(Header::new(name, value, s));
                         }
                         Err(err) => {
-                            message.arc_result =
-                                AuthResult::PermFail(Header::new(name, value, err));
+                            message.arc_fail.push(Header::new(name, value, err));
                         }
                     }
 
@@ -101,8 +97,7 @@ impl<'x> AuthenticatedMessage<'x> {
                             as_headers.push(Header::new(name, value, s));
                         }
                         Err(err) => {
-                            message.arc_result =
-                                AuthResult::PermFail(Header::new(name, value, err));
+                            message.arc_fail.push(Header::new(name, value, err));
                         }
                     }
                     name
@@ -180,11 +175,12 @@ impl<'x> AuthenticatedMessage<'x> {
                         // Validate expiration
                         let signature_ = &signature.header;
                         if signature_.x > 0 && (signature_.x < signature_.t || signature_.x < now) {
-                            message.arc_result = AuthResult::PermFail(Header::new(
+                            message.arc_fail.push(Header::new(
                                 signature.name,
                                 signature.value,
                                 Error::SignatureExpired,
                             ));
+                            message.arc_pass.clear();
                             break;
                         }
 
@@ -208,52 +204,53 @@ impl<'x> AuthenticatedMessage<'x> {
                         ));
 
                         if !success {
-                            message.arc_result = AuthResult::PermFail(Header::new(
+                            message.arc_fail.push(Header::new(
                                 signature.name,
                                 signature.value,
                                 Error::FailedBodyHashMatch,
                             ));
+                            message.arc_pass.clear();
                             break;
                         }
                     }
 
-                    message.arc_sets.push(Set {
+                    message.arc_pass.push(Set {
                         signature,
                         seal,
                         results,
                     });
                 } else {
-                    message.arc_result = AuthResult::PermFail(Header::new(
+                    message.arc_fail.push(Header::new(
                         signature.name,
                         signature.value,
                         Error::ARCBrokenChain,
                     ));
+                    message.arc_pass.clear();
                     break;
                 }
             }
-        } else if arc_headers > 0 && message.arc_result == AuthResult::None {
+        } else if arc_headers > 0 {
             // Missing ARC headers, fail all.
-            let header = ams_headers
-                .into_iter()
-                .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain))
-                .chain(
-                    as_headers
-                        .into_iter()
-                        .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain)),
-                )
-                .chain(
-                    aar_headers
-                        .into_iter()
-                        .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain)),
-                )
-                .next()
-                .unwrap();
-            message.arc_result = AuthResult::PermFail(header);
+            message.arc_fail.extend(
+                ams_headers
+                    .into_iter()
+                    .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain))
+                    .chain(
+                        as_headers
+                            .into_iter()
+                            .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain)),
+                    )
+                    .chain(
+                        aar_headers
+                            .into_iter()
+                            .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain)),
+                    ),
+            );
         }
 
         // Validate body hash of DKIM signatures
         if !dkim_headers.is_empty() {
-            message.dkim_headers = Vec::with_capacity(dkim_headers.len());
+            message.dkim_pass = Vec::with_capacity(dkim_headers.len());
             for header in dkim_headers {
                 let signature = &header.header;
                 let ha = HashAlgorithm::from(signature.a);
@@ -277,22 +274,15 @@ impl<'x> AuthenticatedMessage<'x> {
                 };
 
                 if bh == &signature.bh {
-                    message.dkim_headers.push(header);
+                    message.dkim_pass.push(header);
                 } else {
-                    message.dkim_result = AuthResult::PermFail(Header::new(
+                    message.dkim_fail.push(Header::new(
                         header.name,
                         header.value,
                         crate::Error::FailedBodyHashMatch,
                     ));
                 }
             }
-        }
-
-        if !message.dkim_headers.is_empty() {
-            message.dkim_headers.reverse();
-            message.phase = AuthPhase::Dkim;
-        } else if !message.arc_sets.is_empty() && message.arc_result == AuthResult::None {
-            message.phase = AuthPhase::Ams;
         }
 
         message.into()
