@@ -250,7 +250,7 @@ impl TxtRecordParser for DomainKey {
             match key {
                 V => {
                     if !header.match_bytes(b"DKIM1") || !header.seek_tag_end() {
-                        return Err(Error::InvalidVersion);
+                        return Err(Error::InvalidRecordType);
                     }
                 }
                 H => record.f |= header.flags::<HashAlgorithm>(),

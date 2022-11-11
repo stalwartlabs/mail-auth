@@ -10,16 +10,18 @@
  */
 
 use std::{
+    borrow::Cow,
     fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
 
-use common::lru::LruCache;
+use arc::Set;
+use common::{headers::Header, lru::LruCache};
 use dkim::DomainKey;
 use dmarc::DMARC;
 use spf::{Macro, SPF};
-use trust_dns_resolver::TokioAsyncResolver;
+use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
 
 pub mod arc;
 pub mod common;
@@ -34,7 +36,9 @@ pub struct Resolver {
     pub(crate) cache_mx: LruCache<String, Arc<Vec<MX>>>,
     pub(crate) cache_ipv4: LruCache<String, Arc<Vec<Ipv4Addr>>>,
     pub(crate) cache_ipv6: LruCache<String, Arc<Vec<Ipv6Addr>>>,
-    pub(crate) cache_ptr: LruCache<IpAddr, Arc<String>>,
+    pub(crate) cache_ptr: LruCache<IpAddr, Arc<Vec<String>>>,
+    pub(crate) host_domain: Vec<u8>,
+    pub(crate) verify_helo: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +56,35 @@ pub struct MX {
     preference: u16,
 }
 
+#[derive(Debug, Clone)]
+pub struct AuthenticatedMessage<'x> {
+    pub(crate) headers: Vec<(&'x [u8], &'x [u8])>,
+    pub(crate) from: Vec<Cow<'x, str>>,
+    pub(crate) dkim_pass: Vec<Header<'x, dkim::Signature<'x>>>,
+    pub(crate) dkim_fail: Vec<Header<'x, crate::Error>>,
+    pub(crate) arc_pass: Vec<Set<'x>>,
+    pub(crate) arc_fail: Vec<Header<'x, crate::Error>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum DKIMResult {
+    None,
+    PermFail(crate::Error),
+    TempFail(crate::Error),
+    Pass,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum SPFResult {
+    Pass,
+    Fail(String),
+    SoftFail,
+    Neutral,
+    TempError,
+    PermError,
+    None,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     ParseError,
@@ -65,20 +98,21 @@ pub enum Error {
     UnsupportedCanonicalization,
     UnsupportedKeyType,
     FailedBodyHashMatch,
+    FailedVerification,
+    FailedAUIDMatch,
     RevokedPublicKey,
     IncompatibleAlgorithms,
-    FailedVerification,
     SignatureExpired,
-    FailedAUIDMatch,
-    DNSFailure(String),
+
+    DNSError,
+    DNSRecordNotFound(ResponseCode),
 
     ARCInvalidInstance,
     ARCInvalidCV,
     ARCHasHeaderTag,
     ARCBrokenChain,
 
-    InvalidVersion,
-    InvalidRecord,
+    InvalidRecordType,
 
     InvalidIp4,
     InvalidIp6,
@@ -119,12 +153,12 @@ impl Display for Error {
             Error::ARCInvalidCV => write!(f, "Invalid 'cv=' value found in ARC header."),
             Error::ARCHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal."),
             Error::ARCBrokenChain => write!(f, "Broken or missing ARC chain."),
-            Error::InvalidVersion => write!(f, "Invalid version."),
-            Error::InvalidRecord => write!(f, "Invalid record."),
+            Error::InvalidRecordType => write!(f, "Invalid record."),
             Error::InvalidIp4 => write!(f, "Invalid IPv4."),
             Error::InvalidIp6 => write!(f, "Invalid IPv6."),
             Error::InvalidMacro => write!(f, "Invalid SPF macro."),
-            Error::DNSFailure(err) => write!(f, "DNS failure: {}", err),
+            Error::DNSError => write!(f, "DNS resolution error."),
+            Error::DNSRecordNotFound(code) => write!(f, "DNS record not found: {}.", code),
         }
     }
 }
@@ -159,10 +193,7 @@ mod tests {
         let resolver =
             AsyncResolver::tokio(ResolverConfig::cloudflare_tls(), ResolverOpts::default())
                 .unwrap();
-        let c = resolver
-            .reverse_lookup("135.181.195.209".parse().unwrap())
-            .await
-            .unwrap();
+        let c = resolver.ipv4_lookup("locura.bivo.org.").await.unwrap();
 
         println!(
             "{:#?}",

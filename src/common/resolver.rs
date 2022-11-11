@@ -6,7 +6,8 @@ use std::{
 
 use trust_dns_resolver::{
     config::{ResolverConfig, ResolverOpts},
-    error::ResolveError,
+    error::{ResolveError, ResolveErrorKind},
+    proto::rr::RecordType,
     system_conf::read_system_conf,
     AsyncResolver,
 };
@@ -65,7 +66,19 @@ impl Resolver {
             cache_ipv4: LruCache::with_capacity(capacity),
             cache_ipv6: LruCache::with_capacity(capacity),
             cache_ptr: LruCache::with_capacity(capacity),
+            host_domain: Vec::new(),
+            verify_helo: true,
         })
+    }
+
+    pub fn host_domain(mut self, hostname: &str) -> Self {
+        self.host_domain = hostname.as_bytes().to_vec();
+        self
+    }
+
+    pub fn verify_helo_identity(mut self, value: bool) -> Self {
+        self.verify_helo = value;
+        self
     }
 
     pub(crate) async fn txt_lookup<T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
@@ -81,7 +94,7 @@ impl Resolver {
         }
 
         let txt_lookup = self.resolver.txt_lookup(&key).await?;
-        let mut result = Err(Error::DNSFailure("Empty TXT record.".to_string()));
+        let mut result = Err(Error::InvalidRecordType);
         let records = txt_lookup.as_lookup().record_iter().filter_map(|r| {
             let txt_data = r.data()?.as_txt()?.txt_data();
             match txt_data.len() {
@@ -180,7 +193,7 @@ impl Resolver {
             .insert(key.to_string(), Arc::new(ips), ipv6_lookup.valid_until()))
     }
 
-    pub async fn ptr_lookup(&self, addr: IpAddr) -> crate::Result<Arc<String>> {
+    pub async fn ptr_lookup(&self, addr: IpAddr) -> crate::Result<Arc<Vec<String>>> {
         if let Some(value) = self.cache_ptr.get(&addr) {
             return Ok(value);
         }
@@ -189,12 +202,28 @@ impl Resolver {
             .as_lookup()
             .record_iter()
             .filter_map(|r| r.data()?.as_ptr()?.to_lowercase().to_string().into())
-            .next()
-            .unwrap_or_default();
+            .collect::<Vec<_>>();
 
         Ok(self
             .cache_ptr
             .insert(addr, Arc::new(ptr), ptr_lookup.valid_until()))
+    }
+
+    pub(crate) async fn exists(&self, key: &str) -> crate::Result<bool> {
+        match self.resolver.lookup_ip(key).await {
+            Ok(result) => Ok(result.as_lookup().record_iter().any(|r| {
+                r.data().map_or(false, |d| {
+                    matches!(d.to_record_type(), RecordType::A | RecordType::AAAA)
+                })
+            })),
+            Err(err) => {
+                if matches!(err.kind(), ResolveErrorKind::NoRecordsFound { .. }) {
+                    Ok(false)
+                } else {
+                    Err(Error::DNSError)
+                }
+            }
+        }
     }
 
     #[cfg(test)]
@@ -233,9 +262,14 @@ impl Resolver {
     }
 }
 
-impl From<ResolveError> for crate::Error {
+impl From<ResolveError> for Error {
     fn from(err: ResolveError) -> Self {
-        crate::Error::DNSFailure(err.to_string())
+        match err.kind() {
+            ResolveErrorKind::NoRecordsFound { response_code, .. } => {
+                Error::DNSRecordNotFound(*response_code)
+            }
+            _ => Error::DNSError,
+        }
     }
 }
 

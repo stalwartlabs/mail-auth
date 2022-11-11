@@ -1,5 +1,6 @@
 pub mod macros;
 pub mod parse;
+pub mod verify;
 
 use std::{
     borrow::Cow,
@@ -33,24 +34,24 @@ pub(crate) enum Mechanism {
     },
     A {
         macro_string: Macro,
-        ip4_cidr_length: u8,
-        ip6_cidr_length: u8,
+        ip4_mask: u32,
+        ip6_mask: u128,
     },
     Mx {
         macro_string: Macro,
-        ip4_cidr_length: u8,
-        ip6_cidr_length: u8,
+        ip4_mask: u32,
+        ip6_mask: u128,
     },
     Ptr {
         macro_string: Macro,
     },
     Ip4 {
         addr: Ipv4Addr,
-        cidr_length: u8,
+        mask: u32,
     },
     Ip6 {
         addr: Ipv6Addr,
-        cidr_length: u8,
+        mask: u128,
     },
     Exists {
         macro_string: Macro,
@@ -64,15 +65,6 @@ pub(crate) enum Mechanism {
 pub(crate) struct Directive {
     pub(crate) qualifier: Qualifier,
     pub(crate) mechanism: Mechanism,
-}
-
-/*
-    modifier         = redirect / explanation / unknown-modifier
-*/
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Modifier {
-    Redirect(Macro),
-    Explanation(Macro),
 }
 
 /*
@@ -130,7 +122,8 @@ pub(crate) enum Macro {
 pub struct SPF {
     version: Version,
     directives: Vec<Directive>,
-    modifiers: Vec<Modifier>,
+    exp: Option<Macro>,
+    redirect: Option<Macro>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -143,6 +136,21 @@ impl Directive {
         Directive {
             qualifier,
             mechanism,
+        }
+    }
+}
+
+impl Mechanism {
+    pub fn needs_ptr(&self) -> bool {
+        match self {
+            Mechanism::All
+            | Mechanism::Ip4 { .. }
+            | Mechanism::Ip6 { .. }
+            | Mechanism::Ptr { .. } => false,
+            Mechanism::Include { macro_string } => macro_string.needs_ptr(),
+            Mechanism::A { macro_string, .. } => macro_string.needs_ptr(),
+            Mechanism::Mx { macro_string, .. } => macro_string.needs_ptr(),
+            Mechanism::Exists { macro_string } => macro_string.needs_ptr(),
         }
     }
 }

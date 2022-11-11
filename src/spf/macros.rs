@@ -3,16 +3,19 @@ use std::{borrow::Cow, net::IpAddr, time::SystemTime};
 use super::{Macro, Variable, Variables};
 
 impl Macro {
-    pub fn eval<'z, 'x: 'z>(&'z self, vars: &'x Variables<'x>) -> Cow<'z, [u8]> {
+    pub fn eval<'z, 'x: 'z>(&'z self, vars: &'x Variables<'x>, default: &'x str) -> Cow<'z, str> {
         match self {
-            Macro::Literal(literal) => literal.into(),
+            Macro::Literal(literal) => std::str::from_utf8(literal).unwrap_or_default().into(),
             Macro::Variable {
                 letter,
                 num_parts,
                 reverse,
                 escape,
                 delimiters,
-            } => vars.get(*letter, *num_parts, *reverse, *escape, *delimiters),
+            } => match vars.get(*letter, *num_parts, *reverse, *escape, *delimiters) {
+                Cow::Borrowed(bytes) => std::str::from_utf8(bytes).unwrap_or_default().into(),
+                Cow::Owned(bytes) => String::from_utf8(bytes).unwrap_or_default().into(),
+            },
             Macro::List(list) => {
                 let mut result = Vec::with_capacity(32);
                 for item in list {
@@ -35,9 +38,17 @@ impl Macro {
                         Macro::List(_) | Macro::None => unreachable!(),
                     }
                 }
-                result.into()
+                String::from_utf8(result).unwrap_or_default().into()
             }
-            Macro::None => unreachable!(),
+            Macro::None => default.into(),
+        }
+    }
+
+    pub fn needs_ptr(&self) -> bool {
+        match self {
+            Macro::Variable { letter, .. } => *letter == Variable::ValidatedDomain,
+            Macro::List(list) => list.iter().any(|m| matches!(m, Macro::Variable { letter, .. } if *letter == Variable::ValidatedDomain)),
+            _ => false,
         }
     }
 }
@@ -80,32 +91,40 @@ impl<'x> Variables<'x> {
         self.vars[Variable::SmtpIp as usize] = c.into_bytes().into();
     }
 
-    pub fn set_sender(&mut self, value: &'x [u8]) {
+    pub fn set_sender(&mut self, value: impl Into<Cow<'x, [u8]>>) {
+        let value = value.into();
         for (pos, ch) in value.as_ref().iter().enumerate() {
             if ch == &b'@' {
-                self.vars[Variable::SenderLocalPart as usize] = (&value[..pos]).into();
-                self.vars[Variable::SenderDomainPart as usize] =
-                    (value.get(pos + 1..).unwrap_or_default()).into();
+                if pos > 0 {
+                    self.vars[Variable::SenderLocalPart as usize] = match &value {
+                        Cow::Borrowed(value) => (&value[..pos]).into(),
+                        Cow::Owned(value) => value[..pos].to_vec().into(),
+                    };
+                }
+                self.vars[Variable::SenderDomainPart as usize] = match &value {
+                    Cow::Borrowed(value) => (value.get(pos + 1..).unwrap_or_default()).into(),
+                    Cow::Owned(value) => (value.get(pos + 1..).unwrap_or_default()).to_vec().into(),
+                };
                 break;
             }
         }
 
-        self.vars[Variable::Sender as usize] = value.into();
+        self.vars[Variable::Sender as usize] = value;
     }
 
-    pub fn set_helo_domain(&mut self, value: &'x [u8]) {
+    pub fn set_helo_domain(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         self.vars[Variable::HeloDomain as usize] = value.into();
     }
 
-    pub fn set_host_domain(&mut self, value: &'x [u8]) {
+    pub fn set_host_domain(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         self.vars[Variable::HostDomain as usize] = value.into();
     }
 
-    pub fn set_validated_domain(&mut self, value: &'x [u8]) {
+    pub fn set_validated_domain(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         self.vars[Variable::ValidatedDomain as usize] = value.into();
     }
 
-    pub fn set_domain(&mut self, value: &'x [u8]) {
+    pub fn set_domain(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         self.vars[Variable::Domain as usize] = value.into();
     }
 
@@ -225,12 +244,7 @@ mod test {
             ),
         ] {
             let (m, _) = macro_string.as_bytes().iter().macro_string(false).unwrap();
-            assert_eq!(
-                String::from_utf8_lossy(m.eval(&vars).as_ref()),
-                expansion,
-                "{:?}",
-                macro_string
-            );
+            assert_eq!(m.eval(&vars, ""), expansion, "{:?}", macro_string);
         }
 
         let mut vars = Variables::new();
@@ -261,12 +275,7 @@ mod test {
             ),
         ] {
             let (m, _) = macro_string.as_bytes().iter().macro_string(true).unwrap();
-            assert_eq!(
-                String::from_utf8_lossy(m.eval(&vars).as_ref()),
-                expansion,
-                "{:?}",
-                macro_string
-            );
+            assert_eq!(m.eval(&vars, ""), expansion, "{:?}", macro_string);
         }
     }
 }

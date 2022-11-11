@@ -1,4 +1,4 @@
-use crate::common::AuthenticatedMessage;
+use crate::AuthenticatedMessage;
 
 use super::{DomainKey, Flag, Signature};
 

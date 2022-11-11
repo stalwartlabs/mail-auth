@@ -370,9 +370,9 @@ mod test {
     use sha2::Sha256;
 
     use crate::{
-        common::{parse::TxtRecordParser, AuthResult, AuthenticatedMessage},
+        common::parse::TxtRecordParser,
         dkim::{Canonicalization, DomainKey, Signature},
-        Resolver,
+        DKIMResult, Resolver,
     };
 
     const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -592,12 +592,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             DomainKey::parse(public_key.as_bytes()).unwrap(),
             Instant::now() + Duration::new(3600, 0),
         );
-        let mut verifier = AuthenticatedMessage::parse(&message).unwrap();
-        verifier.verify(&resolver).await;
+        let message = resolver.verify_message(&message).await.unwrap();
 
-        match (verifier.dkim_result(), &expect) {
-            (AuthResult::Pass, Ok(_)) => (),
-            (AuthResult::PermFail(hdr), Err(err)) if &hdr == err => (),
+        match (message.dkim_result(), &expect) {
+            (DKIMResult::Pass, Ok(_)) => (),
+            (DKIMResult::PermFail(hdr), Err(err)) if &hdr == err => (),
             (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
         }
     }

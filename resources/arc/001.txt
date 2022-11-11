@@ -1,0 +1,160 @@
+arc-20160816._domainkey.google.com k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1Lztpxs7yUxQEsbDFhjMc9kZVZu5P/COYEUIX4B39IL4SXAbv4viIlT9E6F6iZmTh1go7+9WQLywwgwjXMJx/Dz0RgMoPeyp5NRy4l320DPYibNqVMWa5iQ2WiImQC0en1O9uhLLvzaSZJ03fvGmCo9jMo0GwKzLNe14xMgn/px2L5N/3IKlKX4bqUAJTUt8L993ZlWzvgMnSFSt8B+euSKSrtAiopdy4r1yO4eN5goBASrGW0eLQc1lYouNvCrcTQpos4/GEAqiGzpqueJLmBfOO4clNvVvpPkvQs2BHw9I9LmIjaMxTNGxkGBRaP3utDiKXXqu1K+LRzl0HCNSdQIDAQAB
+ietf1._domainkey.ietf.org k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDNzNnjKTd5cczd2CDzHflCZuv1tMWYwd7zE+deoJ6s/fXR7/n9ZIBnDS5egt7HAHjNjZrmjcoRlfSsNxRJvUQFyYvaU1BT1s8R+mkPgSOqZ4t9HqAVjiczn2B9+dbjdNN+S/zvSyMMuSCSJDKKAXhBpDeQTpeY7/UdP9s6ws0yjQIDAQAB
+velikisrpan22._domainkey.stalw.art v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvzwKQIIWzQXv0nihasFTT3+JO23hXCge+ESWNxCJdVLxKL5edxrumEU3DnrPeGD6q6E/vjoXwBabpm8F5o96MEPm7v12O5IIK7wx7gIJiQWvexwh+GJvW4aFFa0g13Ai75UdZjGFNKHAEGeLmkQYybK/EHW5ymRlSg3g8zydJGEcI/melLCiBoShHjfZFJEThxLmPHNSi+KOUMypxqYHd7hzg6W7qnq6t9puZYXMWj6tEaf6ORWgb7DOXZSTJJjAJPBWa2+UrxXX6Ro7L7Xy1zzeYFCk8W5vmn0wMgGpjkWw0ljJWNwIpxZAj9p5wMedWasaPS74TZ1b7tI39ncp6QIDAQAB
+
+Delivered-To: mauro@degennaro.me
+Received: by 2002:adf:b343:0:0:0:0:0 with SMTP id k3csp2230702wrd;
+        Mon, 7 Nov 2022 23:51:18 -0800 (PST)
+X-Google-Smtp-Source: AMsMyM7H9v9q2HbUtfgLEbIKzpE2HA/rU5t0NWXFi8ofP0dnpTMVE1iS6XCwU854K6aOmoFdAKGT
+X-Received: by 2002:a17:90b:4ac6:b0:213:ef82:b111 with SMTP id mh6-20020a17090b4ac600b00213ef82b111mr43644956pjb.170.1667893878123;
+        Mon, 07 Nov 2022 23:51:18 -0800 (PST)
+ARC-Seal: i=1; a=rsa-sha256; t=1667893878; cv=none;
+        d=google.com; s=arc-20160816;
+        b=kna37LD/XkkyCuF2pr6yqCft1v3+68UKvkcTDqgwys4t5BG8Nf/Wy8Yds2g3K3QizJ
+         t142Y3gHsRkWPrjrcNUkx7udVx90nb71uOVNkkcqLxwlWNSSp1ob5GsdyijKBqvC1+sW
+         MJaenWq8fymomRGMpH8FxoeJCnp+Kl3N6gFJ5Js7d5X11JqGSxUrU9fC0NmPx6Wn+IOx
+         f/mxC87fM6RTYeTyMiDeNiBve8S/RBj4mkr1MMo9xhA795Wa3SVVA2Ry3RSrg3BmOOUL
+         fX6mY0XAahlLvALABgOdCGXupQ6oT8wZWE1y77zSpC+NAGXeAFHF6MczR2ImHV8i2Crg
+         SObA==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20160816;
+        h=sender:errors-to:content-transfer-encoding:mime-version
+         :list-subscribe:list-help:list-post:list-archive:list-unsubscribe
+         :list-id:precedence:subject:archived-at:date:message-id:user-agent
+         :to:from:autocrypt:dkim-signature:delivered-to:dkim-signature
+         :dkim-signature;
+        bh=wA8UHicgWC9Xhbg+MPaDDXiNuk7OpeLzC4PgU7LJ3mQ=;
+        b=0nKy4Nn+8nEVYv5YYtFjBFSi3BwcNSeqcf1t9IOA7le6cQG7QI/M33po0jAXzgOs76
+         UaQ3Pg9K/ORHImUIOqWTHwXBK2ROYEVKoW/Z4Gezci76/LAy6gZCpourr+wVN5S5owWy
+         W2obi6q+wIaemywp1Ky+WZKlQjF8ruuviyPWUwZCk414fk8n1RChWWDW/6X1nZWNHXjj
+         o2qXzlcYIIoptcsfQrbKZiTwzvad/c+dHZdd8NTTCdEkw0DwAWcjIMflDllv5Fyd2pL5
+         7DVuyNqgrNIJPR13Gd0iYjR5bUujKcPDNz/xxMHmoj65LRWMtAkwEv8047PL/4nL7F3z
+         2QYg==
+ARC-Authentication-Results: i=1; mx.google.com;
+       dkim=pass header.i=@ietf.org header.s=ietf1 header.b=jqktrzno;
+       dkim=pass header.i=@ietf.org header.s=ietf1 header.b=jqktrzno;
+       dkim=neutral (body hash did not verify) header.i=@stalw.art header.s=velikisrpan22 header.b=QS+O8z2Y;
+       spf=pass (google.com: domain of jmap-bounces@ietf.org designates 50.223.129.194 as permitted sender) smtp.mailfrom=jmap-bounces@ietf.org;
+       dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=stalw.art
+Return-Path: <jmap-bounces@ietf.org>
+Received: from mail.ietf.org (mail.ietf.org. [50.223.129.194])
+        by mx.google.com with ESMTPS id r7-20020a1709028bc700b0018862b71d11si11837558plo.381.2022.11.07.23.51.17
+        for <mauro@degennaro.me>
+        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
+        Mon, 07 Nov 2022 23:51:18 -0800 (PST)
+Received-SPF: pass (google.com: domain of jmap-bounces@ietf.org designates 50.223.129.194 as permitted sender) client-ip=50.223.129.194;
+Authentication-Results: mx.google.com;
+       dkim=pass header.i=@ietf.org header.s=ietf1 header.b=jqktrzno;
+       dkim=pass header.i=@ietf.org header.s=ietf1 header.b=jqktrzno;
+       dkim=neutral (body hash did not verify) header.i=@stalw.art header.s=velikisrpan22 header.b=QS+O8z2Y;
+       spf=pass (google.com: domain of jmap-bounces@ietf.org designates 50.223.129.194 as permitted sender) smtp.mailfrom=jmap-bounces@ietf.org;
+       dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=stalw.art
+Received: from ietfa.amsl.com (localhost [IPv6:::1])
+	by ietfa.amsl.com (Postfix) with ESMTP id C3412C1594A9
+	for <mauro@degennaro.me>; Mon,  7 Nov 2022 23:51:12 -0800 (PST)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
+	t=1667893872; bh=wA8UHicgWC9Xhbg+MPaDDXiNuk7OpeLzC4PgU7LJ3mQ=;
+	h=From:To:Date:Subject:List-Id:List-Unsubscribe:List-Archive:
+	 List-Post:List-Help:List-Subscribe;
+	b=jqktrznoU8Iz7FoLfnsYk4u/B9QBL03ucKxKgmOvKUS6pHQJYJfjuH3FlIcHQ1SeA
+	 rpuTCZRhEQnaNKMac7AG7LCiOug5ru778NhrNRq97Ch2j4EsSlVoMzuofsq5pzEJkS
+	 3dticx06Z1dRvUzv4bSi7C26Ju1E7PJTSxoizmFU=
+X-Mailbox-Line: From jmap-bounces@ietf.org  Mon Nov  7 23:51:12 2022
+Received: from ietfa.amsl.com (localhost [IPv6:::1])
+	by ietfa.amsl.com (Postfix) with ESMTP id 45785C14CE26;
+	Mon,  7 Nov 2022 23:51:12 -0800 (PST)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
+	t=1667893872; bh=wA8UHicgWC9Xhbg+MPaDDXiNuk7OpeLzC4PgU7LJ3mQ=;
+	h=From:To:Date:Subject:List-Id:List-Unsubscribe:List-Archive:
+	 List-Post:List-Help:List-Subscribe;
+	b=jqktrznoU8Iz7FoLfnsYk4u/B9QBL03ucKxKgmOvKUS6pHQJYJfjuH3FlIcHQ1SeA
+	 rpuTCZRhEQnaNKMac7AG7LCiOug5ru778NhrNRq97Ch2j4EsSlVoMzuofsq5pzEJkS
+	 3dticx06Z1dRvUzv4bSi7C26Ju1E7PJTSxoizmFU=
+X-Original-To: jmap@ietfa.amsl.com
+Delivered-To: jmap@ietfa.amsl.com
+Received: from localhost (localhost [127.0.0.1])
+ by ietfa.amsl.com (Postfix) with ESMTP id AFF62C14CE26
+ for <jmap@ietfa.amsl.com>; Mon,  7 Nov 2022 23:51:10 -0800 (PST)
+X-Virus-Scanned: amavisd-new at amsl.com
+X-Spam-Flag: NO
+X-Spam-Score: -7.107
+X-Spam-Level: 
+X-Spam-Status: No, score=-7.107 tagged_above=-999 required=5
+ tests=[BAYES_00=-1.9, DKIM_SIGNED=0.1, DKIM_VALID=-0.1,
+ DKIM_VALID_AU=-0.1, DKIM_VALID_EF=-0.1, RCVD_IN_DNSWL_HI=-5,
+ RCVD_IN_ZEN_BLOCKED_OPENDNS=0.001, SPF_PASS=-0.001,
+ T_SCC_BODY_TEXT_LINE=-0.01, URIBL_BLOCKED=0.001,
+ URIBL_DBL_BLOCKED_OPENDNS=0.001, URIBL_ZEN_BLOCKED_OPENDNS=0.001]
+ autolearn=ham autolearn_force=no
+Authentication-Results: ietfa.amsl.com (amavisd-new); dkim=pass (2048-bit key)
+ header.d=stalw.art
+Received: from mail.ietf.org ([50.223.129.194])
+ by localhost (ietfa.amsl.com [127.0.0.1]) (amavisd-new, port 10024)
+ with ESMTP id C2BYC56k_5K8 for <jmap@ietfa.amsl.com>;
+ Mon,  7 Nov 2022 23:51:05 -0800 (PST)
+Received: from london.stalw.art (london.stalw.art [159.65.62.60])
+ (using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+ key-exchange X25519 server-signature RSA-PSS (2048 bits) server-digest SHA256)
+ (No client certificate requested)
+ by ietfa.amsl.com (Postfix) with ESMTPS id 72103C14F741
+ for <jmap@ietf.org>; Mon,  7 Nov 2022 23:51:05 -0800 (PST)
+Received: from mail.stalw.art (mail.stalw.art [135.181.195.209])
+ (using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits))
+ (No client certificate requested)
+ by london.stalw.art (Postfix) with ESMTPS id C2FAE3F0AC
+ for <jmap@ietf.org>; Tue,  8 Nov 2022 07:51:03 +0000 (UTC)
+DKIM-Signature: v=1; a=rsa-sha256; s=velikisrpan22; d=stalw.art;
+ c=relaxed/relaxed;
+ h=date:message-id:to:subject:from:Cc:Bcc:References:In-Reply-To; t=1667893863; 
+ bh=OgTMiNFUgqZ1Y0qvWdQiRZ7Fe12y4IcgtcFne3tQlUM=;
+ b=QS+O8z2YkUFZwXgnAC9gxSzsamA5iE/L/HzjiehekjILOeHKytKiWzDOXSLiVZeQvS1jC+k8A0DNcaPVMFiXZ8iwC3H5RQa3KPDOMLrNYK82uHoackFqB9UrZtDm2yz6x0w04J2rof5S+XOxa7Wqm+f7a008u5dlwwNxPjLOHdPMlxKo/3ZTfJa26eYl5AMXKH4kRVto7cQV+WVm8oYDzA7lS97JRxCLCXAovdBmehI/XSXd6GOOcAmQJAN1bHyBpia/Gt61NfpJ+y25lK+IKc7ZqmYCsLwztN+3orKOCHigaHNS+C0FfvZo3G24wfglaOX3AE4phkuW7lhpWwa1cA==;
+Autocrypt: addr=mauro@stalw.art; prefer-encrypt=nopreference;
+ keydata=mDMEYw77lxYJKwYBBAHaRw8BAQdAXoROXGL/auLEnTdUp9JPJ2MlfIpnOc/DGSRprXaKryG0EjxNYXVybyBEZSBHZW5uYXJvPoiPBBMWCgBBBQJjDvuXCZAJcspuD/KHohahBMtFbXLNqpcZ95UX2glyym4P8oeiAp4BApsDBZYCAwEABIsJCAcFlQoJCAsCmQEAAHzCAQCjGZc0pYF7AaKemBHP/BXNCNeOWg0v7NKsrDf1ItTK5gD/YBzT4ePnHkGId1hxKMGwo+ZsDpmKrXNXj7PeZOfh1wm4OARjDvuXEgorBgEEAZdVAQUBAQdAln5xUkpaUagWqVdrM3gPOnwJRhvavS+BGmlNl1PxrC8DAQgHiHUEGBYKAB0FAmMO+5cCngECmwwFlgIDAQAEiwkIBwWVCgkICwAKCRAJcspuD/KHohbaAQCsTAfZaxVuF0/bFd8771DNKbkNOwCIC58biiavdp1D6QEAtYhO2PRKOOovJejHOKFaqKRPhiYqRtUFfbENLZ59QgY=
+From: "Mauro De Gennaro" <mauro@stalw.art>
+To: <jmap@ietf.org>
+User-Agent: Ltt.rs/0.3.3
+Message-ID: <17258ca1bcf59bd3.d24f3c69e7e135b9.c637457d878ae815@mail.stalw.art>
+Date: Tue, 8 Nov 2022 07:51:03 +0000
+Archived-At: <https://mailarchive.ietf.org/arch/msg/jmap/f9idfPvvfIYguyVhzx3WuiAsuSM>
+Subject: [Jmap] Script deactivation in JMAP for Sieve
+X-BeenThere: jmap@ietf.org
+X-Mailman-Version: 2.1.39
+Precedence: list
+List-Id: JSON Message Access Protocol <jmap.ietf.org>
+List-Unsubscribe: <https://www.ietf.org/mailman/options/jmap>,
+ <mailto:jmap-request@ietf.org?subject=unsubscribe>
+List-Archive: <https://mailarchive.ietf.org/arch/browse/jmap/>
+List-Post: <mailto:jmap@ietf.org>
+List-Help: <mailto:jmap-request@ietf.org?subject=help>
+List-Subscribe: <https://www.ietf.org/mailman/listinfo/jmap>,
+ <mailto:jmap-request@ietf.org?subject=subscribe>
+MIME-Version: 1.0
+Content-Type: text/plain; charset="us-ascii"
+Content-Transfer-Encoding: 7bit
+Errors-To: jmap-bounces@ietf.org
+Sender: "Jmap" <jmap-bounces@ietf.org>
+
+Hi,
+
+In the latest JMAP for Sieve draft, the currently active script is deactivated by sending a SieveScript/set request including the onSuccessActivateScript: "" argument.
+This syntax was probably chosen to be aligned with ManageSieve, but it feels a bit unidiomatic in a JMAP API.
+
+I would like to propose using a syntax similar to EmailSubmission/set and having two separate arguments, one for activating scripts and another one for deactivating them, for instance:
+
+onSuccessActivateScript: Id
+onSuccessDeactivateScripts: true
+
+- or -
+
+onSuccessActivateScript: Id
+onSuccessDeactivateScript: Id
+
+
+
+Thanks,
+Mauro De Gennaro
+Stalwart Labs, Ltd.
+
+_______________________________________________
+Jmap mailing list
+Jmap@ietf.org
+https://www.ietf.org/mailman/listinfo/jmap

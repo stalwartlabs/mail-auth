@@ -12,10 +12,11 @@ use super::{Alignment, Format, Policy, Report, DMARC, URI};
 impl TxtRecordParser for DMARC {
     fn parse(bytes: &[u8]) -> crate::Result<Self> {
         let mut record = bytes.iter();
-        if record.key().unwrap_or(0) != V {
-            return Err(Error::InvalidRecord);
-        } else if !record.match_bytes(b"DMARC1") || !record.seek_tag_end() {
-            return Err(Error::InvalidVersion);
+        if record.key().unwrap_or(0) != V
+            || !record.match_bytes(b"DMARC1")
+            || !record.seek_tag_end()
+        {
+            return Err(Error::InvalidRecordType);
         }
 
         let mut dmarc = DMARC {
