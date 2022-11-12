@@ -38,7 +38,7 @@ pub struct Resolver {
     pub(crate) cache_ipv6: LruCache<String, Arc<Vec<Ipv6Addr>>>,
     pub(crate) cache_ptr: LruCache<IpAddr, Arc<Vec<String>>>,
     pub(crate) host_domain: Vec<u8>,
-    pub(crate) verify_helo: bool,
+    pub(crate) verify_policy: Policy,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +54,13 @@ pub(crate) enum Txt {
 pub struct MX {
     exchange: String,
     preference: u16,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Policy {
+    Relaxed,
+    Strict,
+    VeryStrict,
 }
 
 #[derive(Debug, Clone)]
@@ -113,10 +120,6 @@ pub enum Error {
     ARCBrokenChain,
 
     InvalidRecordType,
-
-    InvalidIp4,
-    InvalidIp6,
-    InvalidMacro,
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -154,9 +157,6 @@ impl Display for Error {
             Error::ARCHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal."),
             Error::ARCBrokenChain => write!(f, "Broken or missing ARC chain."),
             Error::InvalidRecordType => write!(f, "Invalid record."),
-            Error::InvalidIp4 => write!(f, "Invalid IPv4."),
-            Error::InvalidIp6 => write!(f, "Invalid IPv6."),
-            Error::InvalidMacro => write!(f, "Invalid SPF macro."),
             Error::DNSError => write!(f, "DNS resolution error."),
             Error::DNSRecordNotFound(code) => write!(f, "DNS record not found: {}.", code),
         }

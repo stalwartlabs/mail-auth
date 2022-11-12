@@ -1,0 +1,43 @@
+# Mechanisms after "all" will never be tested.  Mechanisms listed after
+# "all" MUST be ignored.  Any "redirect" modifier (Section 6.1) MUST be
+# ignored when there is an "all" mechanism in the record, regardless of
+# the relative ordering of the terms.
+
+name: All test
+records:
+  spf: test.org v=spf1 -all ip:10.0.0.1
+  spf: redir.test.org v=spf1 ?all redirect=test.org
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 10.0.0.1
+    expect: fail
+  - domain: redir.test.org
+    sender: sender@redir.test.org
+    ip: 10.0.0.1
+    expect: neutral
+
+---
+name: All modifiers
+records:
+  spf: pass.test.org v=spf1 +all
+  spf: neutral.test.org v=spf1 ?all
+  spf: fail.test.org v=spf1 -all
+  spf: softfail.test.org v=spf1 ~all
+tests:
+  - domain: pass.test.org
+    sender: sender@pass.test.org
+    ip: 10.0.0.1
+    expect: pass
+  - domain: neutral.test.org
+    sender: sender@neutral.test.org
+    ip: 10.0.0.1
+    expect: neutral
+  - domain: fail.test.org
+    sender: sender@fail.test.org
+    ip: 10.0.0.1
+    expect: fail
+  - domain: softfail.test.org
+    sender: sender@softfail.test.org
+    ip: 10.0.0.1
+    expect: softfail

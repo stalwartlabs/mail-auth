@@ -1,0 +1,94 @@
+name: A record match
+records:
+  a: test.org 192.168.1.5, 192.168.1.6, 192.168.1.7
+  a: mx.test.org 10.0.0.1, 10.0.0.2, 10.0.0.3
+  spf: test.org v=spf1 a a:mx.test.org -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.4
+    expect: fail
+  - domain: test.org
+    sender: sender@test.org
+    ip: 10.0.0.1
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 10.0.0.4
+    expect: fail
+
+---
+name: A record match with mask
+records:
+  a: test.org 192.168.1.5, 192.168.1.6, 192.168.1.7
+  a: mx.test.org 10.0.0.1, 10.0.0.2, 10.0.0.3
+  spf: test.org v=spf1 a/24 a:mx.test.org/8 -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.100
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.3.1
+    expect: fail
+  - domain: test.org
+    sender: sender@test.org
+    ip: 10.1.2.3
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 9.0.0.4
+    expect: fail
+
+---
+name: AAAA record match
+records:
+  aaaa: test.org a:b::c:a, a:b::c:b, a:b::c:c
+  aaaa: mx.test.org FF01::100, FF01::101, FF01::102
+  spf: test.org v=spf1 a a:mx.test.org -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: a:b::c:a
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: a:b::c:1
+    expect: fail
+  - domain: test.org
+    sender: sender@test.org
+    ip: FF01::100
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: FF01::103
+    expect: fail
+
+---
+name: AAAA record match with mask
+records:
+  aaaa: test.org a:b::c:a, a:b::c:b, a:b::c:c
+  aaaa: mx.test.org FF01::100, FF01::101, FF01::102
+  spf: test.org v=spf1 a//32 a:mx.test.org/32//16 -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: a:b::f:f
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: a:c::1
+    expect: fail
+  - domain: test.org
+    sender: sender@test.org
+    ip: FF01::a:b:c:100
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: FF02::103
+    expect: fail

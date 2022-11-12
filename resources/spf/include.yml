@@ -1,0 +1,182 @@
+
+# +---------------------------------+---------------------------------+
+# | A recursive check_host() result | Causes the "include" mechanism  |
+# | of:                             | to:                             |
+# +---------------------------------+---------------------------------+
+# | pass                            | match                           |
+# | fail                            | not match                       |
+# | softfail                        | not match                       |
+# | neutral                         | not match                       |
+# | temperror                       | return temperror                |
+# | permerror                       | return permerror                |
+# | none                            | return permerror                |
+# +---------------------------------+---------------------------------+
+
+name: Include match
+records:
+  spf: pass.test.org v=spf1 +all
+  spf: fail.test.org v=spf1 -all
+  spf: softfail.test.org v=spf1 ~all
+  spf: neutral.test.org v=spf1 ?all
+  spf: permerror.test.org v=spf1 +all/32
+  spf: include.pass.test.org v=spf1 include:pass.test.org -all
+  spf: include.fail.test.org v=spf1 include:fail.test.org +all
+  spf: include.softfail.test.org v=spf1 include:softfail.test.org -all
+  spf: include.neutral.test.org v=spf1 include:neutral.test.org -all
+  spf: include.permerror.test.org v=spf1 include:permerror.test.org -all
+  spf: include.temperror.test.org v=spf1 include:_dns_error.test.org -all
+  spf: include.none.test.org v=spf1 include:unknown.test.org -all
+tests:
+  - domain: include.pass.test.org
+    sender: sender@include.pass.test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: include.fail.test.org
+    sender: sender@include.fail.test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: include.softfail.test.org
+    sender: sender@include.softfail.test.org
+    ip: 192.168.1.5
+    expect: fail
+  - domain: include.neutral.test.org
+    sender: sender@include.neutral.test.org
+    ip: 192.168.1.5
+    expect: fail
+  - domain: include.permerror.test.org
+    sender: sender@include.permerror.test.org
+    ip: 192.168.1.5
+    expect: permerror
+  - domain: include.temperror.test.org
+    sender: sender@include.temperror.test.org
+    ip: 192.168.1.5
+    expect: temperror
+  - domain: include.none.test.org
+    sender: sender@include.none.test.org
+    ip: 192.168.1.5
+    expect: permerror
+
+---
+name: Include recursive
+records:
+  spf: inc1.test.org v=spf1 include:inc2.test.org -all
+  spf: inc2.test.org v=spf1 include:inc3.test.org -all
+  spf: inc3.test.org v=spf1 include:inc4.test.org -all
+  spf: inc4.test.org v=spf1 ip4:192.168.1.5 -all
+  spf: test.org v=spf1 include:inc1.test.org
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.6
+    expect: neutral
+
+---
+name: Include recursive mixed
+records:
+  spf: inc1.test.org v=spf1 ip4:192.168.1.2 include:inc2.test.org ip4:192.168.1.3 -all
+  spf: inc2.test.org v=spf1 ip4:192.168.1.4 include:inc3.test.org ip4:192.168.1.5 -all
+  spf: inc3.test.org v=spf1 ip4:192.168.1.6 include:inc4.test.org ip4:192.168.1.7 -all
+  spf: inc4.test.org v=spf1 ip4:192.168.1.8 -all
+  spf: test.org v=spf1 include:inc1.test.org ip4:192.168.1.1 -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.1
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.2
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.3
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.4
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.6
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.7
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.8
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.9
+    expect: fail
+
+---
+name: Include recursive multiple
+records:
+  spf: inc1.test.org v=spf1 ip4:192.168.1.4 include:inc2.test.org ip4:192.168.1.5 -all
+  spf: inc2.test.org v=spf1 ip4:192.168.1.6 -all
+  spf: inc3.test.org v=spf1 ip4:192.168.1.7 include:inc4.test.org ip4:192.168.1.8 -all
+  spf: inc4.test.org v=spf1 ip4:192.168.1.9 -all
+  spf: test.org v=spf1 ip4:192.168.1.1 include:inc1.test.org ip4:192.168.1.2 include:inc3.test.org ip4:192.168.1.3 -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.1
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.2
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.3
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.4
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.6
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.7
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.8
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.9
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.10
+    expect: fail
+
+---
+name: Include loop
+records:
+  spf: test.org v=spf1 include:test.org
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.2
+    expect: permerror
+

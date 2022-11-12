@@ -315,7 +315,7 @@ impl SPFParser for Iter<'_, u8> {
                                 Variable::parse_exp(l)
                             }
                         })
-                        .ok_or(Error::InvalidMacro)?;
+                        .ok_or(Error::ParseError)?;
                     let mut num_parts: u32 = 0;
                     let mut reverse = false;
                     let mut delimiters = 0;
@@ -337,7 +337,7 @@ impl SPFParser for Iter<'_, u8> {
                                 delimiters |= 1u64 << (ch - b'+');
                             }
                             _ => {
-                                return Err(Error::InvalidMacro);
+                                return Err(Error::ParseError);
                             }
                         }
                     }
@@ -360,7 +360,7 @@ impl SPFParser for Iter<'_, u8> {
                 }
                 _ => {
                     if last_is_pct {
-                        return Err(Error::InvalidMacro);
+                        return Err(Error::ParseError);
                     } else if !ch.is_ascii_whitespace() || is_exp {
                         literal.push(ch);
                     } else {
@@ -406,7 +406,7 @@ impl SPFParser for Iter<'_, u8> {
         if pos == 3 {
             Ok((Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]), stop_char))
         } else {
-            Err(Error::InvalidIp4)
+            Err(Error::ParseError)
         }
     }
 
@@ -426,7 +426,7 @@ impl SPFParser for Iter<'_, u8> {
                         ip_part[ip_part_pos] = ch;
                         ip_part_pos += 1;
                     } else {
-                        return Err(Error::InvalidIp6);
+                        return Err(Error::ParseError);
                     }
                 }
                 b':' => {
@@ -436,16 +436,16 @@ impl SPFParser for Iter<'_, u8> {
                                 std::str::from_utf8(&ip_part[..ip_part_pos]).unwrap(),
                                 16,
                             )
-                            .map_err(|_| Error::InvalidIp6)?;
+                            .map_err(|_| Error::ParseError)?;
                             ip_part_pos = 0;
                             ip_pos += 1;
                         } else if zero_group_pos == usize::MAX {
                             zero_group_pos = ip_pos;
                         } else if zero_group_pos != ip_pos {
-                            return Err(Error::InvalidIp6);
+                            return Err(Error::ParseError);
                         }
                     } else {
-                        return Err(Error::InvalidIp6);
+                        return Err(Error::ParseError);
                     }
                 }
                 b'.' => {
@@ -453,7 +453,7 @@ impl SPFParser for Iter<'_, u8> {
                         let qnum = std::str::from_utf8(&ip_part[..ip_part_pos])
                             .unwrap()
                             .parse::<u8>()
-                            .map_err(|_| Error::InvalidIp6)?
+                            .map_err(|_| Error::ParseError)?
                             as u16;
                         ip_part_pos = 0;
                         if ip4_pos % 2 == 1 {
@@ -464,7 +464,7 @@ impl SPFParser for Iter<'_, u8> {
                         }
                         ip4_pos += 1;
                     } else {
-                        return Err(Error::InvalidIp6);
+                        return Err(Error::ParseError);
                     }
                 }
                 _ => {
@@ -478,20 +478,20 @@ impl SPFParser for Iter<'_, u8> {
             if ip_pos < 8 {
                 ip[ip_pos] = if ip4_pos == 0 {
                     u16::from_str_radix(std::str::from_utf8(&ip_part[..ip_part_pos]).unwrap(), 16)
-                        .map_err(|_| Error::InvalidIp6)?
+                        .map_err(|_| Error::ParseError)?
                 } else if ip4_pos == 3 {
                     (ip[ip_pos] << 8)
                         | std::str::from_utf8(&ip_part[..ip_part_pos])
                             .unwrap()
                             .parse::<u8>()
-                            .map_err(|_| Error::InvalidIp6)? as u16
+                            .map_err(|_| Error::ParseError)? as u16
                 } else {
-                    return Err(Error::InvalidIp6);
+                    return Err(Error::ParseError);
                 };
 
                 ip_pos += 1;
             } else {
-                return Err(Error::InvalidIp6);
+                return Err(Error::ParseError);
             }
         }
         if zero_group_pos != usize::MAX && zero_group_pos < ip_pos {
@@ -499,7 +499,7 @@ impl SPFParser for Iter<'_, u8> {
                 ip.copy_within(zero_group_pos..ip_pos, zero_group_pos + 8 - ip_pos);
                 ip[zero_group_pos..zero_group_pos + 8 - ip_pos].fill(0);
             } else {
-                return Err(Error::InvalidIp6);
+                return Err(Error::ParseError);
             }
         }
 
@@ -509,7 +509,7 @@ impl SPFParser for Iter<'_, u8> {
                 stop_char,
             ))
         } else {
-            Err(Error::InvalidIp6)
+            Err(Error::ParseError)
         }
     }
 
@@ -1294,6 +1294,7 @@ mod test {
             "2001:DB8::8:800:200C:417A",
             "2001:DB8:0:0:8:800:200C::",
             "FF01::101",
+            "1234::",
             "::1",
             "::",
             "a:b::c:d",

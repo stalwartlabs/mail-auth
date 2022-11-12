@@ -7,6 +7,8 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
+use crate::SPFResult;
+
 /*
       "+" pass
       "-" fail
@@ -152,5 +154,37 @@ impl Mechanism {
             Mechanism::Mx { macro_string, .. } => macro_string.needs_ptr(),
             Mechanism::Exists { macro_string } => macro_string.needs_ptr(),
         }
+    }
+}
+
+impl TryFrom<&str> for SPFResult {
+    type Error = ();
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        if value.eq_ignore_ascii_case("pass") {
+            Ok(SPFResult::Pass)
+        } else if value.eq_ignore_ascii_case("fail") {
+            Ok(SPFResult::Fail(String::new()))
+        } else if value.eq_ignore_ascii_case("softfail") {
+            Ok(SPFResult::SoftFail)
+        } else if value.eq_ignore_ascii_case("neutral") {
+            Ok(SPFResult::Neutral)
+        } else if value.eq_ignore_ascii_case("temperror") {
+            Ok(SPFResult::TempError)
+        } else if value.eq_ignore_ascii_case("permerror") {
+            Ok(SPFResult::PermError)
+        } else if value.eq_ignore_ascii_case("none") {
+            Ok(SPFResult::None)
+        } else {
+            Err(())
+        }
+    }
+}
+
+impl TryFrom<String> for SPFResult {
+    type Error = ();
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        TryFrom::try_from(value.as_str())
     }
 }

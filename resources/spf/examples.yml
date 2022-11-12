@@ -1,0 +1,158 @@
+---
+name: Simple Examples
+records:
+  mx: example.com 192.0.2.129, 192.0.2.130
+  a: mail-a.example.com 192.0.2.129
+  a: mail-b.example.com 192.0.2.130
+  a: amy.example.com 192.0.2.65
+  a: bob.example.com 192.0.2.66
+  a: www.example.com 192.0.2.10, 192.0.2.11
+  a: example.com 192.0.2.10, 192.0.2.11
+  a: mail-c.example.org 192.0.2.140
+  mx: example.org 192.0.2.140
+  ptr: 192.0.2.10 example.com
+  ptr: 192.0.2.11 example.com
+  ptr: 192.0.2.65 amy.example.com
+  ptr: 192.0.2.66 bob.example.com
+  ptr: 192.0.2.129 mail-a.example.com
+  ptr: 192.0.2.130 mail-b.example.com
+  ptr: 192.0.2.140 mail-c.example.org
+  ptr: 10.0.0.4 bob.example.com
+tests:
+  - sender: user@example.com
+    domain: example.com
+
+  - name: any <ip> passes
+    spf: example.com v=spf1 +all
+    ip: 172.168.0.1
+    expect: pass
+    ip: 10.1.1.1
+    expect: pass
+
+  - name: hosts 192.0.2.10 and 192.0.2.11 pass
+    spf: example.com v=spf1 a -all
+    ip: 192.0.2.10
+    expect: pass
+    ip: 192.0.2.11
+    expect: pass
+    ip: 192.0.2.12
+    expect: fail
+
+  - name: no sending hosts pass since example.org has no A records
+    spf: example.com v=spf1 a:example.org -all
+    ip: 192.0.2.10
+    expect: fail
+    ip: 192.0.2.11
+    expect: fail
+    ip: 192.0.2.12
+    expect: fail   
+
+  - name: sending hosts 192.0.2.129 and 192.0.2.130 pass
+    spf: example.com v=spf1 mx -all
+    ip: 192.0.2.129
+    expect: pass
+    ip: 192.0.2.130
+    expect: pass
+    ip: 192.0.2.12
+    expect: fail   
+
+  - name: sending host 192.0.2.140 passes
+    spf: example.com v=spf1 mx:example.org -all
+    ip: 192.0.2.140
+    expect: pass
+    ip: 192.0.2.130
+    expect: fail
+    ip: 192.0.2.12
+    expect: fail   
+
+  - name: sending hosts 192.0.2.129, 192.0.2.130, and 192.0.2.140 pass
+    spf: example.com v=spf1 mx mx:example.org -all
+    ip: 192.0.2.129
+    expect: pass
+    ip: 192.0.2.130
+    expect: pass
+    ip: 192.0.2.140
+    expect: pass   
+    ip: 192.0.2.12
+    expect: fail   
+
+  - name: any sending host in 192.0.2.128/30 or 192.0.2.140/30 passes
+    spf: example.com v=spf1 mx/30 mx:example.org/30 -all
+    ip: 192.0.2.128
+    expect: pass
+    ip: 192.0.2.140
+    expect: pass   
+    ip: 192.0.2.12
+    expect: fail   
+
+  - name: sending host 192.0.2.65 passes, 192.0.2.140 fails and 10.0.0.4 fails
+    spf: example.com v=spf1 ptr -all
+    ip: 192.0.2.65
+    expect: pass
+    ip: 192.0.2.140
+    expect: fail
+    ip: 10.0.0.4
+    expect: fail   
+
+  - name: sending host 192.0.2.65 fails, 192.0.2.129 passes
+    spf: example.com v=spf1 ip4:192.0.2.128/28 -all
+    ip: 192.0.2.65
+    expect: fail
+    ip: 192.0.2.129
+    expect: pass   
+    ip: 10.0.0.4
+    expect: fail   
+
+  - name: Multiple Domain
+    spf: example.com v=spf1 ip4:192.0.2.128/28 -all
+    spf: example.net v=spf1 ip4:10.0.0.5 -all
+    spf: example.org v=spf1 include:example.com include:example.net -all
+    spf: la.example.org v=spf1 redirect=example.org
+    spf: ny.example.org v=spf1 redirect=example.org
+    spf: sf.example.org v=spf1 redirect=example.org
+    domain: sf.example.org
+    sender: tom@sf.example.org
+    ip: 192.0.2.129
+    expect: pass   
+    ip: 10.0.0.4
+    expect: fail   
+
+  - name: DNS Blacklist (DNSBL) Style Example
+    a: mary.mobile-users._spf.example.com 127.0.0.2
+    a: fred.mobile-users._spf.example.com 127.0.0.2
+    a: 15.15.168.192.joel.remote-users._spf.example.com 127.0.0.2
+    a: 16.15.168.192.joel.remote-users._spf.example.com 127.0.0.2
+    spf: mx.example.com v=spf1 +all
+    spf: example.com v=spf1 mx include:mobile-users._spf.%{d} include:remote-users._spf.%{d} -all
+    spf: mobile-users._spf.example.com v=spf1 exists:%{l1r+}.%{d}
+    spf: remote-users._spf.example.com v=spf1 exists:%{ir}.%{l1r+}.%{d}
+    ip: 192.168.15.15
+    domain: mx.example.com
+    sender: joel@example.com
+    expect: pass
+    ip: 192.168.15.16
+    domain: mx.example.com
+    sender: joel@example.com
+    expect: pass
+    ip: 192.168.15.17
+    domain: mx.example.com
+    sender: joel@example.com
+    expect: fail
+    ip: 1.1.1.1
+    domain: mx.example.com
+    sender: mary@example.com
+    expect: pass
+
+  - name: Multiple Requirements Example
+    a: mx.domain.com 192.0.2.1
+    ptr: 192.0.2.1 mx.domain.com
+    spf: mx.domain.com v=spf1 +all
+    spf: example.com v=spf1 -include:ip4._spf.%{d} -include:ptr._spf.%{d} +all
+    spf: ip4._spf.example.com v=spf1 -ip4:192.0.2.0/24 +all
+    spf: ptr._spf.example.com v=spf1 -ptr +all
+    domain: mx.example.com
+    sender: mary@example.com
+    ip: 192.0.2.1
+    expect: pass
+    #ip: 192.0.2.2
+    #expect: fail

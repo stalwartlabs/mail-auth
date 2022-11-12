@@ -3,7 +3,12 @@ use std::{borrow::Cow, net::IpAddr, time::SystemTime};
 use super::{Macro, Variable, Variables};
 
 impl Macro {
-    pub fn eval<'z, 'x: 'z>(&'z self, vars: &'x Variables<'x>, default: &'x str) -> Cow<'z, str> {
+    pub fn eval<'z, 'x: 'z>(
+        &'z self,
+        vars: &'x Variables<'x>,
+        default: &'x str,
+        fqdn: bool,
+    ) -> Cow<'z, str> {
         match self {
             Macro::Literal(literal) => std::str::from_utf8(literal).unwrap_or_default().into(),
             Macro::Variable {
@@ -12,7 +17,7 @@ impl Macro {
                 reverse,
                 escape,
                 delimiters,
-            } => match vars.get(*letter, *num_parts, *reverse, *escape, *delimiters) {
+            } => match vars.get(*letter, *num_parts, *reverse, *escape, fqdn, *delimiters) {
                 Cow::Borrowed(bytes) => std::str::from_utf8(bytes).unwrap_or_default().into(),
                 Cow::Owned(bytes) => String::from_utf8(bytes).unwrap_or_default().into(),
             },
@@ -31,12 +36,22 @@ impl Macro {
                             delimiters,
                         } => {
                             result.extend_from_slice(
-                                vars.get(*letter, *num_parts, *reverse, *escape, *delimiters)
-                                    .as_ref(),
+                                vars.get(
+                                    *letter,
+                                    *num_parts,
+                                    *reverse,
+                                    *escape,
+                                    false,
+                                    *delimiters,
+                                )
+                                .as_ref(),
                             );
                         }
                         Macro::List(_) | Macro::None => unreachable!(),
                     }
+                }
+                if fqdn && !result.is_empty() && result.last().unwrap() != &b'.' {
+                    result.push(b'.');
                 }
                 String::from_utf8(result).unwrap_or_default().into()
             }
@@ -134,6 +149,7 @@ impl<'x> Variables<'x> {
         num_parts: u32,
         reverse: bool,
         escape: bool,
+        fqdn: bool,
         delimiters: u64,
     ) -> Cow<'_, [u8]> {
         let var = self.vars[name as usize].as_ref();
@@ -170,6 +186,9 @@ impl<'x> Variables<'x> {
             for (pos, part) in parts.iter().rev().skip(parts.len() - num_parts).enumerate() {
                 add_part(&mut result, part, pos, escape);
             }
+        }
+        if fqdn && result.last().unwrap_or(&0) != &b'.' {
+            result.push(b'.');
         }
         result.into()
     }
@@ -244,7 +263,7 @@ mod test {
             ),
         ] {
             let (m, _) = macro_string.as_bytes().iter().macro_string(false).unwrap();
-            assert_eq!(m.eval(&vars, ""), expansion, "{:?}", macro_string);
+            assert_eq!(m.eval(&vars, "", false), expansion, "{:?}", macro_string);
         }
 
         let mut vars = Variables::new();
@@ -275,7 +294,7 @@ mod test {
             ),
         ] {
             let (m, _) = macro_string.as_bytes().iter().macro_string(true).unwrap();
-            assert_eq!(m.eval(&vars, ""), expansion, "{:?}", macro_string);
+            assert_eq!(m.eval(&vars, "", false), expansion, "{:?}", macro_string);
         }
     }
 }

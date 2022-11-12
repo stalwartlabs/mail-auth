@@ -1,0 +1,62 @@
+name: IPv4 match
+records:
+  spf: test.org v=spf1 ip4:192.168.1.5 ip4:192.168.1.6/32 ip4:192.168.2.0/24 ip4:10.0.0.0/8 -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.6
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.2.123
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 10.1.2.3
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: ::10.1.2.3
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 9.1.2.3
+    expect: fail
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.4
+    expect: fail
+
+---
+name: IPv6 match
+records:
+  spf: test.org v=spf1 ip6:ABCD:EF01:2345:6789:ABCD:EF01:2345:6789 ip6:ABCD:EF01:2345:6789:ABCD:EF01:2345:6788/128 ip6:1234::/16 ip6:::ffff:10.1.2.3 -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: ABCD:EF01:2345:6789:ABCD:EF01:2345:6789
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: ABCD:EF01:2345:6789:ABCD:EF01:2345:6788
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 1234::ABCD
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 10.1.2.3
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: ABCD:EF01:2345:6789:ABCD:EF01:2345:6787
+    expect: fail
+  - domain: test.org
+    sender: sender@test.org
+    ip: AAAA::1
+    expect: fail

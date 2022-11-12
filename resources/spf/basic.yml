@@ -1,0 +1,169 @@
+# If the <domain> is malformed (e.g., label longer than 63 characters,
+# zero-length label not at the end, etc.) or is not a multi-label
+# domain name, or if the DNS lookup returns "Name Error" (RCODE 3, also
+# known as "NXDOMAIN" [RFC2308]), check_host() immediately returns the
+# result "none".
+
+name: Malformed Domains
+records:
+  spf: extremely.ridiculously.long.domain.name.that.should.fail.immediately.com v=spf1 +all
+  spf: nolabels v=spf1 +all
+  spf: none.test.org v=something-else not=spf for=sure
+tests:
+  - domain: extremely.ridiculously.long.domain.name.that.should.fail.immediately.com
+    sender: sender@extremely.ridiculously.long.domain.name.that.should.fail.immediately.com
+    ip: 172.168.0.1
+    expect: none
+  - domain: nolabels
+    sender: sender@nolabels
+    ip: 172.168.0.1
+    expect: none
+  - domain: nonexistant.domain.org
+    sender: sender@nonexistant.domain.org
+    ip: 172.168.0.1
+    expect: none
+  - domain: none.domain.org
+    sender: sender@none.domain.org
+    ip: 172.168.0.1
+    expect: none    
+
+---
+# If the <sender> has no local-part, substitute the string "postmaster"
+# for the local-part.
+
+name: Sender has no local-part
+records:
+  spf: test.org v=spf1 -all exp=explain.test.org
+  exp: explain.test.org Sender is %{s}
+tests:
+  - domain: test.org
+    sender: 
+    ip: 172.168.0.1
+    expect: fail Sender is postmaster@test.org
+
+---
+# If the DNS lookup returns a server failure (RCODE 2) or some other
+# error (RCODE other than 0 or 3), or if the lookup times out, then
+# check_host() terminates immediately with the result "temperror".
+
+name: DNS Temp Error
+records:
+tests:
+  - domain: _dns_error.org
+    sender: sender@_dns_error.org
+    ip: 172.168.0.1
+    expect: temperror
+
+---
+# If there are any syntax errors anywhere in the
+# record, check_host() returns immediately with the result "permerror",
+# without further interpretation or evaluation.
+
+name: SPF record with syntax errors
+records:
+  spf: test.org v=spf1 all/32
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 172.168.0.1
+    expect: permerror
+
+---
+# SPF implementations MUST limit the total number of those terms to 10
+# during SPF evaluation, to avoid unreasonable load on the DNS.  If
+# this limit is exceeded, the implementation MUST return "permerror".
+# [...] In addition to that limit, the evaluation of each "PTR" record MUST NOT
+# result in querying more than 10 address records -- either "A" or
+# "AAAA" resource records.  If this limit is exceeded, all records
+# other than the first 10 MUST be ignored.
+
+name: DNS Lookup Limits
+records:
+  spf: ok.test.org v=spf1 a:t1.org a:t2.org a:t3.org a:t4.org a:t5.org a:t6.org a:t7.org a:t8.org a:t9.org ~all
+  spf: err.test.org v=spf1 a:t1.org a:t2.org a:t3.org a:t4.org a:t5.org a:t6.org a:t7.org a:t8.org a:t9.org a:t10.org ~all
+  spf: inc1.org v=spf1 include:inc2.org ~all
+  spf: inc2.org v=spf1 include:inc3.org ~all
+  spf: inc3.org v=spf1 include:inc4.org ~all
+  spf: inc4.org v=spf1 include:inc5.org ~all
+  spf: inc5.org v=spf1 include:inc6.org ~all
+  spf: inc6.org v=spf1 include:inc7.org ~all
+  spf: inc7.org v=spf1 include:inc8.org ~all
+  spf: inc8.org v=spf1 include:inc9.org ~all
+  spf: inc9.org v=spf1 include:inc10.org ~all
+  spf: inc10.org v=spf1 include:inc11.org ~all
+  spf: inc11.org v=spf1 ~all
+  spf: mx.test.org v=spf1 mx -all
+  spf: ptr.test.org v=spf1 ptr:test.org -all
+  mx: mx.test.org 10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7,10.0.0.8,10.0.0.9,10.0.0.10,10.0.0.11
+  ptr: 10.0.0.1 h1.test.org
+  ptr: 10.0.0.11 h1.test.org, h2.test.org, h3.test.org, h4.test.org, h5.test.org, h6.test.org, h7.test.org, h8.test.org, h9.test.org, h10.test.org, h11.test.org
+  a: h1.test.org 10.0.0.1
+  a: h11.test.org 10.0.0.11
+tests:
+  - domain: ok.test.org
+    sender: sender@ok.test.org
+    ip: 172.168.0.1
+    expect: softfail
+  - domain: err.test.org
+    sender: sender@err.test.org
+    ip: 172.168.0.1
+    expect: permerror
+  - domain: inc2.org
+    sender: sender@inc2.org
+    ip: 172.168.0.1
+    expect: softfail
+  - domain: inc1.org
+    sender: sender@inc1.org
+    ip: 172.168.0.1
+    expect: permerror
+  - domain: mx.test.org
+    sender: sender@mx.test.org
+    ip: 172.168.0.1
+    expect: permerror
+  - domain: mx.test.org
+    sender: sender@mx.test.org
+    ip: 10.0.0.8
+    expect: pass
+  - domain: ptr.test.org
+    sender: sender@ptr.test.org
+    ip: 10.0.0.1
+    expect: pass
+  - domain: ptr.test.org
+    sender: sender@ptr.test.org
+    ip: 10.0.0.11
+    expect: fail
+
+---
+# If none of the mechanisms match and there is no "redirect" modifier,
+# then the check_host() returns a result of "neutral", just as if
+# "?all" were specified as the last directive.
+name: Default Result
+records:
+  spf: test.org v=spf1 
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 172.168.0.1
+    expect: neutral
+
+---
+name: HELO identity
+records:
+  spf: mx.test.org v=spf1 -all
+  spf: test.org v=spf1 +all
+tests:
+  - domain: mx.test.org
+    sender: sender@test.org
+    ip: 172.168.0.1
+    expect: fail
+
+---
+name: MAIL FROM identity
+records:
+  spf: mx.test.org v=spf1 +all
+  spf: test.org v=spf1 -all
+tests:
+  - domain: mx.test.org
+    sender: sender@test.org
+    ip: 172.168.0.1
+    expect: fail

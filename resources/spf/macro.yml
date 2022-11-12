@@ -1,0 +1,43 @@
+name: Macro expansion 1
+records:
+  a: 1.2.0.192.someuser._spf.example.com 10.0.0.1
+  spf: example.com v=spf1 exists:%{ir}.%{l1r+-}._spf.%{d} -all
+  spf: mx.example.com v=spf1 ip4:192.0.0.0/8
+tests:
+  - domain: mx.example.com
+    sender: someuser@example.com
+    ip: 192.0.2.1
+    expect: pass
+  - domain: mx.example.com
+    sender: otheruser@example.com
+    ip: 192.0.2.1
+    expect: fail
+
+---
+name: Macro expansion 2
+records:
+  aaaa: 1.0.b.c.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2.ip6._spf.example.com a:b::c:d
+  aaaa: mx.example.org 2001:db8::cb01
+  a: mx.example.org 192.0.2.3
+  a: bad.strong.lp.3.2.0.192.in-addr._spf.example.com 192.1.1.1
+  ptr: 192.0.2.3 mx.example.org 
+  ptr: 2001:db8::cb01 mx.example.org
+  spf: mx.example.org v=spf1 a -all
+  spf: email.example.com v=spf1 exists:%{ir}.%{v}._spf.%{d2} exists:%{lr-}.lp.%{ir}.%{v}._spf.%{d2} -all
+tests:
+  - domain: mx.example.org
+    sender: strong-bad@email.example.com
+    ip: 192.0.2.3
+    expect: pass
+  - domain: mx.example.org
+    sender: strong-bad@email.example.com
+    ip: 2001:db8::cb01
+    expect: pass
+  - domain: mx.example.org
+    sender: strong-bad@email.example.com
+    ip: 192.0.2.4
+    expect: fail
+  - domain: mx.example.org
+    sender: strong-bad@email.example.com
+    ip: 2001:db8::cb02
+    expect: fail

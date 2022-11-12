@@ -1,0 +1,57 @@
+# This mechanism matches if
+#  o the <target-name> is a subdomain of a validated domain name
+
+name: PTR subdomain match
+records:
+  ptr: 192.168.1.5 pass.test.org
+  ptr: 192.168.1.6 incomplete.test.org
+  ptr: 10.0.0.1 other.domain.org
+  a: pass.test.org 192.168.1.5
+  a: other.domain.org 10.0.0.1
+  spf: test.org v=spf1 ptr -all
+  spf: other.test.org v=spf1 ptr:domain.org -all
+  spf: pass.test.org v=spf1 +all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.6
+    expect: fail
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.7
+    expect: fail
+  - domain: test.org
+    sender: sender@test.org
+    ip: 10.0.0.1
+    expect: fail
+  - domain: pass.test.org
+    sender: sender@other.test.org
+    ip: 10.0.0.1
+    expect: pass
+  - domain: pass.test.org
+    sender: sender@other.test.org
+    ip: 10.0.0.2
+    expect: fail
+
+---
+# This mechanism matches if
+#  o the <target-name> and a validated domain name are the same.
+
+name: PTR domain match
+records:
+  ptr: 192.168.1.5 test.org
+  a: test.org 192.168.1.5
+  spf: test.org v=spf1 ptr -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.6
+    expect: fail

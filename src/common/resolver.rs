@@ -16,7 +16,7 @@ use crate::{
     dkim::DomainKey,
     dmarc::DMARC,
     spf::{Macro, SPF},
-    Error, Resolver, Txt, MX,
+    Error, Policy, Resolver, Txt, MX,
 };
 
 use super::{
@@ -67,33 +67,35 @@ impl Resolver {
             cache_ipv6: LruCache::with_capacity(capacity),
             cache_ptr: LruCache::with_capacity(capacity),
             host_domain: Vec::new(),
-            verify_helo: true,
+            verify_policy: Policy::VeryStrict,
         })
     }
 
-    pub fn host_domain(mut self, hostname: &str) -> Self {
+    pub fn with_host_domain(mut self, hostname: &str) -> Self {
         self.host_domain = hostname.as_bytes().to_vec();
         self
     }
 
-    pub fn verify_helo_identity(mut self, value: bool) -> Self {
-        self.verify_helo = value;
+    pub fn with_policy(mut self, policy: Policy) -> Self {
+        self.verify_policy = policy;
         self
     }
 
-    pub(crate) async fn txt_lookup<T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
+    pub(crate) async fn txt_lookup<'x, T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
         &self,
-        key: String,
+        key: impl IntoFqdn<'x>,
     ) -> crate::Result<Arc<T>> {
-        if let Some(value) = self.cache_txt.get(&key) {
+        let key = key.into_fqdn();
+        if let Some(value) = self.cache_txt.get(key.as_ref()) {
             return T::unwrap_txt(value);
         }
+
         #[cfg(test)]
-        if !key.is_empty() {
-            panic!("{:?} not found.", key);
+        if true {
+            return mock_resolve(key.as_ref());
         }
 
-        let txt_lookup = self.resolver.txt_lookup(&key).await?;
+        let txt_lookup = self.resolver.txt_lookup(key.as_ref()).await?;
         let mut result = Err(Error::InvalidRecordType);
         let records = txt_lookup.as_lookup().record_iter().filter_map(|r| {
             let txt_data = r.data()?.as_txt()?.txt_data();
@@ -116,22 +118,25 @@ impl Resolver {
                 break;
             }
         }
-        T::unwrap_txt(
-            self.cache_txt
-                .insert(key, result.into(), txt_lookup.valid_until()),
-        )
+        T::unwrap_txt(self.cache_txt.insert(
+            key.into_owned(),
+            result.into(),
+            txt_lookup.valid_until(),
+        ))
     }
 
-    pub async fn mx_lookup(&self, key: &str) -> crate::Result<Arc<Vec<MX>>> {
-        if let Some(value) = self.cache_mx.get(key) {
+    pub async fn mx_lookup<'x>(&self, key: impl IntoFqdn<'x>) -> crate::Result<Arc<Vec<MX>>> {
+        let key = key.into_fqdn();
+        if let Some(value) = self.cache_mx.get(key.as_ref()) {
             return Ok(value);
         }
+
         #[cfg(test)]
-        if !key.is_empty() {
-            panic!("{:?} not found.", key);
+        if true {
+            return mock_resolve(key.as_ref());
         }
 
-        let mx_lookup = self.resolver.mx_lookup(key).await?;
+        let mx_lookup = self.resolver.mx_lookup(key.as_ref()).await?;
         let mut records = mx_lookup
             .as_lookup()
             .record_iter()
@@ -148,19 +153,24 @@ impl Resolver {
 
         Ok(self
             .cache_mx
-            .insert(key.to_string(), Arc::new(records), mx_lookup.valid_until()))
+            .insert(key.into_owned(), Arc::new(records), mx_lookup.valid_until()))
     }
 
-    pub async fn ipv4_lookup(&self, key: &str) -> crate::Result<Arc<Vec<Ipv4Addr>>> {
-        if let Some(value) = self.cache_ipv4.get(key) {
+    pub async fn ipv4_lookup<'x>(
+        &self,
+        key: impl IntoFqdn<'x>,
+    ) -> crate::Result<Arc<Vec<Ipv4Addr>>> {
+        let key = key.into_fqdn();
+        if let Some(value) = self.cache_ipv4.get(key.as_ref()) {
             return Ok(value);
         }
+
         #[cfg(test)]
-        if !key.is_empty() {
-            panic!("{:?} not found.", key);
+        if true {
+            return mock_resolve(key.as_ref());
         }
 
-        let ipv4_lookup = self.resolver.ipv4_lookup(key).await?;
+        let ipv4_lookup = self.resolver.ipv4_lookup(key.as_ref()).await?;
         let ips = ipv4_lookup
             .as_lookup()
             .record_iter()
@@ -169,19 +179,24 @@ impl Resolver {
 
         Ok(self
             .cache_ipv4
-            .insert(key.to_string(), Arc::new(ips), ipv4_lookup.valid_until()))
+            .insert(key.into_owned(), Arc::new(ips), ipv4_lookup.valid_until()))
     }
 
-    pub async fn ipv6_lookup(&self, key: &str) -> crate::Result<Arc<Vec<Ipv6Addr>>> {
-        if let Some(value) = self.cache_ipv6.get(key) {
+    pub async fn ipv6_lookup<'x>(
+        &self,
+        key: impl IntoFqdn<'x>,
+    ) -> crate::Result<Arc<Vec<Ipv6Addr>>> {
+        let key = key.into_fqdn();
+        if let Some(value) = self.cache_ipv6.get(key.as_ref()) {
             return Ok(value);
         }
+
         #[cfg(test)]
-        if !key.is_empty() {
-            panic!("{:?} not found.", key);
+        if true {
+            return mock_resolve(key.as_ref());
         }
 
-        let ipv6_lookup = self.resolver.ipv6_lookup(key).await?;
+        let ipv6_lookup = self.resolver.ipv6_lookup(key.as_ref()).await?;
         let ips = ipv6_lookup
             .as_lookup()
             .record_iter()
@@ -190,13 +205,19 @@ impl Resolver {
 
         Ok(self
             .cache_ipv6
-            .insert(key.to_string(), Arc::new(ips), ipv6_lookup.valid_until()))
+            .insert(key.into_owned(), Arc::new(ips), ipv6_lookup.valid_until()))
     }
 
-    pub async fn ptr_lookup(&self, addr: IpAddr) -> crate::Result<Arc<Vec<String>>> {
+    pub async fn ptr_lookup<'x>(&self, addr: IpAddr) -> crate::Result<Arc<Vec<String>>> {
         if let Some(value) = self.cache_ptr.get(&addr) {
             return Ok(value);
         }
+
+        #[cfg(test)]
+        if true {
+            return mock_resolve(&addr.to_string());
+        }
+
         let ptr_lookup = self.resolver.reverse_lookup(addr).await?;
         let ptr = ptr_lookup
             .as_lookup()
@@ -209,8 +230,23 @@ impl Resolver {
             .insert(addr, Arc::new(ptr), ptr_lookup.valid_until()))
     }
 
-    pub(crate) async fn exists(&self, key: &str) -> crate::Result<bool> {
-        match self.resolver.lookup_ip(key).await {
+    pub(crate) async fn exists<'x>(&self, key: impl IntoFqdn<'x>) -> crate::Result<bool> {
+        #[cfg(test)]
+        if true {
+            let key = key.into_fqdn().into_owned();
+            return match self.ipv4_lookup(key.as_str()).await {
+                Ok(_) => Ok(true),
+                Err(Error::DNSRecordNotFound(_)) => match self.ipv6_lookup(key.as_str()).await {
+                    Ok(_) => Ok(true),
+                    Err(Error::DNSRecordNotFound(_)) => Ok(false),
+                    Err(err) => Err(err),
+                },
+                Err(err) => Err(err),
+            };
+        }
+
+        let key = key.into_fqdn();
+        match self.resolver.lookup_ip(key.as_ref()).await {
             Ok(result) => Ok(result.as_lookup().record_iter().any(|r| {
                 r.data().map_or(false, |d| {
                     matches!(d.to_record_type(), RecordType::A | RecordType::AAAA)
@@ -227,38 +263,57 @@ impl Resolver {
     }
 
     #[cfg(test)]
-    pub(crate) fn txt_add(
+    pub(crate) fn txt_add<'x>(
         &self,
-        name: String,
+        name: impl IntoFqdn<'x>,
         value: impl Into<Txt>,
         valid_until: std::time::Instant,
     ) {
-        self.cache_txt.insert(name, value.into(), valid_until);
+        self.cache_txt
+            .insert(name.into_fqdn().into_owned(), value.into(), valid_until);
     }
 
     #[cfg(test)]
-    pub(crate) fn ipv4_add(
+    pub(crate) fn ipv4_add<'x>(
         &self,
-        name: String,
+        name: impl IntoFqdn<'x>,
         value: Vec<Ipv4Addr>,
         valid_until: std::time::Instant,
     ) {
-        self.cache_ipv4.insert(name, Arc::new(value), valid_until);
+        self.cache_ipv4
+            .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
     }
 
     #[cfg(test)]
-    pub(crate) fn ipv6_add(
+    pub(crate) fn ipv6_add<'x>(
         &self,
-        name: String,
+        name: impl IntoFqdn<'x>,
         value: Vec<Ipv6Addr>,
         valid_until: std::time::Instant,
     ) {
-        self.cache_ipv6.insert(name, Arc::new(value), valid_until);
+        self.cache_ipv6
+            .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
     }
 
     #[cfg(test)]
-    pub(crate) fn mx_add(&self, name: String, value: Vec<MX>, valid_until: std::time::Instant) {
-        self.cache_mx.insert(name, Arc::new(value), valid_until);
+    pub(crate) fn ptr_add(
+        &self,
+        name: IpAddr,
+        value: Vec<String>,
+        valid_until: std::time::Instant,
+    ) {
+        self.cache_ptr.insert(name, Arc::new(value), valid_until);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mx_add<'x>(
+        &self,
+        name: impl IntoFqdn<'x>,
+        value: Vec<MX>,
+        valid_until: std::time::Instant,
+    ) {
+        self.cache_mx
+            .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
     }
 }
 
@@ -348,4 +403,41 @@ impl UnwrapTxtRecord for DMARC {
             _ => Err(Error::Io("Invalid record type".to_string())),
         }
     }
+}
+
+pub trait IntoFqdn<'x> {
+    fn into_fqdn(self) -> Cow<'x, str>;
+}
+
+impl<'x> IntoFqdn<'x> for String {
+    fn into_fqdn(self) -> Cow<'x, str> {
+        if self.ends_with('.') {
+            self.to_lowercase().into()
+        } else {
+            format!("{}.", self.to_lowercase()).into()
+        }
+    }
+}
+
+impl<'x> IntoFqdn<'x> for &'x str {
+    fn into_fqdn(self) -> Cow<'x, str> {
+        if self.ends_with('.') {
+            self.to_lowercase().into()
+        } else {
+            format!("{}.", self.to_lowercase()).into()
+        }
+    }
+}
+
+#[cfg(test)]
+fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
+    Err(if domain.contains("_parse_error.") {
+        Error::ParseError
+    } else if domain.contains("_invalid_record.") {
+        Error::InvalidRecordType
+    } else if domain.contains("_dns_error.") {
+        Error::DNSError
+    } else {
+        Error::DNSRecordNotFound(trust_dns_resolver::proto::op::ResponseCode::NXDomain)
+    })
 }

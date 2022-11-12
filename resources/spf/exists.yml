@@ -1,0 +1,28 @@
+name: Exists
+records:
+  a: ip4.test.org 192.168.1.5, 192.168.1.6, 192.168.1.7
+  aaaa: ip6.test.org a:b::c:a, a:b::c:b, a:b::c:c
+  a: mixed.test.org 10.0.0.1, 10.0.0.2, 10.0.0.3
+  aaaa: mixed.test.org FF01::100, FF01::101, FF01::102
+  spf: ip4.test.org v=spf1 exists:ip4.test.org -all
+  spf: ip6.test.org v=spf1 exists:ip6.test.org -all
+  spf: mixed.test.org v=spf1 exists:mixed.test.org -all
+  spf: null.test.org v=spf1 exists:null.test.org -all
+tests:
+  - domain: ip4.test.org
+    sender: sender@ip4.test.org
+    ip: 167.1.2.3
+    expect: pass
+  - domain: ip6.test.org
+    sender: sender@ip6.test.org
+    ip: 167.1.2.3
+    expect: pass
+  - domain: mixed.test.org
+    sender: sender@mixed.test.org
+    ip: 167.1.2.3
+    expect: pass
+  - domain: null.test.org
+    sender: sender@null.test.org
+    ip: 167.1.2.3
+    expect: fail
+

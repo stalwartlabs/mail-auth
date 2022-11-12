@@ -1,0 +1,36 @@
+name: Explanation
+records:
+  mx: test.org a::1
+  spf: test.org v=spf1 mx -all exp=explain._spf.%{d}
+  exp: explain._spf.test.org %{c} is not one of %{d}'s designated mail servers.
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: a::1
+    expect: pass
+  - domain: test.org
+    sender: sender@test.org
+    ip: a:b::1
+    expect: fail a:b::1 is not one of test.org's designated mail servers.
+
+---
+# If there are any DNS processing errors (any RCODE other than 0), or
+# if no records are returned, or if more than one record is returned,
+# or if there are syntax errors in the explanation string, then proceed
+# as if no "exp" modifier was given.
+
+name: Explanation not found
+records:
+  exp: invalid._spf.test.org %{w} is an invalid macro %{d
+  spf: invalid.test.org v=spf1 -all exp=invalid._spf.%{d}
+  spf: notfound.test.org v=spf1 -all exp=notfound._spf.%{d}
+tests:
+  - domain: invalid.test.org
+    sender: sender@invalid.test.org
+    ip: a::1
+    expect: fail
+  - domain: notfound.test.org
+    sender: sender@notfound.test.org
+    ip: a:b::1
+    expect: fail
+
