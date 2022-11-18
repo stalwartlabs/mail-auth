@@ -1,40 +1,47 @@
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    time::Instant,
+};
 
 use crate::{Error, Policy, Resolver, SPFResult};
 
 use super::{Macro, Mechanism, Qualifier, Variables, SPF};
 
 impl Resolver {
-    pub async fn verify_spf(&self, ip: IpAddr, mail_from: &str, helo_domain: &str) -> SPFResult {
-        // Verify HELO domain
-        if self.verify_policy != Policy::Relaxed {
-            if !helo_domain.has_labels() && self.verify_policy == Policy::VeryStrict {
-                return SPFResult::None;
-            }
-
-            match self
-                .check_host(
-                    ip,
-                    helo_domain,
-                    helo_domain,
-                    &format!("postmaster@{}", helo_domain),
-                )
-                .await
-            {
-                SPFResult::TempError | SPFResult::Pass => (),
-                SPFResult::None | SPFResult::PermError
-                    if self.verify_policy != Policy::VeryStrict => {}
-                result => return result,
-            }
+    pub async fn verify_helo(&self, ip: IpAddr, helo_domain: &str) -> SPFResult {
+        if helo_domain.has_labels() {
+            self.check_host(
+                ip,
+                helo_domain,
+                helo_domain,
+                &format!("postmaster@{}", helo_domain),
+            )
+            .await
+        } else {
+            SPFResult::None
         }
+    }
 
+    pub async fn verify_sender(&self, ip: IpAddr, helo_domain: &str, sender: &str) -> SPFResult {
         self.check_host(
             ip,
-            mail_from.split_once('@').map_or(helo_domain, |(_, d)| d),
+            sender.split_once('@').map_or(helo_domain, |(_, d)| d),
             helo_domain,
-            mail_from,
+            sender,
         )
         .await
+    }
+
+    pub async fn verify_strict(&self, ip: IpAddr, helo_domain: &str, mail_from: &str) -> SPFResult {
+        // Verify HELO identity
+        match self.verify_helo(ip, helo_domain).await {
+            SPFResult::TempError | SPFResult::Pass => (),
+            SPFResult::None | SPFResult::PermError if self.verify_policy != Policy::VeryStrict => {}
+            result => return result,
+        }
+
+        // Verify MAIL FROM identity
+        self.verify_sender(ip, helo_domain, mail_from).await
     }
 
     #[allow(clippy::while_let_on_iterator)]
@@ -60,11 +67,11 @@ impl Resolver {
         vars.set_host_domain(&self.host_domain);
         vars.set_helo_domain(helo_domain.as_bytes());
 
+        let mut lookup_limit = LookupLimit::new();
         let mut spf_record = match self.txt_lookup::<SPF>(domain).await {
             Ok(spf_record) => spf_record,
             Err(err) => return err.into(),
         };
-        let mut lookup_count: u32 = 1;
 
         let mut domain = domain.to_string();
         let mut include_stack = Vec::new();
@@ -75,7 +82,7 @@ impl Resolver {
         loop {
             while let Some((pos, directive)) = directives.next() {
                 if !has_p_var && directive.mechanism.needs_ptr() {
-                    if !lookup_count.can_lookup() {
+                    if !lookup_limit.can_lookup() {
                         return SPFResult::PermError;
                     }
                     if let Some(ptr) = self
@@ -98,7 +105,7 @@ impl Resolver {
                         ip4_mask,
                         ip6_mask,
                     } => {
-                        if !lookup_count.can_lookup() {
+                        if !lookup_limit.can_lookup() {
                             return SPFResult::PermError;
                         }
                         match self
@@ -122,7 +129,7 @@ impl Resolver {
                         ip4_mask,
                         ip6_mask,
                     } => {
-                        if !lookup_count.can_lookup() {
+                        if !lookup_limit.can_lookup() {
                             return SPFResult::PermError;
                         }
 
@@ -133,7 +140,7 @@ impl Resolver {
                         {
                             Ok(records) => {
                                 for record in records.iter() {
-                                    if !lookup_count.can_lookup() {
+                                    if !lookup_limit.can_lookup() {
                                         return SPFResult::PermError;
                                     }
 
@@ -160,7 +167,7 @@ impl Resolver {
                         matches
                     }
                     Mechanism::Include { macro_string } => {
-                        if !lookup_count.can_lookup() {
+                        if !lookup_limit.can_lookup() {
                             return SPFResult::PermError;
                         }
 
@@ -187,23 +194,23 @@ impl Resolver {
                         }
                     }
                     Mechanism::Ptr { macro_string } => {
-                        if !lookup_count.can_lookup() {
+                        if !lookup_limit.can_lookup() {
                             return SPFResult::PermError;
                         }
 
                         let target_addr = macro_string.eval(&vars, &domain, true).to_lowercase();
                         let target_sub_addr = format!(".{}", target_addr);
                         let mut matches = false;
+
                         if let Ok(records) = self.ptr_lookup(ip).await {
                             for record in records.iter() {
-                                if lookup_count.can_lookup() {
+                                if lookup_limit.can_lookup() {
                                     if let Ok(true) =
                                         self.ip_matches(record, ip, u32::MAX, u128::MAX).await
                                     {
-                                        if record == &target_addr
-                                            || record.ends_with(&target_sub_addr)
-                                        {
-                                            matches = true;
+                                        matches = record == &target_addr
+                                            || record.ends_with(&target_sub_addr);
+                                        if matches {
                                             break;
                                         }
                                     }
@@ -213,7 +220,7 @@ impl Resolver {
                         matches
                     }
                     Mechanism::Exists { macro_string } => {
-                        if !lookup_count.can_lookup() {
+                        if !lookup_limit.can_lookup() {
                             return SPFResult::PermError;
                         }
 
@@ -250,7 +257,7 @@ impl Resolver {
             } else {
                 // Follow redirect
                 if let (Some(macro_string), None) = (&spf_record.redirect, &result) {
-                    if !lookup_count.can_lookup() {
+                    if !lookup_limit.can_lookup() {
                         return SPFResult::PermError;
                     }
 
@@ -382,15 +389,23 @@ impl From<Error> for SPFResult {
     }
 }
 
-trait LookupLimit {
-    fn can_lookup(&mut self) -> bool;
+struct LookupLimit {
+    num_lookups: u32,
+    timer: Instant,
 }
 
-impl LookupLimit for u32 {
+impl LookupLimit {
+    pub fn new() -> Self {
+        LookupLimit {
+            num_lookups: 1,
+            timer: Instant::now(),
+        }
+    }
+
     #[inline(always)]
     fn can_lookup(&mut self) -> bool {
-        if *self < 10 {
-            *self += 1;
+        if self.num_lookups < 10 && self.timer.elapsed().as_secs() < 20 {
+            self.num_lookups += 1;
             true
         } else {
             false
@@ -549,7 +564,7 @@ mod test {
                             result = SPFResult::Fail(exp.to_string());
                         }
                         assert_eq!(
-                            resolver.verify_spf(client_ip, mail_from, helo).await,
+                            resolver.verify_strict(client_ip, helo, mail_from).await,
                             result,
                             "Failed for {:?}, test {}.",
                             test_name,

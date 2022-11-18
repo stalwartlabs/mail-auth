@@ -144,15 +144,15 @@ tests:
     expect: pass
 
   - name: Multiple Requirements Example
-    a: mx.domain.com 192.0.2.1
-    ptr: 192.0.2.1 mx.domain.com
-    spf: mx.domain.com v=spf1 +all
+    a: example.com 192.0.2.1
+    ptr: 192.0.2.1 example.com
+    spf: mx.example.com v=spf1 +all
     spf: example.com v=spf1 -include:ip4._spf.%{d} -include:ptr._spf.%{d} +all
     spf: ip4._spf.example.com v=spf1 -ip4:192.0.2.0/24 +all
-    spf: ptr._spf.example.com v=spf1 -ptr +all
+    spf: ptr._spf.example.com v=spf1 -ptr:example.com +all
     domain: mx.example.com
     sender: mary@example.com
     ip: 192.0.2.1
     expect: pass
-    #ip: 192.0.2.2
-    #expect: fail
+    ip: 192.0.2.2
+    expect: fail

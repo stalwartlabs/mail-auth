@@ -190,19 +190,14 @@ mod tests {
 
     #[tokio::test]
     async fn it_works() {
-        let resolver =
+        /*let resolver =
             AsyncResolver::tokio(ResolverConfig::cloudflare_tls(), ResolverOpts::default())
                 .unwrap();
         let c = resolver.ipv4_lookup("locura.bivo.org.").await.unwrap();
 
         println!(
             "{:#?}",
-            c /*c.as_lookup().records()[0]
-              .data()
-              .unwrap()
-              .as_txt()
-              .unwrap()
-              .to_string()*/
-        );
+            c
+        );*/
     }
 }
