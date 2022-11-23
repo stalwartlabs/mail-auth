@@ -1,3 +1,4 @@
+pub mod base32;
 pub mod headers;
 pub mod lru;
 pub mod message;

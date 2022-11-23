@@ -18,7 +18,7 @@ use std::{
 
 use arc::Set;
 use common::{headers::Header, lru::LruCache};
-use dkim::DomainKey;
+use dkim::{Atps, DomainKey};
 use dmarc::DMARC;
 use spf::{Macro, SPF};
 use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
@@ -47,6 +47,7 @@ pub(crate) enum Txt {
     SPFMacro(Arc<Macro>),
     DomainKey(Arc<DomainKey>),
     DMARC(Arc<DMARC>),
+    Atps(Arc<Atps>),
     Error(Error),
 }
 

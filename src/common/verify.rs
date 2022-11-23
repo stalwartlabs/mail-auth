@@ -1,19 +1,23 @@
-use std::time::SystemTime;
+use std::{io::Write, time::SystemTime};
 
 use mail_parser::{parsers::MessageStream, HeaderValue};
 use rsa::PaddingScheme;
-use sha1::Sha1;
+use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
 use crate::{
     arc::{self, ChainValidation, Set},
     dkim::{
-        self, verify::Verifier, Algorithm, Canonicalization, DomainKey, HashAlgorithm, PublicKey,
+        self, verify::Verifier, Algorithm, Atps, Canonicalization, DomainKey, HashAlgorithm,
+        PublicKey,
     },
     AuthenticatedMessage, DKIMResult, Error, Resolver,
 };
 
-use super::headers::{AuthenticatedHeader, Header, HeaderParser};
+use super::{
+    base32::Base32Writer,
+    headers::{AuthenticatedHeader, Header, HeaderParser},
+};
 
 impl Resolver {
     /// Verifies DKIM and ARC headers of an RFC5322 message, returns None if the message could not be parsed.
@@ -320,15 +324,75 @@ impl Resolver {
             .unwrap_or_default();
 
             // Verify signature
-            match signature.verify(record.as_ref(), &hh) {
-                Ok(_) => {
-                    message.dkim_pass.push(header);
-                }
+            let mut did_verify = match signature.verify(record.as_ref(), &hh) {
+                Ok(_) => true,
                 Err(err) => {
                     message
                         .dkim_fail
                         .push(Header::new(header.name, header.value, err));
+                    false
                 }
+            };
+
+            // Verify third-party signature, if any.
+            match &signature.atps {
+                Some(atps) if did_verify => {
+                    let mut found = false;
+                    // RFC5322.From has to match atps=
+                    for from in &message.from {
+                        if let Some((_, domain)) = from.rsplit_once('@') {
+                            if domain.as_bytes().eq_ignore_ascii_case(atps.as_ref()) {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if found {
+                        let mut query_domain = match &signature.atpsh {
+                            Some(HashAlgorithm::Sha256) => {
+                                let mut writer = Base32Writer::with_capacity(40);
+                                let mut hash = Sha256::new();
+                                for ch in signature.d.as_ref() {
+                                    hash.update([ch.to_ascii_lowercase()]);
+                                }
+                                writer.write_all(&hash.finalize()[..]).ok();
+                                writer.finalize()
+                            }
+                            Some(HashAlgorithm::Sha1) => {
+                                let mut writer = Base32Writer::with_capacity(40);
+                                let mut hash = Sha1::new();
+                                for ch in signature.d.as_ref() {
+                                    hash.update([ch.to_ascii_lowercase()]);
+                                }
+                                writer.write_all(&hash.finalize()[..]).ok();
+                                writer.finalize()
+                            }
+                            None => std::str::from_utf8(signature.d.as_ref())
+                                .unwrap_or_default()
+                                .to_string(),
+                        };
+                        query_domain.push_str("._atps.");
+                        query_domain
+                            .push_str(std::str::from_utf8(atps.as_ref()).unwrap_or_default());
+                        query_domain.push('.');
+
+                        match self.txt_lookup::<Atps>(query_domain).await {
+                            Ok(_) => (),
+                            Err(err) => {
+                                message
+                                    .dkim_fail
+                                    .push(Header::new(header.name, header.value, err));
+                                did_verify = false;
+                            }
+                        }
+                    }
+                }
+                _ => (),
+            }
+
+            if did_verify {
+                message.dkim_pass.push(header);
             }
         }
 

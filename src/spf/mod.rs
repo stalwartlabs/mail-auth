@@ -126,7 +126,15 @@ pub struct SPF {
     directives: Vec<Directive>,
     exp: Option<Macro>,
     redirect: Option<Macro>,
+    ra: Option<Vec<u8>>,
+    rp: u8,
+    rr: u8,
 }
+
+pub(crate) const RR_TEMP_PERM_ERROR: u8 = 0x01;
+pub(crate) const RR_FAIL: u8 = 0x02;
+pub(crate) const RR_SOFTFAIL: u8 = 0x04;
+pub(crate) const RR_NEUTRAL_NONE: u8 = 0x08;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Version {

@@ -40,6 +40,8 @@ impl<'x> DKIMSigner<'x> {
             i: (b""[..]).into(),
             l: false,
             x: 0,
+            atps: None,
+            atpsh: None,
         }
     }
 
@@ -101,6 +103,20 @@ impl<'x> DKIMSigner<'x> {
             Cow::Borrowed(v) => v.as_bytes().into(),
             Cow::Owned(v) => v.into_bytes().into(),
         };
+        self
+    }
+
+    /// Sets the selector to use for signing.
+    pub fn atps(mut self, atps: impl Into<Cow<'x, str>>) -> Self {
+        self.atps = Some(match atps.into() {
+            Cow::Borrowed(v) => v.as_bytes().into(),
+            Cow::Owned(v) => v.into_bytes().into(),
+        });
+        self
+    }
+
+    pub fn atpsh(mut self, atpsh: HashAlgorithm) -> Self {
+        self.atpsh = atpsh.into();
         self
     }
 
@@ -194,7 +210,8 @@ impl<'x> DKIMSigner<'x> {
             z: Vec::new(),
             l: if self.l { body_len as u64 } else { 0 },
             r: false,
-            atps: None,
+            atps: self.atps.as_ref().map(|a| a.as_ref().into()),
+            atpsh: self.atpsh,
         };
 
         // Add signature to hash
@@ -245,11 +262,12 @@ impl<'x> Signature<'x> {
 
         if let Some(atps) = &self.atps {
             writer.write_all(b"; atps=")?;
-            writer.write_all(&atps.atps)?;
+            writer.write_all(atps)?;
             writer.write_all(b"; atpsh=")?;
-            writer.write_all(match atps.atpsh {
-                HashAlgorithm::Sha256 => b"sha256",
-                HashAlgorithm::Sha1 => b"sha1",
+            writer.write_all(match self.atpsh {
+                Some(HashAlgorithm::Sha256) => b"sha256",
+                Some(HashAlgorithm::Sha1) => b"sha1",
+                _ => b"none",
             })?;
         }
         if self.r {
@@ -368,10 +386,11 @@ mod test {
 
     use mail_parser::decoders::base64::base64_decode;
     use sha2::Sha256;
+    use trust_dns_resolver::proto::op::ResponseCode;
 
     use crate::{
         common::parse::TxtRecordParser,
-        dkim::{Canonicalization, DomainKey, Signature},
+        dkim::{Atps, Canonicalization, DomainKey, HashAlgorithm, Signature},
         DKIMResult, Resolver,
     };
 
@@ -474,6 +493,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .unwrap(),
             message,
             RSA_PUBLIC_KEY,
+            "",
             Ok(()),
         )
         .await;
@@ -494,6 +514,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .unwrap(),
             message,
             ED25519_PUBLIC_KEY,
+            "",
             Ok(()),
         )
         .await;
@@ -518,6 +539,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .unwrap(),
             message_multiheader,
             RSA_PUBLIC_KEY,
+            "",
             Ok(()),
         )
         .await;
@@ -536,6 +558,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .unwrap(),
             &(message.to_string() + "\r\n----- Mailing list"),
             RSA_PUBLIC_KEY,
+            "",
             Ok(()),
         )
         .await;
@@ -553,6 +576,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .unwrap(),
             message,
             RSA_PUBLIC_KEY,
+            "",
             Err(super::Error::FailedAUIDMatch),
         )
         .await;
@@ -570,7 +594,64 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .unwrap(),
             message,
             RSA_PUBLIC_KEY,
+            "",
             Err(super::Error::SignatureExpired),
+        )
+        .await;
+
+        // Verify ATPS (failure)
+        verify(
+            super::DKIMSigner::new()
+                .rsa_pem(RSA_PRIVATE_KEY)
+                .unwrap()
+                .headers(["From", "To", "Subject"])
+                .domain("example.com")
+                .selector("default")
+                .atps("example.com")
+                .atpsh(HashAlgorithm::Sha256)
+                .sign_::<Sha256>(message.as_bytes(), 12345)
+                .unwrap(),
+            message,
+            RSA_PUBLIC_KEY,
+            "",
+            Err(super::Error::DNSRecordNotFound(ResponseCode::NXDomain)),
+        )
+        .await;
+
+        // Verify ATPS (success)
+        verify(
+            super::DKIMSigner::new()
+                .rsa_pem(RSA_PRIVATE_KEY)
+                .unwrap()
+                .headers(["From", "To", "Subject"])
+                .domain("example.com")
+                .selector("default")
+                .atps("example.com")
+                .atpsh(HashAlgorithm::Sha256)
+                .sign_::<Sha256>(message.as_bytes(), 12345)
+                .unwrap(),
+            message,
+            RSA_PUBLIC_KEY,
+            "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.",
+            Ok(()),
+        )
+        .await;
+
+        // Verify ATPS (success - no hash)
+        verify(
+            super::DKIMSigner::new()
+                .rsa_pem(RSA_PRIVATE_KEY)
+                .unwrap()
+                .headers(["From", "To", "Subject"])
+                .domain("example.com")
+                .selector("default")
+                .atps("example.com")
+                .sign_::<Sha256>(message.as_bytes(), 12345)
+                .unwrap(),
+            message,
+            RSA_PUBLIC_KEY,
+            "example.com._atps.example.com.",
+            Ok(()),
         )
         .await;
     }
@@ -579,6 +660,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         signature: Signature<'_>,
         message_: &str,
         public_key: &str,
+        atps: &str,
         expect: Result<(), super::Error>,
     ) {
         let mut message = Vec::with_capacity(message_.len() + 100);
@@ -592,6 +674,13 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             DomainKey::parse(public_key.as_bytes()).unwrap(),
             Instant::now() + Duration::new(3600, 0),
         );
+        if !atps.is_empty() {
+            resolver.txt_add(
+                atps.to_string(),
+                Atps::parse(b"v=ATPS1;").unwrap(),
+                Instant::now() + Duration::new(3600, 0),
+            );
+        }
         let message = resolver.verify_message(&message).await.unwrap();
 
         match (message.dkim_result(), &expect) {

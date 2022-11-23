@@ -13,7 +13,7 @@ use trust_dns_resolver::{
 };
 
 use crate::{
-    dkim::DomainKey,
+    dkim::{Atps, DomainKey},
     dmarc::DMARC,
     spf::{Macro, SPF},
     Error, Policy, Resolver, Txt, MX,
@@ -334,6 +334,12 @@ impl From<DomainKey> for Txt {
     }
 }
 
+impl From<Atps> for Txt {
+    fn from(v: Atps) -> Self {
+        Txt::Atps(v.into())
+    }
+}
+
 impl From<SPF> for Txt {
     fn from(v: SPF) -> Self {
         Txt::SPF(v.into())
@@ -369,6 +375,16 @@ impl UnwrapTxtRecord for DomainKey {
     fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
         match txt {
             Txt::DomainKey(a) => Ok(a),
+            Txt::Error(err) => Err(err),
+            _ => Err(Error::Io("Invalid record type".to_string())),
+        }
+    }
+}
+
+impl UnwrapTxtRecord for Atps {
+    fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
+        match txt {
+            Txt::Atps(a) => Ok(a),
             Txt::Error(err) => Err(err),
             _ => Err(Error::Io("Invalid record type".to_string())),
         }

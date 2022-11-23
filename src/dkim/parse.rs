@@ -3,11 +3,15 @@ use std::slice::Iter;
 use mail_parser::decoders::base64::base64_decode_stream;
 use rsa::RsaPublicKey;
 
-use crate::{common::parse::*, Error};
+use crate::{
+    common::parse::*,
+    dkim::{RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION},
+    Error,
+};
 
 use super::{
-    Algorithm, Atps, Canonicalization, DomainKey, Flag, HashAlgorithm, PublicKey, Service,
-    Signature, Version,
+    Algorithm, Atps, Canonicalization, DomainKey, Flag, HashAlgorithm, PublicKey, Report, Service,
+    Signature, Version, RR_DNS, RR_OTHER, RR_POLICY,
 };
 
 const ATPSH: u64 = (b'a' as u64)
@@ -16,6 +20,7 @@ const ATPSH: u64 = (b'a' as u64)
     | (b's' as u64) << 24
     | (b'h' as u64) << 32;
 const ATPS: u64 = (b'a' as u64) | (b't' as u64) << 8 | (b'p' as u64) << 16 | (b's' as u64) << 24;
+const NONE: u64 = (b'n' as u64) | (b'o' as u64) << 8 | (b'n' as u64) << 16 | (b'e' as u64) << 24;
 const SHA256: u64 = (b's' as u64)
     | (b'h' as u64) << 8
     | (b'a' as u64) << 16
@@ -23,6 +28,11 @@ const SHA256: u64 = (b's' as u64)
     | (b'5' as u64) << 32
     | (b'6' as u64) << 40;
 const SHA1: u64 = (b's' as u64) | (b'h' as u64) << 8 | (b'a' as u64) << 16 | (b'1' as u64) << 24;
+const RA: u64 = (b'r' as u64) | (b'a' as u64) << 8;
+const RP: u64 = (b'r' as u64) | (b'p' as u64) << 8;
+const RR: u64 = (b'r' as u64) | (b'r' as u64) << 8;
+const RS: u64 = (b'r' as u64) | (b's' as u64) << 8;
+const ALL: u64 = (b'a' as u64) | (b'l' as u64) << 8 | (b'l' as u64) << 16;
 
 impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
@@ -44,6 +54,7 @@ impl<'x> Signature<'x> {
             cb: Canonicalization::Simple,
             r: false,
             atps: None,
+            atpsh: None,
         };
         let header_len = header.len();
         let mut header = header.iter();
@@ -82,27 +93,20 @@ impl<'x> Signature<'x> {
                 Z => signature.z = header.headers_qp(),
                 R => signature.r = header.value() == Y,
                 ATPS => {
-                    signature
-                        .atps
-                        .get_or_insert_with(|| Atps {
-                            atps: (b""[..]).into(),
-                            atpsh: HashAlgorithm::Sha256,
-                        })
-                        .atps = header.tag().into()
+                    if signature.atps.is_none() {
+                        signature.atps = Some(header.tag().into());
+                    }
                 }
                 ATPSH => {
-                    let atpsh = match header.value() {
-                        SHA256 => HashAlgorithm::Sha256,
-                        SHA1 => HashAlgorithm::Sha1,
-                        _ => continue,
+                    signature.atpsh = match header.value() {
+                        SHA256 => HashAlgorithm::Sha256.into(),
+                        SHA1 => HashAlgorithm::Sha1.into(),
+                        NONE => None,
+                        _ => {
+                            signature.atps = Some((&b""[..]).into());
+                            None
+                        }
                     };
-                    signature
-                        .atps
-                        .get_or_insert_with(|| Atps {
-                            atps: (b""[..]).into(),
-                            atpsh,
-                        })
-                        .atpsh = atpsh;
                 }
                 _ => header.ignore(),
             }
@@ -239,7 +243,7 @@ impl TxtRecordParser for DomainKey {
         let header_len = header.len();
         let mut header = header.iter();
         let mut record = DomainKey {
-            v: Version::Dkim1,
+            v: Version::V1,
             p: PublicKey::Revoked,
             f: 0,
         };
@@ -308,6 +312,115 @@ impl TxtRecordParser for DomainKey {
     }
 }
 
+impl TxtRecordParser for Report {
+    #[allow(clippy::while_let_on_iterator)]
+    fn parse(header: &[u8]) -> crate::Result<Self> {
+        let mut header = header.iter();
+        let mut record = Report {
+            ra: None,
+            rp: 100,
+            rr: u8::MAX,
+            rs: None,
+        };
+
+        while let Some(key) = header.key() {
+            match key {
+                RA => {
+                    record.ra = header.tag_qp().into();
+                }
+                RP => {
+                    record.rp = std::cmp::min(header.number().unwrap_or(0), 100) as u8;
+                }
+                RS => {
+                    record.rs = header.tag_qp().into();
+                }
+                RR => {
+                    record.rr = 0;
+                    loop {
+                        let (val, stop_char) = header.flag_value();
+                        match val {
+                            ALL => {
+                                record.rr = u8::MAX;
+                            }
+                            D => {
+                                record.rr |= RR_DNS;
+                            }
+                            O => {
+                                record.rr |= RR_OTHER;
+                            }
+                            P => {
+                                record.rr |= RR_POLICY;
+                            }
+                            S => {
+                                record.rr |= RR_SIGNATURE;
+                            }
+                            U => {
+                                record.rr |= RR_UNKNOWN_TAG;
+                            }
+                            V => {
+                                record.rr |= RR_VERIFICATION;
+                            }
+                            X => {
+                                record.rr |= RR_EXPIRATION;
+                            }
+                            _ => (),
+                        }
+
+                        if stop_char != b':' {
+                            break;
+                        }
+                    }
+                }
+
+                _ => {
+                    header.ignore();
+                }
+            }
+        }
+
+        if record.ra.is_some() {
+            Ok(record)
+        } else {
+            Err(Error::InvalidRecordType)
+        }
+    }
+}
+
+impl TxtRecordParser for Atps {
+    #[allow(clippy::while_let_on_iterator)]
+    fn parse(header: &[u8]) -> crate::Result<Self> {
+        let mut header = header.iter();
+        let mut record = Atps {
+            v: Version::V1,
+            d: None,
+        };
+        let mut has_version = false;
+
+        while let Some(key) = header.key() {
+            match key {
+                V => {
+                    if !header.match_bytes(b"ATPS1") || !header.seek_tag_end() {
+                        return Err(Error::InvalidRecordType);
+                    }
+                    has_version = true;
+                }
+                D => {
+                    record.d = header.tag().into();
+                }
+                _ => {
+                    header.ignore();
+                }
+            }
+        }
+
+        if !has_version {
+            return Err(Error::InvalidRecordType);
+        }
+
+        Ok(record)
+    }
+}
+
 impl DomainKey {
     pub fn has_flag(&self, flag: impl Into<u64>) -> bool {
         (self.f & flag.into()) != 0
@@ -358,7 +471,8 @@ mod test {
     use crate::{
         common::parse::TxtRecordParser,
         dkim::{
-            Algorithm, Canonicalization, DomainKey, PublicKey, Signature, Version,
+            Algorithm, Canonicalization, DomainKey, PublicKey, Report, Signature, Version, RR_DNS,
+            RR_EXPIRATION, RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION,
             R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_HASH_SHA1, R_HASH_SHA256, R_SVC_ALL,
             R_SVC_EMAIL,
         },
@@ -401,6 +515,7 @@ mod test {
                     cb: Canonicalization::Relaxed,
                     r: false,
                     atps: None,
+                    atpsh: None,
                 },
             ),
             (
@@ -448,6 +563,7 @@ mod test {
                     cb: Canonicalization::Simple,
                     r: false,
                     atps: None,
+                    atpsh: None,
                 },
             ),
             (
@@ -495,6 +611,7 @@ mod test {
                     cb: Canonicalization::Relaxed,
                     r: false,
                     atps: None,
+                    atpsh: None,
                 },
             ),
         ] {
@@ -528,7 +645,7 @@ mod test {
                     "tdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB",
                 ),
                 DomainKey {
-                    v: Version::Dkim1,
+                    v: Version::V1,
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
@@ -562,7 +679,7 @@ mod test {
                     "s=*:email;; h= sha1:sha 256:other;; n=ignore these notes "
                 ),
                 DomainKey {
-                    v: Version::Dkim1,
+                    v: Version::V1,
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
@@ -599,7 +716,7 @@ mod test {
                     "NP8/htqWHS+CvwWT4Qgs0NtB7Re9bQIDAQAB"
                 ),
                 DomainKey {
-                    v: Version::Dkim1,
+                    v: Version::V1,
                     p: PublicKey::Rsa(
                         RsaPublicKey::from_public_key_der(
                             &base64_decode(
@@ -623,6 +740,38 @@ mod test {
                 DomainKey::parse(record.as_bytes()).unwrap(),
                 expected_result
             );
+        }
+    }
+
+    #[test]
+    fn dkim_report_record_parse() {
+        for (record, expected_result) in [
+            (
+                "ra=dkim-errors; rp=97; rr=v:x",
+                Report {
+                    ra: b"dkim-errors".to_vec().into(),
+                    rp: 97,
+                    rr: RR_VERIFICATION | RR_EXPIRATION,
+                    rs: None,
+                },
+            ),
+            (
+                "ra=postmaster; rp=1; rr=d:o:p:s:u:v:x; rs=Error=20Message;",
+                Report {
+                    ra: b"postmaster".to_vec().into(),
+                    rp: 1,
+                    rr: RR_DNS
+                        | RR_OTHER
+                        | RR_POLICY
+                        | RR_SIGNATURE
+                        | RR_UNKNOWN_TAG
+                        | RR_VERIFICATION
+                        | RR_EXPIRATION,
+                    rs: b"Error Message".to_vec().into(),
+                },
+            ),
+        ] {
+            assert_eq!(Report::parse(record.as_bytes()).unwrap(), expected_result);
         }
     }
 }

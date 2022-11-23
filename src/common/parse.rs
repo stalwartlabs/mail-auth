@@ -12,10 +12,12 @@ pub(crate) const H: u64 = b'h' as u64;
 pub(crate) const I: u64 = b'i' as u64;
 pub(crate) const K: u64 = b'k' as u64;
 pub(crate) const L: u64 = b'l' as u64;
+pub(crate) const O: u64 = b'o' as u64;
 pub(crate) const P: u64 = b'p' as u64;
 pub(crate) const R: u64 = b'r' as u64;
 pub(crate) const S: u64 = b's' as u64;
 pub(crate) const T: u64 = b't' as u64;
+pub(crate) const U: u64 = b'u' as u64;
 pub(crate) const X: u64 = b'x' as u64;
 pub(crate) const Y: u64 = b'y' as u64;
 pub(crate) const Z: u64 = b'z' as u64;
@@ -33,6 +35,7 @@ pub(crate) trait TagParser: Sized {
     fn headers_qp(&mut self) -> Vec<Vec<u8>>;
     fn number(&mut self) -> Option<u64>;
     fn items<T: ItemParser>(&mut self) -> Vec<T>;
+    fn flag_value(&mut self) -> (u64, u8);
     fn flags<T: ItemParser + Into<u64>>(&mut self) -> u64;
     fn ignore(&mut self);
     fn seek_tag_end(&mut self) -> bool;
@@ -83,7 +86,7 @@ impl TagParser for Iter<'_, u8> {
 
         while let Some(&ch) = self.next() {
             match ch {
-                b'a'..=b'z' if shift < 64 => {
+                b'a'..=b'z' | b'0'..=b'9' if shift < 64 => {
                     value |= (ch as u64) << shift;
                     shift += 8;
                 }
@@ -103,6 +106,35 @@ impl TagParser for Iter<'_, u8> {
         }
 
         value
+    }
+
+    #[allow(clippy::while_let_on_iterator)]
+    fn flag_value(&mut self) -> (u64, u8) {
+        let mut value: u64 = 0;
+        let mut shift = 0;
+
+        while let Some(&ch) = self.next() {
+            match ch {
+                b'a'..=b'z' | b'0'..=b'9' if shift < 64 => {
+                    value |= (ch as u64) << shift;
+                    shift += 8;
+                }
+                b' ' | b'\t' | b'\r' | b'\n' => (),
+                b'A'..=b'Z' if shift < 64 => {
+                    value |= ((ch - b'A' + b'a') as u64) << shift;
+                    shift += 8;
+                }
+                b';' | b':' => {
+                    return (value, ch);
+                }
+                _ => {
+                    value = u64::MAX;
+                    shift = 64;
+                }
+            }
+        }
+
+        (value, 0)
     }
 
     #[inline(always)]

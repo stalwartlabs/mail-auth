@@ -8,7 +8,10 @@ use crate::{
     Error,
 };
 
-use super::{Directive, Macro, Mechanism, Qualifier, Variable, SPF};
+use super::{
+    Directive, Macro, Mechanism, Qualifier, Variable, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
+    RR_TEMP_PERM_ERROR, SPF,
+};
 
 impl TxtRecordParser for SPF {
     fn parse(bytes: &[u8]) -> crate::Result<SPF> {
@@ -25,6 +28,9 @@ impl TxtRecordParser for SPF {
             directives: Vec::new(),
             redirect: None,
             exp: None,
+            ra: None,
+            rp: 100,
+            rr: u8::MAX,
         };
 
         while let Some((term, qualifier, mut stop_char)) = record.next_term() {
@@ -171,6 +177,15 @@ impl TxtRecordParser for SPF {
                         return Err(Error::ParseError);
                     };
                 }
+                RA => {
+                    spf.ra = record.ra()?.into();
+                }
+                RP => {
+                    spf.rp = std::cmp::min(record.cidr_length()?, 100);
+                }
+                RR => {
+                    spf.rr = record.rr()?;
+                }
                 _ => {
                     let (_, stop_char) = record.macro_string(false)?;
                     if stop_char != b' ' {
@@ -212,6 +227,9 @@ const REDIRECT: u64 = (b't' as u64) << 56
     | (b'd' as u64) << 16
     | (b'e' as u64) << 8
     | (b'r' as u64);
+const RA: u64 = (b'a' as u64) << 8 | (b'r' as u64);
+const RP: u64 = (b'p' as u64) << 8 | (b'r' as u64);
+const RR: u64 = (b'r' as u64) << 8 | (b'r' as u64);
 
 pub(crate) trait SPFParser: Sized {
     fn next_term(&mut self) -> Option<(u64, Qualifier, u8)>;
@@ -220,6 +238,8 @@ pub(crate) trait SPFParser: Sized {
     fn ip6(&mut self) -> crate::Result<(Ipv6Addr, u8)>;
     fn cidr_length(&mut self) -> crate::Result<u8>;
     fn dual_cidr_length(&mut self) -> crate::Result<(u8, u8)>;
+    fn rr(&mut self) -> crate::Result<u8>;
+    fn ra(&mut self) -> crate::Result<Vec<u8>>;
 }
 
 impl SPFParser for Iter<'_, u8> {
@@ -577,6 +597,63 @@ impl SPFParser for Iter<'_, u8> {
             std::cmp::min(ip6_length, 128),
         ))
     }
+
+    fn rr(&mut self) -> crate::Result<u8> {
+        let mut flags: u8 = 0;
+
+        'outer: while let Some(&ch) = self.next() {
+            match ch {
+                b'a' | b'A' => {
+                    for _ in 0..2 {
+                        match self.next().unwrap_or(&0) {
+                            b'l' | b'L' => {}
+                            b' ' | b'\t' => {
+                                return Ok(flags);
+                            }
+                            _ => {
+                                continue 'outer;
+                            }
+                        }
+                    }
+                    flags = u8::MAX;
+                }
+                b'e' | b'E' => {
+                    flags |= RR_TEMP_PERM_ERROR;
+                }
+                b'f' | b'F' => {
+                    flags |= RR_FAIL;
+                }
+                b's' | b'S' => {
+                    flags |= RR_SOFTFAIL;
+                }
+                b'n' | b'N' => {
+                    flags |= RR_NEUTRAL_NONE;
+                }
+                b':' => {}
+                _ => {
+                    if ch.is_ascii_whitespace() {
+                        break;
+                    } else if !ch.is_ascii_alphanumeric() {
+                        return Err(Error::ParseError);
+                    }
+                }
+            }
+        }
+
+        Ok(flags)
+    }
+
+    fn ra(&mut self) -> crate::Result<Vec<u8>> {
+        let mut ra = Vec::new();
+        for &ch in self {
+            if !ch.is_ascii_whitespace() {
+                ra.push(ch);
+            } else {
+                break;
+            }
+        }
+        Ok(ra)
+    }
 }
 
 impl Variable {
@@ -647,7 +724,10 @@ mod test {
 
     use crate::{
         common::parse::TxtRecordParser,
-        spf::{Directive, Macro, Mechanism, Qualifier, Variable, Version, SPF},
+        spf::{
+            Directive, Macro, Mechanism, Qualifier, Variable, Version, RR_FAIL, RR_NEUTRAL_NONE,
+            RR_SOFTFAIL, RR_TEMP_PERM_ERROR, SPF,
+        },
     };
 
     use super::SPFParser;
@@ -659,6 +739,9 @@ mod test {
                 "v=spf1 +mx a:colo.example.com/28 -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -686,6 +769,9 @@ mod test {
                 "v=spf1 a:A.EXAMPLE.COM -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -705,6 +791,9 @@ mod test {
                 "v=spf1 +mx -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -724,6 +813,9 @@ mod test {
                 "v=spf1 +mx redirect=_spf.example.com",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     redirect: Macro::Literal(b"_spf.example.com".to_vec()).into(),
                     exp: None,
                     directives: vec![Directive::new(
@@ -740,6 +832,9 @@ mod test {
                 "v=spf1 a mx -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -767,6 +862,9 @@ mod test {
                 "v=spf1 include:example.com include:example.org -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -790,6 +888,9 @@ mod test {
                 "v=spf1 exists:%{ir}.%{l1r+-}._spf.%{d} -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -831,6 +932,9 @@ mod test {
                 "v=spf1 mx -all exp=explain._spf.%{d}",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: Macro::List(vec![
                         Macro::Literal(b"explain._spf.".to_vec()),
                         Macro::Variable {
@@ -860,6 +964,9 @@ mod test {
                 "v=spf1 ip4:192.0.2.1 ip4:192.0.2.129 -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -885,6 +992,9 @@ mod test {
                 "v=spf1 ip4:192.0.2.0/24 mx -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -911,6 +1021,9 @@ mod test {
                 "v=spf1 mx/30 mx:example.org/30 -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -938,6 +1051,9 @@ mod test {
                 "v=spf1 ptr -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -955,6 +1071,9 @@ mod test {
                 "v=spf1 exists:%{l1r+}.%{d}",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![Directive::new(
@@ -985,6 +1104,9 @@ mod test {
                 "v=spf1 exists:%{ir}.%{l1r+}.%{d}",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![Directive::new(
@@ -1023,6 +1145,9 @@ mod test {
                 "v=spf1 exists:_h.%{h}._l.%{l}._o.%{o}._i.%{i}._spf.%{d} ?all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -1081,6 +1206,9 @@ mod test {
                 "v=spf1 mx ?exists:%{ir}.whitelist.example.org -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -1115,6 +1243,9 @@ mod test {
                 "v=spf1 mx exists:%{l}._%-spf_%_verify%%.%{d} -all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -1156,6 +1287,9 @@ mod test {
                 "v=spf1 mx redirect=%{l1r+}._at_.%{o,=_/}._spf.%{d}",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: Macro::List(vec![
                         Macro::Variable {
@@ -1200,6 +1334,9 @@ mod test {
                 "v=spf1 -ip4:192.0.2.0/24 a//96 +all",
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -1229,6 +1366,9 @@ mod test {
                 ),
                 SPF {
                     version: Version::Spf1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
                     exp: None,
                     redirect: None,
                     directives: vec![
@@ -1269,6 +1409,28 @@ mod test {
                                 mask: u128::MAX << (128 - 96),
                             },
                         ),
+                    ],
+                },
+            ),
+            (
+                concat!("v=spf1 mx:example.org -all ra=postmaster rp=15 rr=e:f:s:n"),
+                SPF {
+                    version: Version::Spf1,
+                    ra: b"postmaster".to_vec().into(),
+                    rp: 15,
+                    rr: RR_FAIL | RR_NEUTRAL_NONE | RR_SOFTFAIL | RR_TEMP_PERM_ERROR,
+                    exp: None,
+                    redirect: None,
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Mx {
+                                macro_string: Macro::Literal(b"example.org".to_vec()),
+                                ip4_mask: u32::MAX,
+                                ip6_mask: u128::MAX,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
                     ],
                 },
             ),

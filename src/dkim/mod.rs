@@ -51,6 +51,8 @@ pub struct DKIMSigner<'x> {
     x: u64,
     ch: Canonicalization,
     cb: Canonicalization,
+    atps: Option<Cow<'x, [u8]>>,
+    atpsh: Option<HashAlgorithm>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -67,16 +69,11 @@ pub struct Signature<'x> {
     pub(crate) l: u64,
     pub(crate) x: u64,
     pub(crate) t: u64,
-    pub(crate) r: bool,                // RFC 6651
-    pub(crate) atps: Option<Atps<'x>>, // RFC 6541
+    pub(crate) r: bool,                      // RFC 6651
+    pub(crate) atps: Option<Cow<'x, [u8]>>,  // RFC 6541
+    pub(crate) atpsh: Option<HashAlgorithm>, // RFC 6541
     pub(crate) ch: Canonicalization,
     pub(crate) cb: Canonicalization,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Atps<'x> {
-    pub(crate) atps: Cow<'x, [u8]>,
-    pub(crate) atpsh: HashAlgorithm,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -86,6 +83,20 @@ pub struct DomainKey {
     pub(crate) f: u64,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Report {
+    pub(crate) ra: Option<Vec<u8>>,
+    pub(crate) rp: u8,
+    pub(crate) rr: u8,
+    pub(crate) rs: Option<Vec<u8>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct Atps {
+    pub(crate) v: Version,
+    pub(crate) d: Option<Vec<u8>>,
+}
+
 pub(crate) const R_HASH_SHA1: u64 = 0x01;
 pub(crate) const R_HASH_SHA256: u64 = 0x02;
 pub(crate) const R_SVC_ALL: u64 = 0x04;
@@ -93,9 +104,17 @@ pub(crate) const R_SVC_EMAIL: u64 = 0x08;
 pub(crate) const R_FLAG_TESTING: u64 = 0x10;
 pub(crate) const R_FLAG_MATCH_DOMAIN: u64 = 0x20;
 
+pub(crate) const RR_DNS: u8 = 0x01;
+pub(crate) const RR_OTHER: u8 = 0x02;
+pub(crate) const RR_POLICY: u8 = 0x04;
+pub(crate) const RR_SIGNATURE: u8 = 0x08;
+pub(crate) const RR_UNKNOWN_TAG: u8 = 0x10;
+pub(crate) const RR_VERIFICATION: u8 = 0x20;
+pub(crate) const RR_EXPIRATION: u8 = 0x40;
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Version {
-    Dkim1,
+    V1,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
