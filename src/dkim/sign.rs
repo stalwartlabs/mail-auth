@@ -683,9 +683,12 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         }
         let message = resolver.verify_message(&message).await.unwrap();
 
-        match (message.dkim_result(), &expect) {
+        match (message.dkim_output().last().unwrap().result(), &expect) {
             (DKIMResult::Pass, Ok(_)) => (),
-            (DKIMResult::PermFail(hdr), Err(err)) if &hdr == err => (),
+            (
+                DKIMResult::Fail(hdr) | DKIMResult::PermError(hdr) | DKIMResult::Neutral(hdr),
+                Err(err),
+            ) if hdr == err => (),
             (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
         }
     }

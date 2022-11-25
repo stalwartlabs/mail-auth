@@ -12,6 +12,7 @@ pub(crate) const H: u64 = b'h' as u64;
 pub(crate) const I: u64 = b'i' as u64;
 pub(crate) const K: u64 = b'k' as u64;
 pub(crate) const L: u64 = b'l' as u64;
+pub(crate) const N: u64 = b'n' as u64;
 pub(crate) const O: u64 = b'o' as u64;
 pub(crate) const P: u64 = b'p' as u64;
 pub(crate) const R: u64 = b'r' as u64;

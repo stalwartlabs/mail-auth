@@ -40,7 +40,7 @@ pub struct Results {
     pub(crate) i: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Set<'x> {
     pub(crate) signature: Header<'x, Signature<'x>>,
     pub(crate) seal: Header<'x, Seal<'x>>,

@@ -11,7 +11,7 @@ use crate::{
         self, verify::Verifier, Algorithm, Atps, Canonicalization, DomainKey, HashAlgorithm,
         PublicKey,
     },
-    AuthenticatedMessage, DKIMResult, Error, Resolver,
+    ARCOutput, AuthenticatedMessage, DKIMOutput, DKIMResult, Error, Resolver,
 };
 
 use super::{
@@ -41,10 +41,11 @@ impl Resolver {
         let mut message = AuthenticatedMessage {
             headers: Vec::new(),
             from: Vec::new(),
-            dkim_pass: Vec::new(),
-            dkim_fail: Vec::new(),
-            arc_pass: Vec::new(),
-            arc_fail: Vec::new(),
+            dkim_output: Vec::new(),
+            arc_output: ARCOutput {
+                result: DKIMResult::None,
+                set: Vec::new(),
+            },
         };
 
         let mut ams_headers = Vec::new();
@@ -63,15 +64,14 @@ impl Resolver {
                             {
                                 dkim_headers.push(Header::new(name, value, signature));
                             } else {
-                                message.dkim_fail.push(Header::new(
-                                    name,
-                                    value,
-                                    crate::Error::SignatureExpired,
-                                ));
+                                message.dkim_output.push(
+                                    DKIMOutput::neutral(Error::SignatureExpired)
+                                        .with_signature(signature),
+                                );
                             }
                         }
                         Err(err) => {
-                            message.dkim_fail.push(Header::new(name, value, err));
+                            message.dkim_output.push(DKIMOutput::neutral(err));
                         }
                     }
 
@@ -83,7 +83,7 @@ impl Resolver {
                             aar_headers.push(Header::new(name, value, r));
                         }
                         Err(err) => {
-                            message.arc_fail.push(Header::new(name, value, err));
+                            message.arc_output.result = DKIMResult::Neutral(err);
                         }
                     }
 
@@ -95,7 +95,7 @@ impl Resolver {
                             ams_headers.push(Header::new(name, value, s));
                         }
                         Err(err) => {
-                            message.arc_fail.push(Header::new(name, value, err));
+                            message.arc_output.result = DKIMResult::Neutral(err);
                         }
                     }
 
@@ -107,7 +107,7 @@ impl Resolver {
                             as_headers.push(Header::new(name, value, s));
                         }
                         Err(err) => {
-                            message.arc_fail.push(Header::new(name, value, err));
+                            message.arc_output.result = DKIMResult::Neutral(err);
                         }
                     }
                     name
@@ -160,6 +160,7 @@ impl Resolver {
 
         // Group ARC headers in sets
         let arc_headers = ams_headers.len();
+        let mut has_arc_headers = arc_headers > 0;
         if (1..=50).contains(&arc_headers)
             && (arc_headers == as_headers.len())
             && (arc_headers == aar_headers.len())
@@ -185,12 +186,8 @@ impl Resolver {
                         // Validate expiration
                         let signature_ = &signature.header;
                         if signature_.x > 0 && (signature_.x < signature_.t || signature_.x < now) {
-                            message.arc_fail.push(Header::new(
-                                signature.name,
-                                signature.value,
-                                Error::SignatureExpired,
-                            ));
-                            message.arc_pass.clear();
+                            message.arc_output.result =
+                                DKIMResult::Neutral(Error::SignatureExpired);
                             break;
                         }
 
@@ -205,7 +202,7 @@ impl Resolver {
                         }
                         .unwrap_or_default();
 
-                        let success = bh == signature_.bh;
+                        let body_hash_matches = bh == signature_.bh;
                         body_hashes.push((
                             signature_.cb,
                             HashAlgorithm::from(signature_.a),
@@ -213,53 +210,34 @@ impl Resolver {
                             bh,
                         ));
 
-                        if !success {
-                            message.arc_fail.push(Header::new(
-                                signature.name,
-                                signature.value,
-                                Error::FailedBodyHashMatch,
-                            ));
-                            message.arc_pass.clear();
-                            break;
+                        if !body_hash_matches {
+                            message.arc_output.result =
+                                DKIMResult::Neutral(Error::FailedBodyHashMatch);
+                            has_arc_headers = false;
                         }
                     }
-
-                    message.arc_pass.push(Set {
-                        signature,
-                        seal,
-                        results,
-                    });
                 } else {
-                    message.arc_fail.push(Header::new(
-                        signature.name,
-                        signature.value,
-                        Error::ARCBrokenChain,
-                    ));
-                    message.arc_pass.clear();
+                    message.arc_output.result = DKIMResult::Neutral(Error::ARCBrokenChain);
+                    has_arc_headers = false;
+                }
+
+                message.arc_output.set.push(Set {
+                    signature,
+                    seal,
+                    results,
+                });
+
+                if !has_arc_headers {
                     break;
                 }
             }
-        } else if arc_headers > 0 {
-            // Missing ARC headers, fail all.
-            message.arc_fail.extend(
-                ams_headers
-                    .into_iter()
-                    .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain))
-                    .chain(
-                        as_headers
-                            .into_iter()
-                            .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain)),
-                    )
-                    .chain(
-                        aar_headers
-                            .into_iter()
-                            .map(|h| Header::new(h.name, h.value, Error::ARCBrokenChain)),
-                    ),
-            );
+        } else if has_arc_headers {
+            // Missing ARC headers, fail.
+            message.arc_output.result = DKIMResult::Neutral(Error::ARCBrokenChain);
+            has_arc_headers = false;
         }
 
         // Validate DKIM headers
-        message.dkim_pass = Vec::with_capacity(dkim_headers.len());
         for header in dkim_headers {
             // Validate body hash
             let signature = &header.header;
@@ -283,11 +261,9 @@ impl Resolver {
                 &body_hashes.last().unwrap().3
             };
             if bh != &signature.bh {
-                message.dkim_fail.push(Header::new(
-                    header.name,
-                    header.value,
-                    crate::Error::FailedBodyHashMatch,
-                ));
+                message.dkim_output.push(
+                    DKIMOutput::neutral(Error::FailedBodyHashMatch).with_signature(header.header),
+                );
                 continue;
             }
 
@@ -296,19 +272,17 @@ impl Resolver {
                 Ok(record) => record,
                 Err(err) => {
                     message
-                        .dkim_fail
-                        .push(Header::new(header.name, header.value, err));
+                        .dkim_output
+                        .push(DKIMOutput::dns_error(err).with_signature(header.header));
                     continue;
                 }
             };
 
             // Enforce t=s flag
             if !signature.validate_auid(&record) {
-                message.dkim_fail.push(Header::new(
-                    header.name,
-                    header.value,
-                    Error::FailedAUIDMatch,
-                ));
+                message
+                    .dkim_output
+                    .push(DKIMOutput::fail(Error::FailedAUIDMatch).with_signature(header.header));
                 continue;
             }
 
@@ -324,80 +298,75 @@ impl Resolver {
             .unwrap_or_default();
 
             // Verify signature
-            let mut did_verify = match signature.verify(record.as_ref(), &hh) {
-                Ok(_) => true,
-                Err(err) => {
-                    message
-                        .dkim_fail
-                        .push(Header::new(header.name, header.value, err));
-                    false
-                }
-            };
+            if let Err(err) = signature.verify(record.as_ref(), &hh) {
+                message
+                    .dkim_output
+                    .push(DKIMOutput::fail(err).with_signature(header.header));
+                continue;
+            }
 
             // Verify third-party signature, if any.
-            match &signature.atps {
-                Some(atps) if did_verify => {
-                    let mut found = false;
-                    // RFC5322.From has to match atps=
-                    for from in &message.from {
-                        if let Some((_, domain)) = from.rsplit_once('@') {
-                            if domain.as_bytes().eq_ignore_ascii_case(atps.as_ref()) {
-                                found = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    if found {
-                        let mut query_domain = match &signature.atpsh {
-                            Some(HashAlgorithm::Sha256) => {
-                                let mut writer = Base32Writer::with_capacity(40);
-                                let mut hash = Sha256::new();
-                                for ch in signature.d.as_ref() {
-                                    hash.update([ch.to_ascii_lowercase()]);
-                                }
-                                writer.write_all(&hash.finalize()[..]).ok();
-                                writer.finalize()
-                            }
-                            Some(HashAlgorithm::Sha1) => {
-                                let mut writer = Base32Writer::with_capacity(40);
-                                let mut hash = Sha1::new();
-                                for ch in signature.d.as_ref() {
-                                    hash.update([ch.to_ascii_lowercase()]);
-                                }
-                                writer.write_all(&hash.finalize()[..]).ok();
-                                writer.finalize()
-                            }
-                            None => std::str::from_utf8(signature.d.as_ref())
-                                .unwrap_or_default()
-                                .to_string(),
-                        };
-                        query_domain.push_str("._atps.");
-                        query_domain
-                            .push_str(std::str::from_utf8(atps.as_ref()).unwrap_or_default());
-                        query_domain.push('.');
-
-                        match self.txt_lookup::<Atps>(query_domain).await {
-                            Ok(_) => (),
-                            Err(err) => {
-                                message
-                                    .dkim_fail
-                                    .push(Header::new(header.name, header.value, err));
-                                did_verify = false;
-                            }
+            if let Some(atps) = &signature.atps {
+                let mut found = false;
+                // RFC5322.From has to match atps=
+                for from in &message.from {
+                    if let Some((_, domain)) = from.rsplit_once('@') {
+                        if domain.as_bytes().eq_ignore_ascii_case(atps.as_ref()) {
+                            found = true;
+                            break;
                         }
                     }
                 }
-                _ => (),
+
+                if found {
+                    let mut query_domain = match &signature.atpsh {
+                        Some(HashAlgorithm::Sha256) => {
+                            let mut writer = Base32Writer::with_capacity(40);
+                            let mut hash = Sha256::new();
+                            for ch in signature.d.as_ref() {
+                                hash.update([ch.to_ascii_lowercase()]);
+                            }
+                            writer.write_all(&hash.finalize()[..]).ok();
+                            writer.finalize()
+                        }
+                        Some(HashAlgorithm::Sha1) => {
+                            let mut writer = Base32Writer::with_capacity(40);
+                            let mut hash = Sha1::new();
+                            for ch in signature.d.as_ref() {
+                                hash.update([ch.to_ascii_lowercase()]);
+                            }
+                            writer.write_all(&hash.finalize()[..]).ok();
+                            writer.finalize()
+                        }
+                        None => std::str::from_utf8(signature.d.as_ref())
+                            .unwrap_or_default()
+                            .to_string(),
+                    };
+                    query_domain.push_str("._atps.");
+                    query_domain.push_str(std::str::from_utf8(atps.as_ref()).unwrap_or_default());
+                    query_domain.push('.');
+
+                    match self.txt_lookup::<Atps>(query_domain).await {
+                        Ok(_) => (),
+                        Err(err) => {
+                            message
+                                .dkim_output
+                                .push(DKIMOutput::dns_error(err).with_signature(header.header));
+                            continue;
+                        }
+                    }
+                }
             }
 
-            if did_verify {
-                message.dkim_pass.push(header);
-            }
+            // Verification successful
+            message
+                .dkim_output
+                .push(DKIMOutput::pass().with_signature(header.header));
         }
 
         // Validate ARC Chain
-        if let Some(arc_set) = message.arc_pass.last() {
+        if has_arc_headers {
+            let arc_set = message.arc_output.set.last().unwrap();
             let header = &arc_set.signature;
             let signature = &header.header;
 
@@ -416,35 +385,26 @@ impl Resolver {
             let record = match self.txt_lookup::<DomainKey>(signature.domain_key()).await {
                 Ok(record) => record,
                 Err(err) => {
-                    message
-                        .arc_fail
-                        .push(Header::new(header.name, header.value, err));
-                    message.arc_pass.clear();
+                    message.arc_output.result = err.into();
                     return message.into();
                 }
             };
 
             // Verify signature
             if let Err(err) = signature.verify(record.as_ref(), &hh) {
-                message
-                    .arc_fail
-                    .push(Header::new(header.name, header.value, err));
-                message.arc_pass.clear();
+                message.arc_output.result = DKIMResult::Fail(err);
                 return message.into();
             }
 
             // Validate ARC Seals
-            for (pos, set) in message.arc_pass.iter().enumerate().rev() {
+            for (pos, set) in message.arc_output.set.iter().enumerate().rev() {
                 // Obtain record
                 let header = &set.seal;
                 let seal = &header.header;
                 let record = match self.txt_lookup::<DomainKey>(seal.domain_key()).await {
                     Ok(record) => record,
                     Err(err) => {
-                        message
-                            .arc_fail
-                            .push(Header::new(header.name, header.value, err));
-                        message.arc_pass.clear();
+                        message.arc_output.result = err.into();
                         return message.into();
                     }
                 };
@@ -452,7 +412,8 @@ impl Resolver {
                 // Build Seal headers
                 let seal_signature = header.value.strip_signature();
                 let headers = message
-                    .arc_pass
+                    .arc_output
+                    .set
                     .iter()
                     .take(pos)
                     .flat_map(|set| {
@@ -478,13 +439,13 @@ impl Resolver {
 
                 // Verify ARC Seal
                 if let Err(err) = seal.verify(record.as_ref(), &hh) {
-                    message
-                        .arc_fail
-                        .push(Header::new(header.name, header.value, err));
-                    message.arc_pass.clear();
+                    message.arc_output.result = DKIMResult::Fail(err);
                     return message.into();
                 }
             }
+
+            // ARC Validation successful
+            message.arc_output.result = DKIMResult::Pass;
         }
 
         message.into()
@@ -492,32 +453,18 @@ impl Resolver {
 }
 
 impl<'x> AuthenticatedMessage<'x> {
-    pub fn dkim_result(&self) -> DKIMResult {
-        if !self.dkim_pass.is_empty() {
-            DKIMResult::Pass
-        } else if let Some(header) = self.dkim_fail.last() {
-            if matches!(header.header, Error::DNSError) {
-                DKIMResult::TempFail(header.header.clone())
-            } else {
-                DKIMResult::PermFail(header.header.clone())
-            }
-        } else {
-            DKIMResult::None
-        }
+    pub fn dkim_output(&self) -> &[DKIMOutput] {
+        &self.dkim_output
     }
 
-    pub fn arc_result(&self) -> DKIMResult {
-        if !self.arc_pass.is_empty() {
-            DKIMResult::Pass
-        } else if let Some(header) = self.arc_fail.last() {
-            if matches!(header.header, Error::DNSError) {
-                DKIMResult::TempFail(header.header.clone())
-            } else {
-                DKIMResult::PermFail(header.header.clone())
-            }
-        } else {
-            DKIMResult::None
-        }
+    pub fn arc_output(&self) -> &ARCOutput {
+        &self.arc_output
+    }
+
+    pub fn has_dkim_pass(&self) -> bool {
+        self.dkim_output
+            .iter()
+            .any(|o| matches!(o.result(), &DKIMResult::Pass))
     }
 }
 
@@ -607,7 +554,10 @@ mod test {
                 .await
                 .unwrap();
 
-            assert_eq!(message.dkim_result(), DKIMResult::Pass);
+            assert_eq!(
+                message.dkim_output().last().unwrap().result(),
+                &DKIMResult::Pass
+            );
         }
     }
 
@@ -634,8 +584,8 @@ mod test {
                 .await
                 .unwrap();
 
-            assert_eq!(message.arc_result(), DKIMResult::Pass);
-            assert_eq!(message.dkim_result(), DKIMResult::Pass);
+            assert_eq!(message.arc_output().result(), &DKIMResult::Pass);
+            assert!(message.has_dkim_pass());
         }
     }
 

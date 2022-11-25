@@ -4,10 +4,10 @@ pub mod verify;
 
 use std::{
     borrow::Cow,
-    net::{Ipv4Addr, Ipv6Addr},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
 
-use crate::SPFResult;
+use crate::{is_within_pct, SPFOutput, SPFResult, Version};
 
 /*
       "+" pass
@@ -136,11 +136,6 @@ pub(crate) const RR_FAIL: u8 = 0x02;
 pub(crate) const RR_SOFTFAIL: u8 = 0x04;
 pub(crate) const RR_NEUTRAL_NONE: u8 = 0x08;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Version {
-    Spf1,
-}
-
 impl Directive {
     pub fn new(qualifier: Qualifier, mechanism: Mechanism) -> Self {
         Directive {
@@ -172,7 +167,7 @@ impl TryFrom<&str> for SPFResult {
         if value.eq_ignore_ascii_case("pass") {
             Ok(SPFResult::Pass)
         } else if value.eq_ignore_ascii_case("fail") {
-            Ok(SPFResult::Fail(String::new()))
+            Ok(SPFResult::Fail)
         } else if value.eq_ignore_ascii_case("softfail") {
             Ok(SPFResult::SoftFail)
         } else if value.eq_ignore_ascii_case("neutral") {
@@ -194,5 +189,59 @@ impl TryFrom<String> for SPFResult {
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
         TryFrom::try_from(value.as_str())
+    }
+}
+
+impl SPFOutput {
+    pub(crate) fn new(domain: &str, ip_addr: IpAddr) -> Self {
+        SPFOutput {
+            domain: domain.to_string(),
+            ip_addr,
+            result: SPFResult::None,
+            report: None,
+            explanation: None,
+        }
+    }
+
+    pub(crate) fn with_result(mut self, result: SPFResult) -> Self {
+        self.result = result;
+        self
+    }
+
+    pub(crate) fn with_report(mut self, spf: &SPF) -> Self {
+        match &spf.ra {
+            Some(ra) if is_within_pct(spf.rp) => {
+                if match self.result {
+                    SPFResult::Fail => (spf.rr & RR_FAIL) != 0,
+                    SPFResult::SoftFail => (spf.rr & RR_SOFTFAIL) != 0,
+                    SPFResult::Neutral | SPFResult::None => (spf.rr & RR_NEUTRAL_NONE) != 0,
+                    SPFResult::TempError | SPFResult::PermError => {
+                        (spf.rr & RR_TEMP_PERM_ERROR) != 0
+                    }
+                    SPFResult::Pass => false,
+                } {
+                    self.report = format!("{}@{}", String::from_utf8_lossy(ra), self.domain).into();
+                }
+            }
+            _ => (),
+        }
+        self
+    }
+
+    pub(crate) fn with_explanation(mut self, explanation: String) -> Self {
+        self.explanation = explanation.into();
+        self
+    }
+
+    pub fn result(&self) -> SPFResult {
+        self.result
+    }
+
+    pub fn explanation(&self) -> Option<&str> {
+        self.explanation.as_deref()
+    }
+
+    pub fn report_address(&self) -> Option<&str> {
+        self.report.as_deref()
     }
 }

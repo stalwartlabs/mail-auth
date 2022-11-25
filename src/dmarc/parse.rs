@@ -3,11 +3,11 @@ use std::slice::Iter;
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 
 use crate::{
-    common::parse::{ItemParser, TagParser, TxtRecordParser, V},
-    Error,
+    common::parse::{ItemParser, TagParser, TxtRecordParser, N, T, V, Y},
+    Error, Version,
 };
 
-use super::{Alignment, Format, Policy, Report, DMARC, URI};
+use super::{Alignment, Format, Policy, Psd, Report, DMARC, URI};
 
 impl TxtRecordParser for DMARC {
     fn parse(bytes: &[u8]) -> crate::Result<Self> {
@@ -31,6 +31,9 @@ impl TxtRecordParser for DMARC {
             rua: vec![],
             ruf: vec![],
             sp: Policy::Unspecified,
+            v: Version::V1,
+            psd: Psd::Default,
+            t: false,
         };
 
         while let Some(key) = record.key() {
@@ -67,6 +70,16 @@ impl TxtRecordParser for DMARC {
                 }
                 SP => {
                     dmarc.sp = record.policy()?;
+                }
+                PSD => {
+                    dmarc.psd = match record.value() {
+                        Y => Psd::Yes,
+                        N => Psd::No,
+                        _ => Psd::Default,
+                    };
+                }
+                T => {
+                    dmarc.t = record.value() == Y;
                 }
                 _ => {
                     record.ignore();
@@ -107,17 +120,33 @@ impl DMARCParser for Iter<'_, u8> {
     }
 
     fn report(&mut self) -> crate::Result<Report> {
-        let r = match self.next_skip_whitespaces().unwrap_or(0) {
-            b'0' => Report::All,
-            b'1' => Report::Any,
-            b'd' | b'D' => Report::Dkim,
-            b's' | b'S' => Report::Spf,
-            _ => return Err(Error::ParseError),
-        };
-        if self.seek_tag_end() {
-            Ok(r)
-        } else {
-            Err(Error::ParseError)
+        let mut r = Report::All;
+
+        loop {
+            r = match self.next_skip_whitespaces().unwrap_or(0) {
+                b'0' => Report::All,
+                b'1' => Report::Any,
+                b'd' | b'D' => {
+                    if r == Report::Spf {
+                        Report::DkimSpf
+                    } else {
+                        Report::Dkim
+                    }
+                }
+                b's' | b'S' => {
+                    if r == Report::Dkim {
+                        Report::DkimSpf
+                    } else {
+                        Report::Spf
+                    }
+                }
+                _ => return Err(Error::ParseError),
+            };
+            match self.next_skip_whitespaces().unwrap_or(0) {
+                b':' => (),
+                b';' | 0 => return Ok(r),
+                _ => return Err(Error::ParseError),
+            }
         }
     }
 
@@ -269,12 +298,14 @@ const RI: u64 = (b'r' as u64) | (b'i' as u64) << 8;
 const RUA: u64 = (b'r' as u64) | (b'u' as u64) << 8 | (b'a' as u64) << 16;
 const RUF: u64 = (b'r' as u64) | (b'u' as u64) << 8 | (b'f' as u64) << 16;
 const SP: u64 = (b's' as u64) | (b'p' as u64) << 8;
+const PSD: u64 = (b'p' as u64) | (b's' as u64) << 8 | (b'd' as u64) << 16;
 
 #[cfg(test)]
 mod test {
     use crate::{
         common::parse::TxtRecordParser,
-        dmarc::{Alignment, Format, Policy, Report, DMARC, URI},
+        dmarc::{Alignment, Format, Policy, Psd, Report, DMARC, URI},
+        Version,
     };
 
     #[test]
@@ -294,6 +325,9 @@ mod test {
                     rua: vec![URI::new("mailto:dmarc-feedback@example.com", 0)],
                     ruf: vec![],
                     sp: Policy::None,
+                    psd: Psd::Default,
+                    t: false,
+                    v: Version::V1,
                 },
             ),
             (
@@ -313,17 +347,20 @@ mod test {
                     rua: vec![URI::new("mailto:dmarc-feedback@example.com", 0)],
                     ruf: vec![URI::new("mailto:auth-reports@example.com", 0)],
                     sp: Policy::None,
+                    psd: Psd::Default,
+                    t: false,
+                    v: Version::V1,
                 },
             ),
             (
                 concat!(
                     "v=DMARC1; p=quarantine; rua=mailto:dmarc-feedback@example.com,",
-                    "mailto:tld-test@thirdparty.example.net!10m; pct=25"
+                    "mailto:tld-test@thirdparty.example.net!10m; pct=25; fo=d:s"
                 ),
                 DMARC {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
-                    fo: Report::All,
+                    fo: Report::DkimSpf,
                     np: Policy::Quarantine,
                     p: Policy::Quarantine,
                     pct: 25,
@@ -335,6 +372,9 @@ mod test {
                         URI::new("mailto:tld-test@thirdparty.example.net", 10 * 1024 * 1024),
                     ],
                     sp: Policy::Quarantine,
+                    psd: Psd::Default,
+                    t: false,
+                    v: Version::V1,
                 },
             ),
             (
@@ -354,6 +394,9 @@ mod test {
                     rua: vec![URI::new("mailto:dmarc-feedback@example.com", 0)],
                     ruf: vec![],
                     sp: Policy::Quarantine,
+                    psd: Psd::Default,
+                    t: false,
+                    v: Version::V1,
                 },
             ),
             (
@@ -377,6 +420,34 @@ mod test {
                     ],
                     ruf: vec![],
                     sp: Policy::Reject,
+                    psd: Psd::Default,
+                    t: false,
+                    v: Version::V1,
+                },
+            ),
+            (
+                concat!(
+                    "v=DMARC1; p=quarantine; rua=mailto:dmarc-feedback@example.com,",
+                    "mailto:tld-test@thirdparty.example.net; fo=s:d; t=y; psd=y;;",
+                ),
+                DMARC {
+                    adkim: Alignment::Relaxed,
+                    aspf: Alignment::Relaxed,
+                    fo: Report::DkimSpf,
+                    np: Policy::Quarantine,
+                    p: Policy::Quarantine,
+                    pct: 100,
+                    rf: Format::Afrf as u8,
+                    ri: 86400,
+                    rua: vec![
+                        URI::new("mailto:dmarc-feedback@example.com", 0),
+                        URI::new("mailto:tld-test@thirdparty.example.net", 0),
+                    ],
+                    ruf: vec![],
+                    sp: Policy::Quarantine,
+                    psd: Psd::Yes,
+                    t: true,
+                    v: Version::V1,
                 },
             ),
         ] {

@@ -13,7 +13,9 @@ use std::borrow::Cow;
 
 use rsa::{RsaPrivateKey, RsaPublicKey};
 
-use crate::common::verify::VerifySignature;
+use crate::{
+    arc::Set, common::verify::VerifySignature, ARCOutput, DKIMOutput, DKIMResult, Error, Version,
+};
 
 pub mod canonicalize;
 pub mod parse;
@@ -113,11 +115,6 @@ pub(crate) const RR_VERIFICATION: u8 = 0x20;
 pub(crate) const RR_EXPIRATION: u8 = 0x40;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Version {
-    V1,
-}
-
-#[derive(Debug, PartialEq, Eq, Clone)]
 #[repr(u64)]
 pub(crate) enum Service {
     All = R_SVC_ALL,
@@ -187,5 +184,88 @@ impl<'x> VerifySignature for Signature<'x> {
 
     fn d(&self) -> &[u8] {
         &self.d
+    }
+}
+
+impl<'x> DKIMOutput<'x> {
+    pub(crate) fn pass() -> Self {
+        DKIMOutput {
+            result: DKIMResult::Pass,
+            signature: None,
+            report: None,
+        }
+    }
+
+    pub(crate) fn perm_err(err: Error) -> Self {
+        DKIMOutput {
+            result: DKIMResult::PermError(err),
+            signature: None,
+            report: None,
+        }
+    }
+
+    pub(crate) fn temp_err(err: Error) -> Self {
+        DKIMOutput {
+            result: DKIMResult::TempError(err),
+            signature: None,
+            report: None,
+        }
+    }
+
+    pub(crate) fn fail(err: Error) -> Self {
+        DKIMOutput {
+            result: DKIMResult::Fail(err),
+            signature: None,
+            report: None,
+        }
+    }
+
+    pub(crate) fn neutral(err: Error) -> Self {
+        DKIMOutput {
+            result: DKIMResult::Neutral(err),
+            signature: None,
+            report: None,
+        }
+    }
+
+    pub(crate) fn dns_error(err: Error) -> Self {
+        if matches!(&err, Error::DNSError) {
+            DKIMOutput::temp_err(err)
+        } else {
+            DKIMOutput::perm_err(err)
+        }
+    }
+
+    pub(crate) fn with_signature(mut self, signature: Signature<'x>) -> Self {
+        self.signature = signature.into();
+        self
+    }
+
+    pub fn result(&self) -> &DKIMResult {
+        &self.result
+    }
+
+    pub fn signature(&self) -> Option<&Signature> {
+        self.signature.as_ref()
+    }
+}
+
+impl<'x> ARCOutput<'x> {
+    pub fn result(&self) -> &DKIMResult {
+        &self.result
+    }
+
+    pub fn sets(&self) -> &[Set] {
+        &self.set
+    }
+}
+
+impl From<Error> for DKIMResult {
+    fn from(err: Error) -> Self {
+        if matches!(&err, Error::DNSError) {
+            DKIMResult::TempError(err)
+        } else {
+            DKIMResult::PermError(err)
+        }
     }
 }

@@ -11,13 +11,15 @@
 
 use std::{
     borrow::Cow,
+    cell::Cell,
     fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
+    time::SystemTime,
 };
 
 use arc::Set;
-use common::{headers::Header, lru::LruCache};
+use common::lru::LruCache;
 use dkim::{Atps, DomainKey};
 use dmarc::DMARC;
 use spf::{Macro, SPF};
@@ -42,6 +44,7 @@ pub struct Resolver {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(clippy::upper_case_acronyms)]
 pub(crate) enum Txt {
     SPF(Arc<SPF>),
     SPFMacro(Arc<Macro>),
@@ -68,29 +71,56 @@ pub enum Policy {
 pub struct AuthenticatedMessage<'x> {
     pub(crate) headers: Vec<(&'x [u8], &'x [u8])>,
     pub(crate) from: Vec<Cow<'x, str>>,
-    pub(crate) dkim_pass: Vec<Header<'x, dkim::Signature<'x>>>,
-    pub(crate) dkim_fail: Vec<Header<'x, crate::Error>>,
-    pub(crate) arc_pass: Vec<Set<'x>>,
-    pub(crate) arc_fail: Vec<Header<'x, crate::Error>>,
+    pub(crate) dkim_output: Vec<DKIMOutput<'x>>,
+    pub(crate) arc_output: ARCOutput<'x>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum DKIMResult {
-    None,
-    PermFail(crate::Error),
-    TempFail(crate::Error),
     Pass,
+    Neutral(crate::Error),
+    Fail(crate::Error),
+    PermError(crate::Error),
+    TempError(crate::Error),
+    None,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DKIMOutput<'x> {
+    result: DKIMResult,
+    signature: Option<dkim::Signature<'x>>,
+    report: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct ARCOutput<'x> {
+    result: DKIMResult,
+    set: Vec<Set<'x>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum SPFResult {
     Pass,
-    Fail(String),
+    Fail,
     SoftFail,
     Neutral,
     TempError,
     PermError,
     None,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct SPFOutput {
+    domain: String,
+    ip_addr: IpAddr,
+    result: SPFResult,
+    report: Option<String>,
+    explanation: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub(crate) enum Version {
+    V1,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -182,12 +212,27 @@ impl From<ed25519_dalek::ed25519::Error> for Error {
     }
 }
 
+thread_local!(static COUNTER: Cell<u64>  = Cell::new(0));
+
+pub(crate) fn is_within_pct(pct: u8) -> bool {
+    pct == 100
+        || COUNTER.with(|c| {
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0)
+                .wrapping_add(c.replace(c.get() + 1))
+                .wrapping_mul(11400714819323198485u64)
+        }) % 100
+            < pct as u64
+}
+
 #[cfg(test)]
 mod tests {
-    use trust_dns_resolver::{
+    /*use trust_dns_resolver::{
         config::{ResolverConfig, ResolverOpts},
         AsyncResolver,
-    };
+    };*/
 
     #[tokio::test]
     async fn it_works() {

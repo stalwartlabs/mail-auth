@@ -1,6 +1,6 @@
-pub static BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+pub(crate) static BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-pub struct Base32Writer {
+pub(crate) struct Base32Writer {
     last_byte: u8,
     pos: usize,
     result: String,
@@ -13,10 +13,6 @@ impl Base32Writer {
             last_byte: 0,
             pos: 0,
         }
-    }
-
-    pub fn push_char(&mut self, ch: char) {
-        self.result.push(ch);
     }
 
     fn push_byte(&mut self, byte: u8, is_remainder: bool) {

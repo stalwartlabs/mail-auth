@@ -1,18 +1,23 @@
+use crate::Version;
+
 pub mod parse;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DMARC {
+    v: Version,
     adkim: Alignment,
     aspf: Alignment,
     fo: Report,
     np: Policy,
     p: Policy,
+    psd: Psd,
     pct: u8,
     rf: u8,
     ri: u32,
     rua: Vec<URI>,
     ruf: Vec<URI>,
     sp: Policy,
+    t: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,11 +34,19 @@ pub(crate) enum Alignment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Psd {
+    Yes,
+    No,
+    Default,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Report {
     All,
     Any,
     Dkim,
     Spf,
+    DkimSpf,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
