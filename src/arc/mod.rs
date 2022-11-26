@@ -1,22 +1,20 @@
 pub mod parse;
 
-use std::borrow::Cow;
-
 use crate::{
     common::{headers::Header, verify::VerifySignature},
     dkim::{Algorithm, Canonicalization},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Signature<'x> {
+pub struct Signature {
     pub(crate) i: u32,
     pub(crate) a: Algorithm,
-    pub(crate) d: Cow<'x, [u8]>,
-    pub(crate) s: Cow<'x, [u8]>,
+    pub(crate) d: String,
+    pub(crate) s: String,
     pub(crate) b: Vec<u8>,
     pub(crate) bh: Vec<u8>,
-    pub(crate) h: Vec<Vec<u8>>,
-    pub(crate) z: Vec<Vec<u8>>,
+    pub(crate) h: Vec<String>,
+    pub(crate) z: Vec<String>,
     pub(crate) l: u64,
     pub(crate) x: u64,
     pub(crate) t: u64,
@@ -25,12 +23,12 @@ pub struct Signature<'x> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Seal<'x> {
+pub struct Seal {
     pub(crate) i: u32,
     pub(crate) a: Algorithm,
     pub(crate) b: Vec<u8>,
-    pub(crate) d: Cow<'x, [u8]>,
-    pub(crate) s: Cow<'x, [u8]>,
+    pub(crate) d: String,
+    pub(crate) s: String,
     pub(crate) t: u64,
     pub(crate) cv: ChainValidation,
 }
@@ -42,8 +40,8 @@ pub struct Results {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Set<'x> {
-    pub(crate) signature: Header<'x, Signature<'x>>,
-    pub(crate) seal: Header<'x, Seal<'x>>,
+    pub(crate) signature: Header<'x, Signature>,
+    pub(crate) seal: Header<'x, Seal>,
     pub(crate) results: Header<'x, Results>,
 }
 
@@ -54,7 +52,7 @@ pub enum ChainValidation {
     Pass,
 }
 
-impl<'x> VerifySignature for Signature<'x> {
+impl VerifySignature for Signature {
     fn b(&self) -> &[u8] {
         &self.b
     }
@@ -63,16 +61,16 @@ impl<'x> VerifySignature for Signature<'x> {
         self.a
     }
 
-    fn s(&self) -> &[u8] {
+    fn s(&self) -> &str {
         &self.s
     }
 
-    fn d(&self) -> &[u8] {
+    fn d(&self) -> &str {
         &self.d
     }
 }
 
-impl<'x> VerifySignature for Seal<'x> {
+impl VerifySignature for Seal {
     fn b(&self) -> &[u8] {
         &self.b
     }
@@ -81,11 +79,11 @@ impl<'x> VerifySignature for Seal<'x> {
         self.a
     }
 
-    fn s(&self) -> &[u8] {
+    fn s(&self) -> &str {
         &self.s
     }
 
-    fn d(&self) -> &[u8] {
+    fn d(&self) -> &str {
         &self.d
     }
 }

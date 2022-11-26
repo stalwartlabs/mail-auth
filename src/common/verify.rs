@@ -20,10 +20,11 @@ use super::{
 };
 
 impl Resolver {
-    /// Verifies DKIM and ARC headers of an RFC5322 message, returns None if the message could not be parsed.
+    /// Verifies DKIM and ARC headers of an RFC5322 message,
+    /// returns None if the message could not be parsed.
     #[inline(always)]
-    pub async fn verify_message<'x>(&self, message: &'x [u8]) -> Option<AuthenticatedMessage<'x>> {
-        self.verify_message_(
+    pub async fn verify_dkim<'x>(&self, message: &'x [u8]) -> Option<AuthenticatedMessage<'x>> {
+        self.verify_dkim_(
             message,
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
@@ -33,7 +34,7 @@ impl Resolver {
         .await
     }
 
-    pub(crate) async fn verify_message_<'x>(
+    pub(crate) async fn verify_dkim_<'x>(
         &self,
         raw_message: &'x [u8],
         now: u64,
@@ -46,6 +47,8 @@ impl Resolver {
                 result: DKIMResult::None,
                 set: Vec::new(),
             },
+            auth_results: self.host_name.clone(),
+            received_spf: String::new(),
         };
 
         let mut ams_headers = Vec::new();
@@ -116,24 +119,31 @@ impl Resolver {
                     match MessageStream::new(value).parse_address() {
                         HeaderValue::Address(addr) => {
                             if let Some(addr) = addr.address {
-                                message.from.push(addr);
+                                message.from.push(addr.to_lowercase());
                             }
                         }
                         HeaderValue::AddressList(list) => {
-                            message
-                                .from
-                                .extend(list.into_iter().filter_map(|a| a.address));
+                            message.from.extend(
+                                list.into_iter()
+                                    .filter_map(|a| a.address.map(|a| a.to_lowercase())),
+                            );
                         }
                         HeaderValue::Group(group) => {
-                            message
-                                .from
-                                .extend(group.addresses.into_iter().filter_map(|a| a.address));
+                            message.from.extend(
+                                group
+                                    .addresses
+                                    .into_iter()
+                                    .filter_map(|a| a.address.map(|a| a.to_lowercase())),
+                            );
                         }
                         HeaderValue::GroupList(group_list) => {
                             message
                                 .from
                                 .extend(group_list.into_iter().flat_map(|group| {
-                                    group.addresses.into_iter().filter_map(|a| a.address)
+                                    group
+                                        .addresses
+                                        .into_iter()
+                                        .filter_map(|a| a.address.map(|a| a.to_lowercase()))
                                 }))
                         }
                         _ => (),
@@ -188,6 +198,7 @@ impl Resolver {
                         if signature_.x > 0 && (signature_.x < signature_.t || signature_.x < now) {
                             message.arc_output.result =
                                 DKIMResult::Neutral(Error::SignatureExpired);
+                            has_arc_headers = false;
                             break;
                         }
 
@@ -311,7 +322,7 @@ impl Resolver {
                 // RFC5322.From has to match atps=
                 for from in &message.from {
                     if let Some((_, domain)) = from.rsplit_once('@') {
-                        if domain.as_bytes().eq_ignore_ascii_case(atps.as_ref()) {
+                        if domain.eq(atps) {
                             found = true;
                             break;
                         }
@@ -323,38 +334,39 @@ impl Resolver {
                         Some(HashAlgorithm::Sha256) => {
                             let mut writer = Base32Writer::with_capacity(40);
                             let mut hash = Sha256::new();
-                            for ch in signature.d.as_ref() {
-                                hash.update([ch.to_ascii_lowercase()]);
-                            }
+                            hash.update(signature.d.as_bytes());
                             writer.write_all(&hash.finalize()[..]).ok();
                             writer.finalize()
                         }
                         Some(HashAlgorithm::Sha1) => {
                             let mut writer = Base32Writer::with_capacity(40);
                             let mut hash = Sha1::new();
-                            for ch in signature.d.as_ref() {
-                                hash.update([ch.to_ascii_lowercase()]);
-                            }
+                            hash.update(signature.d.as_bytes());
                             writer.write_all(&hash.finalize()[..]).ok();
                             writer.finalize()
                         }
-                        None => std::str::from_utf8(signature.d.as_ref())
-                            .unwrap_or_default()
-                            .to_string(),
+                        None => signature.d.to_string(),
                     };
                     query_domain.push_str("._atps.");
-                    query_domain.push_str(std::str::from_utf8(atps.as_ref()).unwrap_or_default());
+                    query_domain.push_str(atps);
                     query_domain.push('.');
 
                     match self.txt_lookup::<Atps>(query_domain).await {
-                        Ok(_) => (),
-                        Err(err) => {
+                        Ok(_) => {
+                            // ATPS Verification successful
                             message
                                 .dkim_output
-                                .push(DKIMOutput::dns_error(err).with_signature(header.header));
-                            continue;
+                                .push(DKIMOutput::pass().with_atps().with_signature(header.header));
+                        }
+                        Err(err) => {
+                            message.dkim_output.push(
+                                DKIMOutput::dns_error(err)
+                                    .with_atps()
+                                    .with_signature(header.header),
+                            );
                         }
                     }
+                    continue;
                 }
             }
 
@@ -469,9 +481,9 @@ impl<'x> AuthenticatedMessage<'x> {
 }
 
 pub(crate) trait VerifySignature {
-    fn s(&self) -> &[u8];
+    fn s(&self) -> &str;
 
-    fn d(&self) -> &[u8];
+    fn d(&self) -> &str;
 
     fn b(&self) -> &[u8];
 
@@ -480,12 +492,12 @@ pub(crate) trait VerifySignature {
     fn domain_key(&self) -> String {
         let s = self.s();
         let d = self.d();
-        let mut key = Vec::with_capacity(s.len() + d.len() + 13);
-        key.extend_from_slice(s);
-        key.extend_from_slice(b"._domainkey.");
-        key.extend_from_slice(d);
-        key.push(b'.');
-        String::from_utf8(key).unwrap_or_default()
+        let mut key = String::with_capacity(s.len() + d.len() + 13);
+        key.push_str(s);
+        key.push_str("._domainkey.");
+        key.push_str(d);
+        key.push('.');
+        key
     }
 
     fn verify(&self, record: &DomainKey, hh: &[u8]) -> crate::Result<()> {
@@ -550,7 +562,7 @@ mod test {
             let message = message.replace('\n', "\r\n");
 
             let message = resolver
-                .verify_message_(message.as_bytes(), 1667843664)
+                .verify_dkim_(message.as_bytes(), 1667843664)
                 .await
                 .unwrap();
 
@@ -580,7 +592,7 @@ mod test {
             let message = message.replace('\n', "\r\n");
 
             let message = resolver
-                .verify_message_(message.as_bytes(), 1667843664)
+                .verify_dkim_(message.as_bytes(), 1667843664)
                 .await
                 .unwrap();
 

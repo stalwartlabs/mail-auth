@@ -10,7 +10,6 @@
  */
 
 use std::{
-    borrow::Cow,
     cell::Cell,
     fmt::Display,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -39,7 +38,8 @@ pub struct Resolver {
     pub(crate) cache_ipv4: LruCache<String, Arc<Vec<Ipv4Addr>>>,
     pub(crate) cache_ipv6: LruCache<String, Arc<Vec<Ipv6Addr>>>,
     pub(crate) cache_ptr: LruCache<IpAddr, Arc<Vec<String>>>,
-    pub(crate) host_domain: Vec<u8>,
+    pub(crate) host_domain: String,
+    pub(crate) host_name: String,
     pub(crate) verify_policy: Policy,
 }
 
@@ -70,9 +70,14 @@ pub enum Policy {
 #[derive(Debug, Clone)]
 pub struct AuthenticatedMessage<'x> {
     pub(crate) headers: Vec<(&'x [u8], &'x [u8])>,
-    pub(crate) from: Vec<Cow<'x, str>>,
-    pub(crate) dkim_output: Vec<DKIMOutput<'x>>,
+    pub(crate) from: Vec<String>,
+    pub(crate) dkim_output: Vec<DKIMOutput>,
     pub(crate) arc_output: ARCOutput<'x>,
+
+    // Authentication-Results header
+    pub(crate) auth_results: String,
+    // Received-SPF header
+    pub(crate) received_spf: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -86,10 +91,11 @@ pub enum DKIMResult {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DKIMOutput<'x> {
+pub struct DKIMOutput {
     result: DKIMResult,
-    signature: Option<dkim::Signature<'x>>,
+    signature: Option<dkim::Signature>,
     report: Option<String>,
+    is_atps: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -111,11 +117,27 @@ pub enum SPFResult {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SPFOutput {
-    domain: String,
-    ip_addr: IpAddr,
+    //domain: String,
     result: SPFResult,
     report: Option<String>,
     explanation: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct DMARCOutput {
+    result: DMARCResult,
+    domain: String,
+    policy: dmarc::Policy,
+    record: Option<Arc<DMARC>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum DMARCResult {
+    Pass,
+    Fail(crate::Error),
+    TempError(crate::Error),
+    PermError(crate::Error),
+    None,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -149,6 +171,8 @@ pub enum Error {
     ARCInvalidCV,
     ARCHasHeaderTag,
     ARCBrokenChain,
+
+    DMARCNotAligned,
 
     InvalidRecordType,
 }
@@ -190,6 +214,7 @@ impl Display for Error {
             Error::InvalidRecordType => write!(f, "Invalid record."),
             Error::DNSError => write!(f, "DNS resolution error."),
             Error::DNSRecordNotFound(code) => write!(f, "DNS record not found: {}.", code),
+            Error::DMARCNotAligned => write!(f, "DMARC policy not aligned."),
         }
     }
 }

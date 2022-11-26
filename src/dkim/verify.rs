@@ -5,7 +5,7 @@ use super::{DomainKey, Flag, Signature};
 impl<'x> AuthenticatedMessage<'x> {
     pub fn signed_headers<'z: 'x>(
         &'z self,
-        headers: &'x [Vec<u8>],
+        headers: &'x [String],
         dkim_hdr_name: &'x [u8],
         dkim_hdr_value: &'x [u8],
     ) -> impl Iterator<Item = (&'x [u8], &'x [u8])> {
@@ -15,11 +15,11 @@ impl<'x> AuthenticatedMessage<'x> {
             .filter_map(move |h| {
                 let header_pos = if let Some((_, header_pos)) = last_header_pos
                     .iter_mut()
-                    .find(|(lh, _)| lh.eq_ignore_ascii_case(h))
+                    .find(|(lh, _)| lh.eq_ignore_ascii_case(h.as_bytes()))
                 {
                     header_pos
                 } else {
-                    last_header_pos.push((h, 0));
+                    last_header_pos.push((h.as_bytes(), 0));
                     &mut last_header_pos.last_mut().unwrap().1
                 };
                 if let Some((last_pos, result)) = self
@@ -28,7 +28,7 @@ impl<'x> AuthenticatedMessage<'x> {
                     .rev()
                     .enumerate()
                     .skip(*header_pos)
-                    .find(|(_, (mh, _))| h.eq_ignore_ascii_case(mh))
+                    .find(|(_, (mh, _))| h.as_bytes().eq_ignore_ascii_case(mh))
                 {
                     *header_pos = last_pos + 1;
                     Some(*result)
@@ -41,21 +41,21 @@ impl<'x> AuthenticatedMessage<'x> {
     }
 }
 
-impl<'x> Signature<'x> {
+impl Signature {
     #[allow(clippy::while_let_on_iterator)]
     pub fn validate_auid(&self, record: &DomainKey) -> bool {
         // Enforce t=s flag
         if !self.i.is_empty() && record.has_flag(Flag::MatchDomain) {
-            let mut auid = self.i.as_ref().iter();
-            let mut domain = self.d.as_ref().iter();
-            while let Some(&ch) = auid.next() {
-                if ch == b'@' {
+            let mut auid = self.i.chars();
+            let mut domain = self.d.chars();
+            while let Some(ch) = auid.next() {
+                if ch == '@' {
                     break;
                 }
             }
             while let Some(ch) = auid.next() {
                 if let Some(dch) = domain.next() {
-                    if !ch.eq_ignore_ascii_case(dch) {
+                    if ch != dch {
                         return false;
                     }
                 } else {

@@ -31,9 +31,9 @@ pub(crate) trait TagParser: Sized {
     fn match_bytes(&mut self, bytes: &[u8]) -> bool;
     fn key(&mut self) -> Option<u64>;
     fn value(&mut self) -> u64;
-    fn tag(&mut self) -> Vec<u8>;
-    fn tag_qp(&mut self) -> Vec<u8>;
-    fn headers_qp(&mut self) -> Vec<Vec<u8>>;
+    fn text(&mut self, to_lower: bool) -> String;
+    fn text_qp(&mut self, to_lower: bool) -> String;
+    fn headers_qp(&mut self) -> Vec<String>;
     fn number(&mut self) -> Option<u64>;
     fn items<T: ItemParser>(&mut self) -> Vec<T>;
     fn flag_value(&mut self) -> (u64, u8);
@@ -158,7 +158,7 @@ impl TagParser for Iter<'_, u8> {
     }
 
     #[inline(always)]
-    fn tag(&mut self) -> Vec<u8> {
+    fn text(&mut self, to_lower: bool) -> String {
         let mut tag = Vec::with_capacity(20);
         for &ch in self {
             if ch == b';' {
@@ -167,12 +167,17 @@ impl TagParser for Iter<'_, u8> {
                 tag.push(ch);
             }
         }
-        tag
+        if to_lower {
+            String::from_utf8_lossy(&tag).to_lowercase()
+        } else {
+            String::from_utf8(tag)
+                .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
+        }
     }
 
     #[inline(always)]
     #[allow(clippy::while_let_on_iterator)]
-    fn tag_qp(&mut self) -> Vec<u8> {
+    fn text_qp(&mut self, to_lower: bool) -> String {
         let mut tag = Vec::with_capacity(20);
         'outer: while let Some(&ch) = self.next() {
             if ch == b';' {
@@ -200,12 +205,17 @@ impl TagParser for Iter<'_, u8> {
                 tag.push(ch);
             }
         }
-        tag
+        if to_lower {
+            String::from_utf8_lossy(&tag).to_lowercase()
+        } else {
+            String::from_utf8(tag)
+                .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
+        }
     }
 
     #[inline(always)]
     #[allow(clippy::while_let_on_iterator)]
-    fn headers_qp(&mut self) -> Vec<Vec<u8>> {
+    fn headers_qp(&mut self) -> Vec<String> {
         let mut tags = Vec::new();
         let mut tag = Vec::with_capacity(20);
 
@@ -214,7 +224,7 @@ impl TagParser for Iter<'_, u8> {
                 break;
             } else if ch == b'|' {
                 if !tag.is_empty() {
-                    tags.push(tag.to_vec());
+                    tags.push(String::from_utf8_lossy(&tag).into_owned());
                     tag.clear();
                 }
             } else if ch == b'=' {
@@ -232,7 +242,7 @@ impl TagParser for Iter<'_, u8> {
                         }
                     } else if ch == b'|' {
                         if !tag.is_empty() {
-                            tags.push(tag.to_vec());
+                            tags.push(String::from_utf8_lossy(&tag).into_owned());
                             tag.clear();
                         }
                         break;
@@ -248,7 +258,10 @@ impl TagParser for Iter<'_, u8> {
         }
 
         if !tag.is_empty() {
-            tags.push(tag);
+            tags.push(
+                String::from_utf8(tag)
+                    .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
+            );
         }
 
         tags
@@ -362,5 +375,11 @@ impl TagParser for Iter<'_, u8> {
 impl ItemParser for Vec<u8> {
     fn parse(bytes: &[u8]) -> Option<Self> {
         Some(bytes.to_vec())
+    }
+}
+
+impl ItemParser for String {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        Some(String::from_utf8_lossy(bytes).into_owned())
     }
 }

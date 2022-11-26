@@ -35,9 +35,9 @@ impl<'x> DKIMSigner<'x> {
             sign_headers: Vec::with_capacity(0),
             cb: Canonicalization::Relaxed,
             ch: Canonicalization::Relaxed,
-            d: (b""[..]).into(),
-            s: (b""[..]).into(),
-            i: (b""[..]).into(),
+            d: "".into(),
+            s: "".into(),
+            i: "".into(),
             l: false,
             x: 0,
             atps: None,
@@ -81,37 +81,25 @@ impl<'x> DKIMSigner<'x> {
 
     /// Sets the headers to sign.
     pub fn headers(mut self, headers: impl IntoIterator<Item = &'x str>) -> Self {
-        self.sign_headers = headers
-            .into_iter()
-            .map(|h| Cow::Borrowed(h.as_bytes()))
-            .collect();
+        self.sign_headers = headers.into_iter().map(Cow::Borrowed).collect();
         self
     }
 
     /// Sets the domain to use for signing.
     pub fn domain(mut self, domain: impl Into<Cow<'x, str>>) -> Self {
-        self.d = match domain.into() {
-            Cow::Borrowed(v) => v.as_bytes().into(),
-            Cow::Owned(v) => v.into_bytes().into(),
-        };
+        self.d = domain.into();
         self
     }
 
     /// Sets the selector to use for signing.
     pub fn selector(mut self, selector: impl Into<Cow<'x, str>>) -> Self {
-        self.s = match selector.into() {
-            Cow::Borrowed(v) => v.as_bytes().into(),
-            Cow::Owned(v) => v.into_bytes().into(),
-        };
+        self.s = selector.into();
         self
     }
 
     /// Sets the selector to use for signing.
     pub fn atps(mut self, atps: impl Into<Cow<'x, str>>) -> Self {
-        self.atps = Some(match atps.into() {
-            Cow::Borrowed(v) => v.as_bytes().into(),
-            Cow::Owned(v) => v.into_bytes().into(),
-        });
+        self.atps = Some(atps.into());
         self
     }
 
@@ -122,10 +110,7 @@ impl<'x> DKIMSigner<'x> {
 
     /// Sets the selector to use for signing.
     pub fn agent_user_identifier(mut self, auid: impl Into<Cow<'x, str>>) -> Self {
-        self.i = match auid.into() {
-            Cow::Borrowed(v) => v.as_bytes().into(),
-            Cow::Owned(v) => v.into_bytes().into(),
-        };
+        self.i = auid.into();
         self
     }
 
@@ -238,7 +223,7 @@ impl<'x> DKIMSigner<'x> {
     }
 }
 
-impl<'x> Signature<'x> {
+impl Signature {
     pub(crate) fn write(&self, mut writer: impl Write, as_header: bool) -> std::io::Result<()> {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"dkim-signature:"[..], &b" "[..]),
@@ -253,7 +238,7 @@ impl<'x> Signature<'x> {
         })?;
         for (tag, value) in [(&b"; s="[..], &self.s), (&b"; d="[..], &self.d)] {
             writer.write_all(tag)?;
-            writer.write_all(value)?;
+            writer.write_all(value.as_bytes())?;
         }
         writer.write_all(b"; c=")?;
         self.ch.serialize_name(&mut writer)?;
@@ -262,7 +247,7 @@ impl<'x> Signature<'x> {
 
         if let Some(atps) = &self.atps {
             writer.write_all(b"; atps=")?;
-            writer.write_all(atps)?;
+            writer.write_all(atps.as_bytes())?;
             writer.write_all(b"; atpsh=")?;
             writer.write_all(match self.atpsh {
                 Some(HashAlgorithm::Sha256) => b"sha256",
@@ -288,7 +273,7 @@ impl<'x> Signature<'x> {
             } else {
                 bw += writer.write(b"h=")?;
             }
-            bw += writer.write(h)?;
+            bw += writer.write(h.as_bytes())?;
         }
 
         if !self.i.is_empty() {
@@ -301,7 +286,7 @@ impl<'x> Signature<'x> {
             }
             bw += writer.write(b"i=")?;
 
-            for &ch in self.i.iter() {
+            for &ch in self.i.as_bytes().iter() {
                 match ch {
                     0..=0x20 | b';' | 0x7f..=u8::MAX => {
                         bw += writer.write(format!("={:02X}", ch).as_bytes())?;
@@ -372,7 +357,7 @@ impl<'x> Default for DKIMSigner<'x> {
     }
 }
 
-impl<'x> Display for Signature<'x> {
+impl Display for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::new();
         self.write(&mut buf, false).map_err(|_| std::fmt::Error)?;
@@ -657,7 +642,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
     }
 
     async fn verify(
-        signature: Signature<'_>,
+        signature: Signature,
         message_: &str,
         public_key: &str,
         atps: &str,
@@ -681,7 +666,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 Instant::now() + Duration::new(3600, 0),
             );
         }
-        let message = resolver.verify_message(&message).await.unwrap();
+        let message = resolver.verify_dkim(&message).await.unwrap();
 
         match (message.dkim_output().last().unwrap().result(), &expect) {
             (DKIMResult::Pass, Ok(_)) => (),

@@ -1,3 +1,4 @@
+pub mod auth_results;
 pub mod base32;
 pub mod headers;
 pub mod lru;

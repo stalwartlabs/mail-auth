@@ -44,38 +44,50 @@ pub enum Algorithm {
 #[derive(Debug)]
 pub struct DKIMSigner<'x> {
     private_key: PrivateKey,
-    sign_headers: Vec<Cow<'x, [u8]>>,
+    sign_headers: Vec<Cow<'x, str>>,
     a: Algorithm,
-    d: Cow<'x, [u8]>,
-    s: Cow<'x, [u8]>,
-    i: Cow<'x, [u8]>,
+    d: Cow<'x, str>,
+    s: Cow<'x, str>,
+    i: Cow<'x, str>,
     l: bool,
     x: u64,
     ch: Canonicalization,
     cb: Canonicalization,
-    atps: Option<Cow<'x, [u8]>>,
+    atps: Option<Cow<'x, str>>,
     atpsh: Option<HashAlgorithm>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Signature<'x> {
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct Signature {
     pub(crate) v: u32,
     pub(crate) a: Algorithm,
-    pub(crate) d: Cow<'x, [u8]>,
-    pub(crate) s: Cow<'x, [u8]>,
+    pub(crate) d: String,
+    pub(crate) s: String,
     pub(crate) b: Vec<u8>,
     pub(crate) bh: Vec<u8>,
-    pub(crate) h: Vec<Vec<u8>>,
-    pub(crate) z: Vec<Vec<u8>>,
-    pub(crate) i: Cow<'x, [u8]>,
+    pub(crate) h: Vec<String>,
+    pub(crate) z: Vec<String>,
+    pub(crate) i: String,
     pub(crate) l: u64,
     pub(crate) x: u64,
     pub(crate) t: u64,
     pub(crate) r: bool,                      // RFC 6651
-    pub(crate) atps: Option<Cow<'x, [u8]>>,  // RFC 6541
+    pub(crate) atps: Option<String>,         // RFC 6541
     pub(crate) atpsh: Option<HashAlgorithm>, // RFC 6541
     pub(crate) ch: Canonicalization,
     pub(crate) cb: Canonicalization,
+}
+
+impl Default for Algorithm {
+    fn default() -> Self {
+        Algorithm::RsaSha256
+    }
+}
+
+impl Default for Canonicalization {
+    fn default() -> Self {
+        Canonicalization::Relaxed
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -87,16 +99,16 @@ pub struct DomainKey {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Report {
-    pub(crate) ra: Option<Vec<u8>>,
+    pub(crate) ra: Option<String>,
     pub(crate) rp: u8,
     pub(crate) rr: u8,
-    pub(crate) rs: Option<Vec<u8>>,
+    pub(crate) rs: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Atps {
     pub(crate) v: Version,
-    pub(crate) d: Option<Vec<u8>>,
+    pub(crate) d: Option<String>,
 }
 
 pub(crate) const R_HASH_SHA1: u64 = 0x01;
@@ -169,7 +181,7 @@ impl From<Algorithm> for HashAlgorithm {
     }
 }
 
-impl<'x> VerifySignature for Signature<'x> {
+impl VerifySignature for Signature {
     fn b(&self) -> &[u8] {
         &self.b
     }
@@ -178,21 +190,22 @@ impl<'x> VerifySignature for Signature<'x> {
         self.a
     }
 
-    fn s(&self) -> &[u8] {
+    fn s(&self) -> &str {
         &self.s
     }
 
-    fn d(&self) -> &[u8] {
+    fn d(&self) -> &str {
         &self.d
     }
 }
 
-impl<'x> DKIMOutput<'x> {
+impl DKIMOutput {
     pub(crate) fn pass() -> Self {
         DKIMOutput {
             result: DKIMResult::Pass,
             signature: None,
             report: None,
+            is_atps: false,
         }
     }
 
@@ -201,6 +214,7 @@ impl<'x> DKIMOutput<'x> {
             result: DKIMResult::PermError(err),
             signature: None,
             report: None,
+            is_atps: false,
         }
     }
 
@@ -209,6 +223,7 @@ impl<'x> DKIMOutput<'x> {
             result: DKIMResult::TempError(err),
             signature: None,
             report: None,
+            is_atps: false,
         }
     }
 
@@ -217,6 +232,7 @@ impl<'x> DKIMOutput<'x> {
             result: DKIMResult::Fail(err),
             signature: None,
             report: None,
+            is_atps: false,
         }
     }
 
@@ -225,6 +241,7 @@ impl<'x> DKIMOutput<'x> {
             result: DKIMResult::Neutral(err),
             signature: None,
             report: None,
+            is_atps: false,
         }
     }
 
@@ -236,8 +253,13 @@ impl<'x> DKIMOutput<'x> {
         }
     }
 
-    pub(crate) fn with_signature(mut self, signature: Signature<'x>) -> Self {
+    pub(crate) fn with_signature(mut self, signature: Signature) -> Self {
         self.signature = signature.into();
+        self
+    }
+
+    pub(crate) fn with_atps(mut self) -> Self {
+        self.is_atps = true;
         self
     }
 

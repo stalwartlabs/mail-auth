@@ -4,7 +4,7 @@ pub mod verify;
 
 use std::{
     borrow::Cow,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    net::{Ipv4Addr, Ipv6Addr},
 };
 
 use crate::{is_within_pct, SPFOutput, SPFResult, Version};
@@ -193,10 +193,8 @@ impl TryFrom<String> for SPFResult {
 }
 
 impl SPFOutput {
-    pub(crate) fn new(domain: &str, ip_addr: IpAddr) -> Self {
+    pub(crate) fn new() -> Self {
         SPFOutput {
-            domain: domain.to_string(),
-            ip_addr,
             result: SPFResult::None,
             report: None,
             explanation: None,
@@ -208,7 +206,7 @@ impl SPFOutput {
         self
     }
 
-    pub(crate) fn with_report(mut self, spf: &SPF) -> Self {
+    pub(crate) fn with_report(mut self, spf: &SPF, domain: &str) -> Self {
         match &spf.ra {
             Some(ra) if is_within_pct(spf.rp) => {
                 if match self.result {
@@ -220,7 +218,7 @@ impl SPFOutput {
                     }
                     SPFResult::Pass => false,
                 } {
-                    self.report = format!("{}@{}", String::from_utf8_lossy(ra), self.domain).into();
+                    self.report = format!("{}@{}", String::from_utf8_lossy(ra), domain).into();
                 }
             }
             _ => (),

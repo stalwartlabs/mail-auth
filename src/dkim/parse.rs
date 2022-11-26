@@ -34,15 +34,15 @@ const RR: u64 = (b'r' as u64) | (b'r' as u64) << 8;
 const RS: u64 = (b'r' as u64) | (b's' as u64) << 8;
 const ALL: u64 = (b'a' as u64) | (b'l' as u64) << 8 | (b'l' as u64) << 16;
 
-impl<'x> Signature<'x> {
+impl Signature {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
             v: 0,
             a: Algorithm::RsaSha256,
-            d: (b""[..]).into(),
-            s: (b""[..]).into(),
-            i: (b""[..]).into(),
+            d: "".into(),
+            s: "".into(),
+            i: "".into(),
             b: Vec::with_capacity(0),
             bh: Vec::with_capacity(0),
             h: Vec::with_capacity(0),
@@ -83,18 +83,18 @@ impl<'x> Signature<'x> {
                     signature.ch = ch;
                     signature.cb = cb;
                 }
-                D => signature.d = header.tag().into(),
+                D => signature.d = header.text(true),
                 H => signature.h = header.items(),
-                I => signature.i = header.tag_qp().into(),
+                I => signature.i = header.text_qp(true),
                 L => signature.l = header.number().unwrap_or(0),
-                S => signature.s = header.tag().into(),
+                S => signature.s = header.text(true),
                 T => signature.t = header.number().unwrap_or(0),
                 X => signature.x = header.number().unwrap_or(0),
                 Z => signature.z = header.headers_qp(),
                 R => signature.r = header.value() == Y,
                 ATPS => {
                     if signature.atps.is_none() {
-                        signature.atps = Some(header.tag().into());
+                        signature.atps = Some(header.text(true));
                     }
                 }
                 ATPSH => {
@@ -103,7 +103,7 @@ impl<'x> Signature<'x> {
                         SHA1 => HashAlgorithm::Sha1.into(),
                         NONE => None,
                         _ => {
-                            signature.atps = Some((&b""[..]).into());
+                            signature.atps = Some("".into());
                             None
                         }
                     };
@@ -326,13 +326,13 @@ impl TxtRecordParser for Report {
         while let Some(key) = header.key() {
             match key {
                 RA => {
-                    record.ra = header.tag_qp().into();
+                    record.ra = header.text_qp(true).into();
                 }
                 RP => {
                     record.rp = std::cmp::min(header.number().unwrap_or(0), 100) as u8;
                 }
                 RS => {
-                    record.rs = header.tag_qp().into();
+                    record.rs = header.text_qp(false).into();
                 }
                 RR => {
                     record.rr = 0;
@@ -405,7 +405,7 @@ impl TxtRecordParser for Atps {
                     has_version = true;
                 }
                 D => {
-                    record.d = header.tag().into();
+                    record.d = header.text(true).into();
                 }
                 _ => {
                     header.ignore();
@@ -493,9 +493,9 @@ mod test {
                 Signature {
                     v: 1,
                     a: Algorithm::RsaSha256,
-                    d: (b"stalw.art"[..]).into(),
-                    s: (b"default"[..]).into(),
-                    i: (b""[..]).into(),
+                    d: "stalw.art".into(),
+                    s: "default".into(),
+                    i: "".into(),
                     bh: base64_decode(b"QoiUNYyUV+1tZ/xUPRcE+gST2zAStvJx1OK078Ylm5s=").unwrap(),
                     b: base64_decode(
                         concat!(
@@ -506,7 +506,7 @@ mod test {
                         .as_bytes(),
                     )
                     .unwrap(),
-                    h: vec![b"Subject".to_vec(), b"To".to_vec(), b"From".to_vec()],
+                    h: vec!["Subject".to_string(), "To".to_string(), "From".to_string()],
                     z: vec![],
                     l: 0,
                     x: 0,
@@ -532,9 +532,9 @@ mod test {
                 Signature {
                     v: 1,
                     a: Algorithm::RsaSha1,
-                    d: (b"example.net"[..]).into(),
-                    s: (b"brisbane"[..]).into(),
-                    i: (b"@eng.example.net"[..]).into(),
+                    d: "example.net".into(),
+                    s: "brisbane".into(),
+                    i: "@eng.example.net".into(),
                     bh: base64_decode(b"MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=").unwrap(),
                     b: base64_decode(
                         concat!(
@@ -545,16 +545,16 @@ mod test {
                     )
                     .unwrap(),
                     h: vec![
-                        b"from".to_vec(),
-                        b"to".to_vec(),
-                        b"subject".to_vec(),
-                        b"date".to_vec(),
+                        "from".to_string(),
+                        "to".to_string(),
+                        "subject".to_string(),
+                        "date".to_string(),
                     ],
                     z: vec![
-                        b"From:foo@eng.example.net".to_vec(),
-                        b"To:joe@example.com".to_vec(),
-                        b"Subject:demo run".to_vec(),
-                        b"Date:July 5, 2005 3:44:08 PM -0700".to_vec(),
+                        "From:foo@eng.example.net".to_string(),
+                        "To:joe@example.com".to_string(),
+                        "Subject:demo run".to_string(),
+                        "Date:July 5, 2005 3:44:08 PM -0700".to_string(),
                     ],
                     l: 0,
                     x: 1118006938,
@@ -581,9 +581,9 @@ mod test {
                 Signature {
                     v: 1,
                     a: Algorithm::RsaSha256,
-                    d: (b"example.com"[..]).into(),
-                    s: (b"brisbane"[..]).into(),
-                    i: (b"joe @football.example.com"[..]).into(),
+                    d: "example.com".into(),
+                    s: "brisbane".into(),
+                    i: "joe @football.example.com".into(),
                     bh: base64_decode(b"2jUSOH9NhtVGCQWNr9BrIAPreKQjO6Sn7XIkfJVOzv8=").unwrap(),
                     b: base64_decode(
                         concat!(
@@ -596,12 +596,12 @@ mod test {
                     )
                     .unwrap(),
                     h: vec![
-                        b"Received".to_vec(),
-                        b"From".to_vec(),
-                        b"To".to_vec(),
-                        b"Subject".to_vec(),
-                        b"Date".to_vec(),
-                        b"Message-ID".to_vec(),
+                        "Received".to_string(),
+                        "From".to_string(),
+                        "To".to_string(),
+                        "Subject".to_string(),
+                        "Date".to_string(),
+                        "Message-ID".to_string(),
                     ],
                     z: vec![],
                     l: 123,
@@ -749,7 +749,7 @@ mod test {
             (
                 "ra=dkim-errors; rp=97; rr=v:x",
                 Report {
-                    ra: b"dkim-errors".to_vec().into(),
+                    ra: "dkim-errors".to_string().into(),
                     rp: 97,
                     rr: RR_VERIFICATION | RR_EXPIRATION,
                     rs: None,
@@ -758,7 +758,7 @@ mod test {
             (
                 "ra=postmaster; rp=1; rr=d:o:p:s:u:v:x; rs=Error=20Message;",
                 Report {
-                    ra: b"postmaster".to_vec().into(),
+                    ra: "postmaster".to_string().into(),
                     rp: 1,
                     rr: RR_DNS
                         | RR_OTHER
@@ -767,7 +767,7 @@ mod test {
                         | RR_UNKNOWN_TAG
                         | RR_VERIFICATION
                         | RR_EXPIRATION,
-                    rs: b"Error Message".to_vec().into(),
+                    rs: "Error Message".to_string().into(),
                 },
             ),
         ] {

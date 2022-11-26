@@ -162,7 +162,7 @@ impl<'x> DKIMSigner<'x> {
         message: &[u8],
         header_hasher: impl Write,
         body_hasher: impl Write,
-    ) -> crate::Result<(usize, Vec<Vec<u8>>)> {
+    ) -> crate::Result<(usize, Vec<String>)> {
         let mut headers_it = HeaderIterator::new(message);
         let mut headers = Vec::with_capacity(self.sign_headers.len());
         let mut found_headers = vec![false; self.sign_headers.len()];
@@ -172,11 +172,11 @@ impl<'x> DKIMSigner<'x> {
             if let Some(pos) = self
                 .sign_headers
                 .iter()
-                .position(|header| header.eq_ignore_ascii_case(name))
+                .position(|header| name.eq_ignore_ascii_case(header.as_bytes()))
             {
                 headers.push((name, value));
                 found_headers[pos] = true;
-                signed_headers.push(name.to_vec());
+                signed_headers.push(std::str::from_utf8(name).unwrap().to_string());
             }
         }
 
@@ -193,7 +193,7 @@ impl<'x> DKIMSigner<'x> {
         signed_headers.reverse();
         for (header, found) in self.sign_headers.iter().zip(found_headers) {
             if !found {
-                signed_headers.push(header.to_vec());
+                signed_headers.push(header.to_string());
             }
         }
 
