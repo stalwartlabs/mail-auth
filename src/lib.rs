@@ -18,9 +18,10 @@ use std::{
 };
 
 use arc::Set;
-use common::lru::LruCache;
-use dkim::{Atps, DomainKey};
+use common::{headers::Header, lru::LruCache};
+use dkim::{Atps, Canonicalization, DomainKey, HashAlgorithm};
 use dmarc::DMARC;
+use rsa::RsaPrivateKey;
 use spf::{Macro, SPF};
 use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
 
@@ -31,6 +32,12 @@ pub mod dmarc;
 pub mod spf;
 
 #[derive(Debug)]
+pub enum PrivateKey {
+    Rsa(RsaPrivateKey),
+    Ed25519(ed25519_dalek::Keypair),
+    None,
+}
+#[derive(Debug)]
 pub struct Resolver {
     pub(crate) resolver: TokioAsyncResolver,
     pub(crate) cache_txt: LruCache<String, Txt>,
@@ -39,7 +46,6 @@ pub struct Resolver {
     pub(crate) cache_ipv6: LruCache<String, Arc<Vec<Ipv6Addr>>>,
     pub(crate) cache_ptr: LruCache<IpAddr, Arc<Vec<String>>>,
     pub(crate) host_domain: String,
-    pub(crate) host_name: String,
     pub(crate) verify_policy: Policy,
 }
 
@@ -71,12 +77,24 @@ pub enum Policy {
 pub struct AuthenticatedMessage<'x> {
     pub(crate) headers: Vec<(&'x [u8], &'x [u8])>,
     pub(crate) from: Vec<String>,
-    pub(crate) dkim_output: Vec<DKIMOutput>,
-    pub(crate) arc_output: ARCOutput<'x>,
+    pub(crate) body: &'x [u8],
+    pub(crate) body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
+    pub(crate) dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature<'x>>>>,
+    pub(crate) ams_headers: Vec<Header<'x, crate::Result<arc::Signature<'x>>>>,
+    pub(crate) as_headers: Vec<Header<'x, crate::Result<arc::Seal<'x>>>>,
+    pub(crate) aar_headers: Vec<Header<'x, crate::Result<arc::Results>>>,
+}
 
-    // Authentication-Results header
+#[derive(Debug, Clone, PartialEq, Eq)]
+// Authentication-Results header
+pub struct AuthenticationResults<'x> {
+    pub(crate) hostname: &'x str,
     pub(crate) auth_results: String,
-    // Received-SPF header
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+// Received-SPF header
+pub struct ReceivedSPF {
     pub(crate) received_spf: String,
 }
 
@@ -91,9 +109,9 @@ pub enum DKIMResult {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DKIMOutput {
+pub struct DKIMOutput<'x> {
     result: DKIMResult,
-    signature: Option<dkim::Signature>,
+    signature: Option<&'x dkim::Signature<'x>>,
     report: Option<String>,
     is_atps: bool,
 }
@@ -117,7 +135,6 @@ pub enum SPFResult {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SPFOutput {
-    //domain: String,
     result: SPFResult,
     report: Option<String>,
     explanation: Option<String>,
@@ -167,7 +184,8 @@ pub enum Error {
     DNSError,
     DNSRecordNotFound(ResponseCode),
 
-    ARCInvalidInstance,
+    ARCChainTooLong,
+    ARCInvalidInstance(u32),
     ARCInvalidCV,
     ARCHasHeaderTag,
     ARCBrokenChain,
@@ -207,10 +225,13 @@ impl Display for Error {
             Error::FailedVerification => write!(f, "Signature verification failed."),
             Error::SignatureExpired => write!(f, "Signature expired."),
             Error::FailedAUIDMatch => write!(f, "AUID does not match domain name."),
-            Error::ARCInvalidInstance => write!(f, "Invalid 'i=' value found in ARC header."),
+            Error::ARCInvalidInstance(i) => {
+                write!(f, "Invalid 'i={}' value found in ARC header.", i)
+            }
             Error::ARCInvalidCV => write!(f, "Invalid 'cv=' value found in ARC header."),
             Error::ARCHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal."),
             Error::ARCBrokenChain => write!(f, "Broken or missing ARC chain."),
+            Error::ARCChainTooLong => write!(f, "Too many ARC headers."),
             Error::InvalidRecordType => write!(f, "Invalid record."),
             Error::DNSError => write!(f, "DNS resolution error."),
             Error::DNSRecordNotFound(code) => write!(f, "DNS record not found: {}.", code),
@@ -250,25 +271,4 @@ pub(crate) fn is_within_pct(pct: u8) -> bool {
                 .wrapping_mul(11400714819323198485u64)
         }) % 100
             < pct as u64
-}
-
-#[cfg(test)]
-mod tests {
-    /*use trust_dns_resolver::{
-        config::{ResolverConfig, ResolverOpts},
-        AsyncResolver,
-    };*/
-
-    #[tokio::test]
-    async fn it_works() {
-        /*let resolver =
-            AsyncResolver::tokio(ResolverConfig::cloudflare_tls(), ResolverOpts::default())
-                .unwrap();
-        let c = resolver.ipv4_lookup("locura.bivo.org.").await.unwrap();
-
-        println!(
-            "{:#?}",
-            c
-        );*/
-    }
 }

@@ -3,12 +3,21 @@ use std::{borrow::Cow, fmt::Write, net::IpAddr};
 use mail_builder::encoders::base64::base64_encode;
 
 use crate::{
-    ARCOutput, AuthenticatedMessage, DKIMOutput, DKIMResult, DMARCOutput, DMARCResult, Error,
-    SPFOutput, SPFResult,
+    ARCOutput, AuthenticationResults, DKIMOutput, DKIMResult, DMARCOutput, DMARCResult, Error,
+    ReceivedSPF, SPFOutput, SPFResult,
 };
 
-impl<'x> AuthenticatedMessage<'x> {
-    pub fn add_dkim_result(&mut self, dkim: &DKIMOutput) {
+use super::headers::HeaderWriter;
+
+impl<'x> AuthenticationResults<'x> {
+    pub fn new(hostname: &'x str) -> Self {
+        AuthenticationResults {
+            hostname,
+            auth_results: String::with_capacity(64),
+        }
+    }
+
+    pub fn add_dkim_result(&mut self, dkim: &DKIMOutput, header_from: &str) {
         if !dkim.is_atps {
             self.auth_results.push_str(";\r\n\tdkim=");
         } else {
@@ -35,12 +44,7 @@ impl<'x> AuthenticatedMessage<'x> {
         }
 
         if dkim.is_atps {
-            write!(
-                self.auth_results,
-                " header.from={}",
-                self.from.last().map(|s| s.as_str()).unwrap_or_default()
-            )
-            .ok();
+            write!(self.auth_results, " header.from={}", header_from).ok();
         }
     }
 
@@ -48,7 +52,6 @@ impl<'x> AuthenticatedMessage<'x> {
         &mut self,
         spf: &SPFOutput,
         ip_addr: IpAddr,
-        receiver: &str,
         helo: &str,
         mail_from: &str,
     ) {
@@ -58,53 +61,12 @@ impl<'x> AuthenticatedMessage<'x> {
             format!("postmaster@{}", helo).into()
         };
         self.auth_results.push_str(";\r\n\tspf=");
-        match &spf.result {
-            SPFResult::Pass => write!(
-                self.received_spf,
-                "pass ({}: domain of {} designates {} as permitted sender)",
-                receiver, mail_from, ip_addr
-            ),
-            SPFResult::Fail => write!(
-                self.received_spf,
-                "fail ({}: domain of {} does not designate {} as permitted sender)",
-                receiver, mail_from, ip_addr
-            ),
-            SPFResult::SoftFail => write!(
-                self.received_spf,
-                "softfail ({}: domain of {} reports soft fail for {})",
-                receiver, mail_from, ip_addr
-            ),
-            SPFResult::Neutral => write!(
-                self.received_spf,
-                "neutral ({}: domain of {} reports neutral for {})",
-                receiver, mail_from, ip_addr
-            ),
-            SPFResult::TempError => write!(
-                self.received_spf,
-                "temperror ({}: temporary dns error validating {})",
-                receiver, mail_from
-            ),
-            SPFResult::PermError => write!(
-                self.received_spf,
-                "permerror ({}: unable to verify SPF record for {})",
-                receiver, mail_from,
-            ),
-            SPFResult::None => write!(
-                self.received_spf,
-                "none ({}: no SPF records found for {})",
-                receiver, mail_from
-            ),
-        }
-        .ok();
-
-        self.auth_results += &self.received_spf;
-        write!(
-            self.received_spf,
-            "\r\n\treceiver={}; client-ip={}; envelope-from=\"{}\"; helo={};",
-            receiver, ip_addr, mail_from, helo
-        )
-        .ok();
-
+        spf.result.as_spf_result(
+            &mut self.auth_results,
+            self.hostname,
+            mail_from.as_ref(),
+            ip_addr,
+        );
         write!(
             self.auth_results,
             " smtp.mailfrom={} smtp.helo={}",
@@ -142,6 +104,99 @@ impl<'x> AuthenticatedMessage<'x> {
             " header.from={} policy.dmarc={}",
             dmarc.domain, dmarc.policy
         )
+        .ok();
+    }
+}
+
+impl<'x> HeaderWriter for AuthenticationResults<'x> {
+    fn write_header(&self, mut writer: impl std::io::Write) -> std::io::Result<()> {
+        writer.write_all(b"Authentication-Results: ")?;
+        writer.write_all(self.hostname.as_bytes())?;
+        if !self.auth_results.is_empty() {
+            writer.write_all(self.auth_results.as_bytes())?;
+        } else {
+            writer.write_all(b"; none")?;
+        }
+        writer.write_all(b"\r\n")
+    }
+}
+
+impl HeaderWriter for ReceivedSPF {
+    fn write_header(&self, mut writer: impl std::io::Write) -> std::io::Result<()> {
+        writer.write_all(b"Received-SPF: ")?;
+        writer.write_all(self.received_spf.as_bytes())?;
+        writer.write_all(b"\r\n")
+    }
+}
+
+impl ReceivedSPF {
+    pub fn new(
+        spf: &SPFOutput,
+        ip_addr: IpAddr,
+        helo: &str,
+        mail_from: &str,
+        hostname: &str,
+    ) -> Self {
+        let mut received_spf = String::with_capacity(64);
+        let mail_from = if !mail_from.is_empty() {
+            Cow::from(mail_from)
+        } else {
+            format!("postmaster@{}", helo).into()
+        };
+
+        spf.result
+            .as_spf_result(&mut received_spf, hostname, mail_from.as_ref(), ip_addr);
+
+        write!(
+            received_spf,
+            "\r\n\treceiver={}; client-ip={}; envelope-from=\"{}\"; helo={};",
+            hostname, ip_addr, mail_from, helo
+        )
+        .ok();
+
+        ReceivedSPF { received_spf }
+    }
+}
+
+impl SPFResult {
+    fn as_spf_result(&self, header: &mut String, hostname: &str, mail_from: &str, ip_addr: IpAddr) {
+        match &self {
+            SPFResult::Pass => write!(
+                header,
+                "pass ({}: domain of {} designates {} as permitted sender)",
+                hostname, mail_from, ip_addr
+            ),
+            SPFResult::Fail => write!(
+                header,
+                "fail ({}: domain of {} does not designate {} as permitted sender)",
+                hostname, mail_from, ip_addr
+            ),
+            SPFResult::SoftFail => write!(
+                header,
+                "softfail ({}: domain of {} reports soft fail for {})",
+                hostname, mail_from, ip_addr
+            ),
+            SPFResult::Neutral => write!(
+                header,
+                "neutral ({}: domain of {} reports neutral for {})",
+                hostname, mail_from, ip_addr
+            ),
+            SPFResult::TempError => write!(
+                header,
+                "temperror ({}: temporary dns error validating {})",
+                hostname, mail_from
+            ),
+            SPFResult::PermError => write!(
+                header,
+                "permerror ({}: unable to verify SPF record for {})",
+                hostname, mail_from,
+            ),
+            SPFResult::None => write!(
+                header,
+                "none ({}: no SPF records found for {})",
+                hostname, mail_from
+            ),
+        }
         .ok();
     }
 }
@@ -197,8 +252,12 @@ impl AsAuthResult for Error {
             Error::SignatureExpired => "signature error",
             Error::DNSError => "dns error",
             Error::DNSRecordNotFound(_) => "dns record not found",
-            Error::ARCInvalidInstance => "invalid ARC instance",
+            Error::ARCInvalidInstance(i) => {
+                write!(header, "invalid ARC instance {})", i).ok();
+                return;
+            }
             Error::ARCInvalidCV => "invalid ARC cv",
+            Error::ARCChainTooLong => "too many ARC headers",
             Error::ARCHasHeaderTag => "ARC has header tag",
             Error::ARCBrokenChain => "broken ARC chain",
             Error::DMARCNotAligned => "dmarc not aligned",
@@ -211,35 +270,25 @@ impl AsAuthResult for Error {
 #[cfg(test)]
 mod test {
     use crate::{
-        dkim::Signature, dmarc::Policy, ARCOutput, AuthenticatedMessage, DKIMOutput, DKIMResult,
-        DMARCOutput, DMARCResult, Error, SPFOutput, SPFResult,
+        dkim::Signature, dmarc::Policy, ARCOutput, AuthenticationResults, DKIMOutput, DKIMResult,
+        DMARCOutput, DMARCResult, Error, ReceivedSPF, SPFOutput, SPFResult,
     };
 
     #[test]
     fn authentication_results() {
-        let mut message = AuthenticatedMessage {
-            headers: vec![],
-            from: vec!["jdoe@example.org".to_string()],
-            dkim_output: vec![],
-            arc_output: ARCOutput {
-                result: DKIMResult::None,
-                set: vec![],
-            },
-            auth_results: "mydomain.org".to_string(),
-            received_spf: String::new(),
-        };
+        let mut auth_results = AuthenticationResults::new("mydomain.org");
 
-        for (auth_results, dkim) in [
+        for (expected_auth_results, dkim) in [
             (
                 "dkim=pass header.d=example.org header.s=myselector",
                 DKIMOutput {
                     result: DKIMResult::Pass,
-                    signature: Signature {
-                        d: "example.org".to_string(),
-                        s: "myselector".to_string(),
+                    signature: (&Signature {
+                        d: "example.org".into(),
+                        s: "myselector".into(),
                         ..Default::default()
-                    }
-                    .into(),
+                    })
+                        .into(),
                     report: None,
                     is_atps: false,
                 },
@@ -251,13 +300,13 @@ mod test {
                 ),
                 DKIMOutput {
                     result: DKIMResult::Fail(Error::FailedVerification),
-                    signature: Signature {
-                        d: "example.org".to_string(),
-                        s: "myselector".to_string(),
+                    signature: (&Signature {
+                        d: "example.org".into(),
+                        s: "myselector".into(),
                         b: b"123456".to_vec(),
                         ..Default::default()
-                    }
-                    .into(),
+                    })
+                        .into(),
                     report: None,
                     is_atps: false,
                 },
@@ -269,26 +318,34 @@ mod test {
                 ),
                 DKIMOutput {
                     result: DKIMResult::TempError(Error::DNSError),
-                    signature: Signature {
-                        d: "atps.example.org".to_string(),
-                        s: "otherselctor".to_string(),
+                    signature: (&Signature {
+                        d: "atps.example.org".into(),
+                        s: "otherselctor".into(),
                         b: b"abcdef".to_vec(),
                         ..Default::default()
-                    }
-                    .into(),
+                    })
+                        .into(),
                     report: None,
                     is_atps: true,
                 },
             ),
         ] {
-            message.add_dkim_result(&dkim);
+            auth_results.add_dkim_result(&dkim, "jdoe@example.org");
             assert_eq!(
-                message.auth_results.rsplit_once(';').unwrap().1.trim(),
-                auth_results
+                auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
+                expected_auth_results
             );
         }
 
-        for (auth_results, received_spf, result, ip_addr, receiver, helo, mail_from) in [
+        for (
+            expected_auth_results,
+            expected_received_spf,
+            result,
+            ip_addr,
+            receiver,
+            helo,
+            mail_from,
+        ) in [
             (
                 concat!(
                     "spf=pass (localhost: domain of jdoe@example.org designates 192.168.1.1 ",
@@ -340,26 +397,36 @@ mod test {
                 "",
             ),
         ] {
-            message.add_spf_result(
+            auth_results.hostname = receiver;
+            auth_results.add_spf_result(
                 &SPFOutput {
                     result,
                     report: None,
                     explanation: None,
                 },
                 ip_addr,
-                receiver,
                 helo,
                 mail_from,
             );
-            assert_eq!(
-                message.auth_results.rsplit_once(';').unwrap().1.trim(),
-                auth_results
+            let received_spf = ReceivedSPF::new(
+                &SPFOutput {
+                    result,
+                    report: None,
+                    explanation: None,
+                },
+                ip_addr,
+                helo,
+                mail_from,
+                receiver,
             );
-            assert_eq!(message.received_spf, received_spf);
-            message.received_spf.clear();
+            assert_eq!(
+                auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
+                expected_auth_results
+            );
+            assert_eq!(received_spf.received_spf, expected_received_spf);
         }
 
-        for (auth_results, dmarc) in [
+        for (expected_auth_results, dmarc) in [
             (
                 "dmarc=pass header.from=example.org policy.dmarc=none",
                 DMARCOutput {
@@ -379,14 +446,14 @@ mod test {
                 },
             ),
         ] {
-            message.add_dmarc_result(&dmarc);
+            auth_results.add_dmarc_result(&dmarc);
             assert_eq!(
-                message.auth_results.rsplit_once(';').unwrap().1.trim(),
-                auth_results
+                auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
+                expected_auth_results
             );
         }
 
-        for (auth_results, arc, remote_ip) in [
+        for (expected_auth_results, arc, remote_ip) in [
             (
                 "arc=pass smtp.remote-ip=192.127.9.2",
                 DKIMResult::Pass,
@@ -398,7 +465,7 @@ mod test {
                 "1:2:3::a".parse().unwrap(),
             ),
         ] {
-            message.add_arc_result(
+            auth_results.add_arc_result(
                 &ARCOutput {
                     result: arc,
                     set: vec![],
@@ -406,8 +473,8 @@ mod test {
                 remote_ip,
             );
             assert_eq!(
-                message.auth_results.rsplit_once(';').unwrap().1.trim(),
-                auth_results
+                auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
+                expected_auth_results
             );
         }
     }

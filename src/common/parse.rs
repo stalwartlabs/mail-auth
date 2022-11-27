@@ -1,4 +1,4 @@
-use std::slice::Iter;
+use std::{borrow::Cow, slice::Iter};
 
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 
@@ -33,7 +33,7 @@ pub(crate) trait TagParser: Sized {
     fn value(&mut self) -> u64;
     fn text(&mut self, to_lower: bool) -> String;
     fn text_qp(&mut self, to_lower: bool) -> String;
-    fn headers_qp(&mut self) -> Vec<String>;
+    fn headers_qp<T: ItemParser>(&mut self) -> Vec<T>;
     fn number(&mut self) -> Option<u64>;
     fn items<T: ItemParser>(&mut self) -> Vec<T>;
     fn flag_value(&mut self) -> (u64, u8);
@@ -215,7 +215,7 @@ impl TagParser for Iter<'_, u8> {
 
     #[inline(always)]
     #[allow(clippy::while_let_on_iterator)]
-    fn headers_qp(&mut self) -> Vec<String> {
+    fn headers_qp<T: ItemParser>(&mut self) -> Vec<T> {
         let mut tags = Vec::new();
         let mut tag = Vec::with_capacity(20);
 
@@ -224,7 +224,10 @@ impl TagParser for Iter<'_, u8> {
                 break;
             } else if ch == b'|' {
                 if !tag.is_empty() {
-                    tags.push(String::from_utf8_lossy(&tag).into_owned());
+                    if let Some(tag) = T::parse(&tag) {
+                        tags.push(tag);
+                    }
+
                     tag.clear();
                 }
             } else if ch == b'=' {
@@ -242,7 +245,9 @@ impl TagParser for Iter<'_, u8> {
                         }
                     } else if ch == b'|' {
                         if !tag.is_empty() {
-                            tags.push(String::from_utf8_lossy(&tag).into_owned());
+                            if let Some(tag) = T::parse(&tag) {
+                                tags.push(tag);
+                            }
                             tag.clear();
                         }
                         break;
@@ -258,10 +263,9 @@ impl TagParser for Iter<'_, u8> {
         }
 
         if !tag.is_empty() {
-            tags.push(
-                String::from_utf8(tag)
-                    .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned()),
-            );
+            if let Some(tag) = T::parse(&tag) {
+                tags.push(tag);
+            }
         }
 
         tags
@@ -381,5 +385,16 @@ impl ItemParser for Vec<u8> {
 impl ItemParser for String {
     fn parse(bytes: &[u8]) -> Option<Self> {
         Some(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
+impl ItemParser for Cow<'_, str> {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        Some(
+            std::str::from_utf8(bytes)
+                .unwrap_or_default()
+                .to_string()
+                .into(),
+        )
     }
 }

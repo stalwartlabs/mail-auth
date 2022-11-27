@@ -34,7 +34,7 @@ const RR: u64 = (b'r' as u64) | (b'r' as u64) << 8;
 const RS: u64 = (b'r' as u64) | (b's' as u64) << 8;
 const ALL: u64 = (b'a' as u64) | (b'l' as u64) << 8 | (b'l' as u64) << 16;
 
-impl Signature {
+impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
@@ -83,18 +83,18 @@ impl Signature {
                     signature.ch = ch;
                     signature.cb = cb;
                 }
-                D => signature.d = header.text(true),
+                D => signature.d = header.text(true).into(),
                 H => signature.h = header.items(),
-                I => signature.i = header.text_qp(true),
+                I => signature.i = header.text_qp(true).into(),
                 L => signature.l = header.number().unwrap_or(0),
-                S => signature.s = header.text(true),
+                S => signature.s = header.text(true).into(),
                 T => signature.t = header.number().unwrap_or(0),
                 X => signature.x = header.number().unwrap_or(0),
                 Z => signature.z = header.headers_qp(),
                 R => signature.r = header.value() == Y,
                 ATPS => {
                     if signature.atps.is_none() {
-                        signature.atps = Some(header.text(true));
+                        signature.atps = Some(header.text(true).into());
                     }
                 }
                 ATPSH => {
@@ -506,7 +506,7 @@ mod test {
                         .as_bytes(),
                     )
                     .unwrap(),
-                    h: vec!["Subject".to_string(), "To".to_string(), "From".to_string()],
+                    h: vec!["Subject".into(), "To".into(), "From".into()],
                     z: vec![],
                     l: 0,
                     x: 0,
@@ -544,17 +544,12 @@ mod test {
                         .as_bytes(),
                     )
                     .unwrap(),
-                    h: vec![
-                        "from".to_string(),
-                        "to".to_string(),
-                        "subject".to_string(),
-                        "date".to_string(),
-                    ],
+                    h: vec!["from".into(), "to".into(), "subject".into(), "date".into()],
                     z: vec![
-                        "From:foo@eng.example.net".to_string(),
-                        "To:joe@example.com".to_string(),
-                        "Subject:demo run".to_string(),
-                        "Date:July 5, 2005 3:44:08 PM -0700".to_string(),
+                        "From:foo@eng.example.net".into(),
+                        "To:joe@example.com".into(),
+                        "Subject:demo run".into(),
+                        "Date:July 5, 2005 3:44:08 PM -0700".into(),
                     ],
                     l: 0,
                     x: 1118006938,
@@ -596,12 +591,12 @@ mod test {
                     )
                     .unwrap(),
                     h: vec![
-                        "Received".to_string(),
-                        "From".to_string(),
-                        "To".to_string(),
-                        "Subject".to_string(),
-                        "Date".to_string(),
-                        "Message-ID".to_string(),
+                        "Received".into(),
+                        "From".into(),
+                        "To".into(),
+                        "Subject".into(),
+                        "Date".into(),
+                        "Message-ID".into(),
                     ],
                     z: vec![],
                     l: 123,

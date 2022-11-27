@@ -1,11 +1,170 @@
-use crate::AuthenticatedMessage;
+use std::{borrow::Cow, io::Write, time::SystemTime};
 
-use super::{DomainKey, Flag, Signature};
+use sha1::{Digest, Sha1};
+use sha2::Sha256;
+
+use crate::{
+    common::{base32::Base32Writer, verify::VerifySignature},
+    AuthenticatedMessage, DKIMOutput, Error, Resolver,
+};
+
+use super::{Algorithm, Atps, DomainKey, Flag, HashAlgorithm, Signature};
+
+impl Resolver {
+    /// Verifies DKIM headers of an RFC5322 message.
+    #[inline(always)]
+    pub async fn verify_dkim<'x>(
+        &self,
+        message: &'x AuthenticatedMessage<'x>,
+    ) -> Vec<DKIMOutput<'x>> {
+        self.verify_dkim_(
+            message,
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        )
+        .await
+    }
+
+    pub(crate) async fn verify_dkim_<'x>(
+        &self,
+        message: &'x AuthenticatedMessage<'x>,
+        now: u64,
+    ) -> Vec<DKIMOutput<'x>> {
+        let mut output = Vec::with_capacity(message.dkim_headers.len());
+
+        // Validate DKIM headers
+        for header in &message.dkim_headers {
+            // Validate body hash
+            let signature = match &header.header {
+                Ok(signature) => {
+                    if signature.x == 0 || (signature.x > signature.t && signature.x > now) {
+                        signature
+                    } else {
+                        output.push(
+                            DKIMOutput::neutral(Error::SignatureExpired).with_signature(signature),
+                        );
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    output.push(DKIMOutput::neutral(err.clone()));
+                    continue;
+                }
+            };
+
+            // Validate body hash
+            let ha = HashAlgorithm::from(signature.a);
+            let bh = &message
+                .body_hashes
+                .iter()
+                .find(|(c, h, l, _)| c == &signature.cb && h == &ha && l == &signature.l)
+                .unwrap()
+                .3;
+
+            if bh != &signature.bh {
+                output.push(
+                    DKIMOutput::neutral(Error::FailedBodyHashMatch).with_signature(signature),
+                );
+                continue;
+            }
+
+            // Obtain ._domainkey TXT record
+            let record = match self.txt_lookup::<DomainKey>(signature.domain_key()).await {
+                Ok(record) => record,
+                Err(err) => {
+                    output.push(DKIMOutput::dns_error(err).with_signature(signature));
+                    continue;
+                }
+            };
+
+            // Enforce t=s flag
+            if !signature.validate_auid(&record) {
+                output.push(DKIMOutput::fail(Error::FailedAUIDMatch).with_signature(signature));
+                continue;
+            }
+
+            // Hash headers
+            let dkim_hdr_value = header.value.strip_signature();
+            let headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
+            let hh = match signature.a {
+                Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => {
+                    signature.ch.hash_headers::<Sha256>(headers)
+                }
+                Algorithm::RsaSha1 => signature.ch.hash_headers::<Sha1>(headers),
+            }
+            .unwrap_or_default();
+
+            // Verify signature
+            if let Err(err) = signature.verify(record.as_ref(), &hh) {
+                output.push(DKIMOutput::fail(err).with_signature(signature));
+                continue;
+            }
+
+            // Verify third-party signature, if any.
+            if let Some(atps) = &signature.atps {
+                let mut found = false;
+                // RFC5322.From has to match atps=
+                for from in &message.from {
+                    if let Some((_, domain)) = from.rsplit_once('@') {
+                        if domain.eq(atps) {
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+
+                if found {
+                    let mut query_domain = match &signature.atpsh {
+                        Some(HashAlgorithm::Sha256) => {
+                            let mut writer = Base32Writer::with_capacity(40);
+                            let mut hash = Sha256::new();
+                            hash.update(signature.d.as_bytes());
+                            writer.write_all(&hash.finalize()[..]).ok();
+                            writer.finalize()
+                        }
+                        Some(HashAlgorithm::Sha1) => {
+                            let mut writer = Base32Writer::with_capacity(40);
+                            let mut hash = Sha1::new();
+                            hash.update(signature.d.as_bytes());
+                            writer.write_all(&hash.finalize()[..]).ok();
+                            writer.finalize()
+                        }
+                        None => signature.d.to_string(),
+                    };
+                    query_domain.push_str("._atps.");
+                    query_domain.push_str(atps);
+                    query_domain.push('.');
+
+                    match self.txt_lookup::<Atps>(query_domain).await {
+                        Ok(_) => {
+                            // ATPS Verification successful
+                            output.push(DKIMOutput::pass().with_atps().with_signature(signature));
+                        }
+                        Err(err) => {
+                            output.push(
+                                DKIMOutput::dns_error(err)
+                                    .with_atps()
+                                    .with_signature(signature),
+                            );
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            // Verification successful
+            output.push(DKIMOutput::pass().with_signature(signature));
+        }
+        output
+    }
+}
 
 impl<'x> AuthenticatedMessage<'x> {
     pub fn signed_headers<'z: 'x>(
         &'z self,
-        headers: &'x [String],
+        headers: &'x [Cow<'x, str>],
         dkim_hdr_name: &'x [u8],
         dkim_hdr_value: &'x [u8],
     ) -> impl Iterator<Item = (&'x [u8], &'x [u8])> {
@@ -41,9 +200,9 @@ impl<'x> AuthenticatedMessage<'x> {
     }
 }
 
-impl Signature {
+impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
-    pub fn validate_auid(&self, record: &DomainKey) -> bool {
+    pub(crate) fn validate_auid(&self, record: &DomainKey) -> bool {
         // Enforce t=s flag
         if !self.i.is_empty() && record.has_flag(Flag::MatchDomain) {
             let mut auid = self.i.chars();
@@ -117,8 +276,42 @@ impl Verifier for &[u8] {
 
 #[cfg(test)]
 mod test {
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{Duration, Instant},
+    };
 
-    use crate::dkim::verify::Verifier;
+    use crate::{
+        common::parse::TxtRecordParser,
+        dkim::{verify::Verifier, DomainKey},
+        AuthenticatedMessage, DKIMResult, Resolver,
+    };
+
+    #[tokio::test]
+    async fn dkim_verify() {
+        let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        test_dir.push("resources");
+        test_dir.push("dkim");
+
+        for file_name in fs::read_dir(&test_dir).unwrap() {
+            let file_name = file_name.unwrap().path();
+            /*if !file_name.to_str().unwrap().contains("002") {
+                continue;
+            }*/
+            println!("file {}", file_name.to_str().unwrap());
+
+            let test = String::from_utf8(fs::read(&file_name).unwrap()).unwrap();
+            let (dns_records, raw_message) = test.split_once("\n\n").unwrap();
+            let resolver = new_resolver(dns_records);
+            let raw_message = raw_message.replace('\n', "\r\n");
+            let message = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
+
+            let dkim = resolver.verify_dkim_(&message, 1667843664).await;
+
+            assert_eq!(dkim.last().unwrap().result(), &DKIMResult::Pass);
+        }
+    }
 
     #[test]
     fn dkim_strip_signature() {
@@ -133,5 +326,21 @@ mod test {
                 stripped_value
             );
         }
+    }
+
+    fn new_resolver(dns_records: &str) -> Resolver {
+        let resolver = Resolver::new_system_conf().unwrap();
+        for (key, value) in dns_records
+            .split('\n')
+            .filter_map(|r| r.split_once(' ').map(|(a, b)| (a, b.as_bytes())))
+        {
+            resolver.txt_add(
+                format!("{}.", key),
+                DomainKey::parse(value).unwrap(),
+                Instant::now() + Duration::new(3200, 0),
+            );
+        }
+
+        resolver
     }
 }

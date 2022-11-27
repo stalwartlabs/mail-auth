@@ -12,7 +12,7 @@ use crate::common::parse::*;
 
 pub(crate) const CV: u64 = (b'c' as u64) | ((b'v' as u64) << 8);
 
-impl Signature {
+impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
@@ -38,7 +38,7 @@ impl Signature {
                 I => {
                     signature.i = header.number().unwrap_or(0) as u32;
                     if !(1..=50).contains(&signature.i) {
-                        return Err(Error::ARCInvalidInstance);
+                        return Err(Error::ARCInvalidInstance(signature.i));
                     }
                 }
                 A => {
@@ -57,10 +57,10 @@ impl Signature {
                     signature.ch = ch;
                     signature.cb = cb;
                 }
-                D => signature.d = header.text(true),
+                D => signature.d = header.text(true).into(),
                 H => signature.h = header.items(),
                 L => signature.l = header.number().unwrap_or(0),
-                S => signature.s = header.text(true),
+                S => signature.s = header.text(true).into(),
                 T => signature.t = header.number().unwrap_or(0),
                 X => signature.x = header.number().unwrap_or(0),
                 Z => signature.z = header.headers_qp(),
@@ -81,7 +81,7 @@ impl Signature {
     }
 }
 
-impl Seal {
+impl<'x> Seal<'x> {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut seal = Seal {
@@ -109,8 +109,8 @@ impl Seal {
                     seal.b =
                         base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
                 }
-                D => seal.d = header.text(true),
-                S => seal.s = header.text(true),
+                D => seal.d = header.text(true).into(),
+                S => seal.s = header.text(true).into(),
                 T => seal.t = header.number().unwrap_or(0),
                 CV => {
                     match header.next_skip_whitespaces().unwrap_or(0) {
@@ -138,7 +138,7 @@ impl Seal {
         seal.cv = cv.ok_or(Error::ARCInvalidCV)?;
 
         if !(1..=50).contains(&seal.i) {
-            Err(Error::ARCInvalidInstance)
+            Err(Error::ARCInvalidInstance(seal.i))
         } else if !seal.d.is_empty() && !seal.s.is_empty() && !seal.b.is_empty() {
             Ok(seal)
         } else {
@@ -166,7 +166,7 @@ impl Results {
         if (1..=50).contains(&results.i) {
             Ok(results)
         } else {
-            Err(Error::ARCInvalidInstance)
+            Err(Error::ARCInvalidInstance(results.i))
         }
     }
 }

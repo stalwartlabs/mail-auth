@@ -9,13 +9,13 @@
  * except according to those terms.
  */
 
-use std::io::Write;
+use std::{borrow::Cow, io::Write};
 
 use sha1::Digest;
 
 use crate::common::headers::HeaderIterator;
 
-use super::{Canonicalization, DKIMSigner};
+use super::{Canonicalization, Signature};
 
 impl Canonicalization {
     pub fn canonicalize_body(&self, body: &[u8], mut hasher: impl Write) -> std::io::Result<()> {
@@ -155,28 +155,28 @@ impl Canonicalization {
     }
 }
 
-impl<'x> DKIMSigner<'x> {
+impl<'x> Signature<'x> {
     #[allow(clippy::while_let_on_iterator)]
     pub(crate) fn canonicalize(
         &self,
-        message: &[u8],
+        message: &'x [u8],
         header_hasher: impl Write,
         body_hasher: impl Write,
-    ) -> crate::Result<(usize, Vec<String>)> {
+    ) -> crate::Result<(usize, Vec<Cow<'x, str>>)> {
         let mut headers_it = HeaderIterator::new(message);
-        let mut headers = Vec::with_capacity(self.sign_headers.len());
-        let mut found_headers = vec![false; self.sign_headers.len()];
-        let mut signed_headers = Vec::with_capacity(self.sign_headers.len());
+        let mut headers = Vec::with_capacity(self.h.len());
+        let mut found_headers = vec![false; self.h.len()];
+        let mut signed_headers = Vec::with_capacity(self.h.len());
 
         for (name, value) in &mut headers_it {
             if let Some(pos) = self
-                .sign_headers
+                .h
                 .iter()
                 .position(|header| name.eq_ignore_ascii_case(header.as_bytes()))
             {
                 headers.push((name, value));
                 found_headers[pos] = true;
-                signed_headers.push(std::str::from_utf8(name).unwrap().to_string());
+                signed_headers.push(std::str::from_utf8(name).unwrap().into());
             }
         }
 
@@ -191,9 +191,9 @@ impl<'x> DKIMSigner<'x> {
 
         // Add any missing headers
         signed_headers.reverse();
-        for (header, found) in self.sign_headers.iter().zip(found_headers) {
+        for (header, found) in self.h.iter().zip(found_headers) {
             if !found {
-                signed_headers.push(header.to_string());
+                signed_headers.push(header.to_string().into());
             }
         }
 

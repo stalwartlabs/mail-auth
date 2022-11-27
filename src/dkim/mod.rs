@@ -11,13 +11,14 @@
 
 use std::borrow::Cow;
 
-use rsa::{RsaPrivateKey, RsaPublicKey};
+use rsa::RsaPublicKey;
 
 use crate::{
     arc::Set, common::verify::VerifySignature, ARCOutput, DKIMOutput, DKIMResult, Error, Version,
 };
 
 pub mod canonicalize;
+pub mod headers;
 pub mod parse;
 pub mod sign;
 pub mod verify;
@@ -41,38 +42,23 @@ pub enum Algorithm {
     RsaSha256,
     Ed25519Sha256,
 }
-#[derive(Debug)]
-pub struct DKIMSigner<'x> {
-    private_key: PrivateKey,
-    sign_headers: Vec<Cow<'x, str>>,
-    a: Algorithm,
-    d: Cow<'x, str>,
-    s: Cow<'x, str>,
-    i: Cow<'x, str>,
-    l: bool,
-    x: u64,
-    ch: Canonicalization,
-    cb: Canonicalization,
-    atps: Option<Cow<'x, str>>,
-    atpsh: Option<HashAlgorithm>,
-}
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct Signature {
+pub struct Signature<'x> {
     pub(crate) v: u32,
     pub(crate) a: Algorithm,
-    pub(crate) d: String,
-    pub(crate) s: String,
+    pub(crate) d: Cow<'x, str>,
+    pub(crate) s: Cow<'x, str>,
     pub(crate) b: Vec<u8>,
     pub(crate) bh: Vec<u8>,
-    pub(crate) h: Vec<String>,
-    pub(crate) z: Vec<String>,
-    pub(crate) i: String,
+    pub(crate) h: Vec<Cow<'x, str>>,
+    pub(crate) z: Vec<Cow<'x, str>>,
+    pub(crate) i: Cow<'x, str>,
     pub(crate) l: u64,
     pub(crate) x: u64,
     pub(crate) t: u64,
     pub(crate) r: bool,                      // RFC 6651
-    pub(crate) atps: Option<String>,         // RFC 6541
+    pub(crate) atps: Option<Cow<'x, str>>,   // RFC 6541
     pub(crate) atpsh: Option<HashAlgorithm>, // RFC 6541
     pub(crate) ch: Canonicalization,
     pub(crate) cb: Canonicalization,
@@ -91,14 +77,14 @@ impl Default for Canonicalization {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DomainKey {
+pub(crate) struct DomainKey {
     pub(crate) v: Version,
     pub(crate) p: PublicKey,
     pub(crate) f: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Report {
+pub(crate) struct Report {
     pub(crate) ra: Option<String>,
     pub(crate) rp: u8,
     pub(crate) rr: u8,
@@ -158,13 +144,6 @@ impl From<Service> for u64 {
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum PrivateKey {
-    Rsa(RsaPrivateKey),
-    Ed25519(ed25519_dalek::Keypair),
-    None,
-}
-
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum PublicKey {
     Rsa(RsaPublicKey),
@@ -181,7 +160,7 @@ impl From<Algorithm> for HashAlgorithm {
     }
 }
 
-impl VerifySignature for Signature {
+impl<'x> VerifySignature for Signature<'x> {
     fn b(&self) -> &[u8] {
         &self.b
     }
@@ -199,7 +178,7 @@ impl VerifySignature for Signature {
     }
 }
 
-impl DKIMOutput {
+impl<'x> DKIMOutput<'x> {
     pub(crate) fn pass() -> Self {
         DKIMOutput {
             result: DKIMResult::Pass,
@@ -253,7 +232,7 @@ impl DKIMOutput {
         }
     }
 
-    pub(crate) fn with_signature(mut self, signature: Signature) -> Self {
+    pub(crate) fn with_signature(mut self, signature: &'x Signature<'x>) -> Self {
         self.signature = signature.into();
         self
     }
@@ -268,7 +247,7 @@ impl DKIMOutput {
     }
 
     pub fn signature(&self) -> Option<&Signature> {
-        self.signature.as_ref()
+        self.signature
     }
 }
 

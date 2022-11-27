@@ -67,18 +67,12 @@ impl Resolver {
             cache_ipv6: LruCache::with_capacity(capacity),
             cache_ptr: LruCache::with_capacity(capacity),
             host_domain: String::new(),
-            host_name: "localhost".to_string(),
             verify_policy: Policy::VeryStrict,
         })
     }
 
     pub fn with_host_domain(mut self, hostname: &str) -> Self {
         self.host_domain = hostname.to_lowercase();
-        self
-    }
-
-    pub fn with_host_name(mut self, hostname: &str) -> Self {
-        self.host_name = hostname.to_lowercase();
         self
     }
 

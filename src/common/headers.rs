@@ -1,7 +1,18 @@
 use std::{
+    io::Write,
     iter::{Enumerate, Peekable},
     slice::Iter,
 };
+
+impl<'x, T> Header<'x, T> {
+    pub fn new(name: &'x [u8], value: &'x [u8], header: T) -> Self {
+        Header {
+            name,
+            value,
+            header,
+        }
+    }
+}
 
 pub(crate) struct HeaderIterator<'x> {
     message: &'x [u8],
@@ -231,6 +242,15 @@ impl<'x> Iterator for HeaderParser<'x> {
         }
 
         None
+    }
+}
+
+pub trait HeaderWriter: Sized {
+    fn write_header(&self, writer: impl Write) -> std::io::Result<()>;
+    fn to_header(&self) -> String {
+        let mut buf = Vec::new();
+        self.write_header(&mut buf).unwrap();
+        String::from_utf8(buf).unwrap()
     }
 }
 

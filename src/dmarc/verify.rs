@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    AuthenticatedMessage, DKIMResult, DMARCOutput, DMARCResult, Error, Resolver, SPFOutput,
-    SPFResult,
+    AuthenticatedMessage, DKIMOutput, DKIMResult, DMARCOutput, DMARCResult, Error, Resolver,
+    SPFOutput, SPFResult,
 };
 
 use super::{Alignment, DMARC};
@@ -11,6 +11,7 @@ impl Resolver {
     pub async fn verify_dmarc(
         &self,
         message: &AuthenticatedMessage<'_>,
+        dkim_output: &[DKIMOutput<'_>],
         mail_from_domain: &str,
         spf_output: &SPFOutput,
     ) -> DMARCOutput {
@@ -29,7 +30,8 @@ impl Resolver {
         }
 
         if from_domain.is_empty()
-            || (spf_output.result != SPFResult::Pass && !message.has_dkim_pass())
+            || (spf_output.result != SPFResult::Pass
+                && !dkim_output.iter().any(|o| o.result == DKIMResult::Pass))
         {
             // No domain found or no mechanism passed, skip DMARC.
             return DMARCOutput::default().with_domain(from_domain);
@@ -55,7 +57,7 @@ impl Resolver {
 
         // Check SPF and DKIM strict alignment
         if (spf_output.result == SPFResult::Pass && mail_from_domain == from_domain)
-            || (message.dkim_output.iter().any(|o| {
+            || (dkim_output.iter().any(|o| {
                 o.result == DKIMResult::Pass && o.signature.as_ref().unwrap().d.eq(from_domain)
             }))
         {
@@ -72,7 +74,7 @@ impl Resolver {
                 && (mail_from_domain.ends_with(&from_subdomain)
                     || from_domain.ends_with(&format!(".{}", mail_from_domain))))
                 || (dmarc.adkim == Alignment::Relaxed
-                    && message.dkim_output.iter().any(|o| {
+                    && dkim_output.iter().any(|o| {
                         o.result == DKIMResult::Pass
                             && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
                                 || from_domain
