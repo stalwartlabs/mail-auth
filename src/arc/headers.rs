@@ -1,11 +1,12 @@
 use std::io::Write;
 
 use crate::{
+    common::headers::HeaderWriter,
     dkim::{Algorithm, Canonicalization},
     AuthenticationResults,
 };
 
-use super::{ChainValidation, Seal, Signature};
+use super::{ChainValidation, Seal, Signature, ARC};
 
 impl<'x> Signature<'x> {
     pub(crate) fn write(&self, mut writer: impl Write, as_header: bool) -> std::io::Result<()> {
@@ -122,9 +123,10 @@ impl<'x> Seal<'x> {
         if self.t > 0 {
             bw += writer.write(b"t=")?;
             bw += writer.write(self.t.to_string().as_bytes())?;
+            bw += writer.write(b"; ")?;
         }
 
-        bw += writer.write(b"; b=")?;
+        bw += writer.write(b"b=")?;
         for &byte in &self.b {
             bw += writer.write(&[byte])?;
             if bw >= 76 {
@@ -170,10 +172,17 @@ impl<'x> AuthenticationResults<'x> {
                     last_is_space = true;
                 }
             }
-            Ok(())
         } else {
             writer.write_all(self.auth_results.as_bytes())?;
-            writer.write_all(b"\r\n")
         }
+        writer.write_all(b"\r\n")
+    }
+}
+
+impl<'x> HeaderWriter for ARC<'x> {
+    fn write_header(&self, mut writer: impl Write) -> std::io::Result<()> {
+        self.seal.write(&mut writer, true)?;
+        self.signature.write(&mut writer, true)?;
+        self.results.write(&mut writer, self.seal.i, true)
     }
 }

@@ -122,6 +122,7 @@ impl<'x> ARC<'x> {
         // Hash ARC headers for the current instance
         self.results.write(&mut header_hasher, self.seal.i, false)?;
         self.signature.write(&mut header_hasher, false)?;
+        header_hasher.write_all(b"\r\n")?;
         self.seal.write(&mut header_hasher, false)?;
 
         // Seal
@@ -225,5 +226,130 @@ impl<'x> Signature<'x> {
         }
 
         Ok((body_len, signed_headers))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::{Duration, Instant};
+
+    use mail_parser::decoders::base64::base64_decode;
+
+    use crate::{
+        arc::ARC,
+        common::{headers::HeaderWriter, parse::TxtRecordParser},
+        dkim::{DomainKey, Signature},
+        AuthenticatedMessage, AuthenticationResults, DKIMResult, PrivateKey, Resolver,
+    };
+
+    const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
+MIICXwIBAAKBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYtIxN2SnFC
+jxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v/RtdC2UzJ1lWT947qR+Rcac2gb
+to/NMqJ0fzfVjH4OuKhitdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB
+AoGBALmn+XwWk7akvkUlqb+dOxyLB9i5VBVfje89Teolwc9YJT36BGN/l4e0l6QX
+/1//6DWUTB3KI6wFcm7TWJcxbS0tcKZX7FsJvUz1SbQnkS54DJck1EZO/BLa5ckJ
+gAYIaqlA9C0ZwM6i58lLlPadX/rtHb7pWzeNcZHjKrjM461ZAkEA+itss2nRlmyO
+n1/5yDyCluST4dQfO8kAB3toSEVc7DeFeDhnC1mZdjASZNvdHS4gbLIA1hUGEF9m
+3hKsGUMMPwJBAPW5v/U+AWTADFCS22t72NUurgzeAbzb1HWMqO4y4+9Hpjk5wvL/
+eVYizyuce3/fGke7aRYw/ADKygMJdW8H/OcCQQDz5OQb4j2QDpPZc0Nc4QlbvMsj
+7p7otWRO5xRa6SzXqqV3+F0VpqvDmshEBkoCydaYwc2o6WQ5EBmExeV8124XAkEA
+qZzGsIxVP+sEVRWZmW6KNFSdVUpk3qzK0Tz/WjQMe5z0UunY9Ax9/4PVhp/j61bf
+eAYXunajbBSOLlx4D+TunwJBANkPI5S9iylsbLs6NkaMHV6k5ioHBBmgCak95JGX
+GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
+-----END RSA PRIVATE KEY-----"#;
+
+    const RSA_PUBLIC_KEY: &str = concat!(
+        "v=DKIM1; t=s; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQ",
+        "KBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYt",
+        "IxN2SnFCjxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v",
+        "/RtdC2UzJ1lWT947qR+Rcac2gbto/NMqJ0fzfVjH4OuKhi",
+        "tdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB",
+    );
+
+    const ED25519_PRIVATE_KEY: &str = "nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=";
+    const ED25519_PUBLIC_KEY: &str =
+        "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
+
+    #[tokio::test]
+    async fn arc_seal() {
+        let message = concat!(
+            "From: queso@manchego.org\r\n",
+            "To: affumicata@scamorza.org\r\n",
+            "Subject: Say cheese\r\n",
+            "\r\n",
+            "We need to settle which one of us ",
+            "is tastier.\r\n"
+        );
+
+        // Crate resolver
+        let resolver = Resolver::new_system_conf().unwrap();
+        resolver.txt_add(
+            "rsa._domainkey.manchego.org.".to_string(),
+            DomainKey::parse(RSA_PUBLIC_KEY.as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
+        resolver.txt_add(
+            "ed._domainkey.scamorza.org.".to_string(),
+            DomainKey::parse(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
+
+        // Create private keys
+        let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_ed = PrivateKey::from_ed25519(
+            &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
+            &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
+        )
+        .unwrap();
+
+        // Create DKIM-signed message
+        let mut raw_message = Signature::new()
+            .headers(["From", "To", "Subject"])
+            .domain("manchego.org")
+            .selector("rsa")
+            .sign(message.as_bytes(), &pk_rsa)
+            .unwrap()
+            .to_header()
+            + message;
+
+        // Verify and seal the message 50 times
+        for _ in 0..25 {
+            raw_message =
+                arc_verify_and_seal(&resolver, &raw_message, "scamorza.org", "ed", &pk_ed).await;
+            raw_message =
+                arc_verify_and_seal(&resolver, &raw_message, "manchego.org", "rsa", &pk_rsa).await;
+        }
+
+        //println!("{}", raw_message);
+    }
+
+    async fn arc_verify_and_seal(
+        resolver: &Resolver,
+        raw_message: &str,
+        d: &str,
+        s: &str,
+        pk: &PrivateKey,
+    ) -> String {
+        let message = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
+        let dkim_result = resolver.verify_dkim(&message).await;
+        let arc_result = resolver.verify_arc(&message).await;
+        assert!(
+            matches!(arc_result.result(), DKIMResult::Pass | DKIMResult::None),
+            "ARC validation failed: {:?}",
+            arc_result.result()
+        );
+        let auth_results = AuthenticationResults::new(d).with_dkim_result(&dkim_result, d);
+        let arc = ARC::new(&auth_results)
+            .domain(d)
+            .selector(s)
+            .headers(["From", "To", "Subject", "DKIM-Signature"])
+            .seal(&message, &arc_result, pk)
+            .unwrap_or_else(|err| panic!("Got {:?} for {}", err, raw_message));
+        format!(
+            "{}{}{}",
+            arc.to_header(),
+            auth_results.to_header(),
+            raw_message
+        )
     }
 }

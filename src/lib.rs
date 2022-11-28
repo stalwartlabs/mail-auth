@@ -29,6 +29,7 @@ pub mod arc;
 pub mod common;
 pub mod dkim;
 pub mod dmarc;
+pub mod report;
 pub mod spf;
 
 #[derive(Debug)]

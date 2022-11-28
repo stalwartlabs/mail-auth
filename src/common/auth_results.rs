@@ -17,44 +17,47 @@ impl<'x> AuthenticationResults<'x> {
         }
     }
 
-    pub fn add_dkim_result(&mut self, dkim: &DKIMOutput, header_from: &str) {
-        if !dkim.is_atps {
-            self.auth_results.push_str(";\r\n\tdkim=");
-        } else {
-            self.auth_results.push_str(";\r\n\tdkim-atps=");
-        }
-        dkim.result.as_auth_result(&mut self.auth_results);
-        if let Some(signature) = &dkim.signature {
-            if !signature.i.is_empty() {
-                self.auth_results.push_str(" header.i=");
-                self.auth_results.push_str(&signature.i);
+    pub fn with_dkim_result(mut self, dkim: &[DKIMOutput], header_from: &str) -> Self {
+        for dkim in dkim {
+            if !dkim.is_atps {
+                self.auth_results.push_str(";\r\n\tdkim=");
             } else {
-                self.auth_results.push_str(" header.d=");
-                self.auth_results.push_str(&signature.d);
+                self.auth_results.push_str(";\r\n\tdkim-atps=");
             }
-            self.auth_results.push_str(" header.s=");
-            self.auth_results.push_str(&signature.s);
-            if signature.b.len() >= 6 {
-                self.auth_results.push_str(" header.b=");
-                self.auth_results.push_str(
-                    &String::from_utf8(base64_encode(&signature.b[..6]).unwrap_or_default())
-                        .unwrap_or_default(),
-                );
+            dkim.result.as_auth_result(&mut self.auth_results);
+            if let Some(signature) = &dkim.signature {
+                if !signature.i.is_empty() {
+                    self.auth_results.push_str(" header.i=");
+                    self.auth_results.push_str(&signature.i);
+                } else {
+                    self.auth_results.push_str(" header.d=");
+                    self.auth_results.push_str(&signature.d);
+                }
+                self.auth_results.push_str(" header.s=");
+                self.auth_results.push_str(&signature.s);
+                if signature.b.len() >= 6 {
+                    self.auth_results.push_str(" header.b=");
+                    self.auth_results.push_str(
+                        &String::from_utf8(base64_encode(&signature.b[..6]).unwrap_or_default())
+                            .unwrap_or_default(),
+                    );
+                }
             }
-        }
 
-        if dkim.is_atps {
-            write!(self.auth_results, " header.from={}", header_from).ok();
+            if dkim.is_atps {
+                write!(self.auth_results, " header.from={}", header_from).ok();
+            }
         }
+        self
     }
 
-    pub fn add_spf_result(
-        &mut self,
+    pub fn with_spf_result(
+        mut self,
         spf: &SPFOutput,
         ip_addr: IpAddr,
         helo: &str,
         mail_from: &str,
-    ) {
+    ) -> Self {
         let mail_from = if !mail_from.is_empty() {
             Cow::from(mail_from)
         } else {
@@ -73,15 +76,17 @@ impl<'x> AuthenticationResults<'x> {
             mail_from, helo
         )
         .ok();
+        self
     }
 
-    pub fn add_arc_result(&mut self, arc: &ARCOutput, remote_ip: IpAddr) {
+    pub fn with_arc_result(mut self, arc: &ARCOutput, remote_ip: IpAddr) -> Self {
         self.auth_results.push_str(";\r\n\tarc=");
         arc.result.as_auth_result(&mut self.auth_results);
         write!(self.auth_results, " smtp.remote-ip={}", remote_ip).ok();
+        self
     }
 
-    pub fn add_dmarc_result(&mut self, dmarc: &DMARCOutput) {
+    pub fn with_dmarc_result(mut self, dmarc: &DMARCOutput) -> Self {
         self.auth_results.push_str(";\r\n\tdmarc=");
         match &dmarc.result {
             DMARCResult::Pass => self.auth_results.push_str("pass"),
@@ -105,6 +110,7 @@ impl<'x> AuthenticationResults<'x> {
             dmarc.domain, dmarc.policy
         )
         .ok();
+        self
     }
 }
 
@@ -330,7 +336,7 @@ mod test {
                 },
             ),
         ] {
-            auth_results.add_dkim_result(&dkim, "jdoe@example.org");
+            auth_results = auth_results.with_dkim_result(&[dkim], "jdoe@example.org");
             assert_eq!(
                 auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
                 expected_auth_results
@@ -398,7 +404,7 @@ mod test {
             ),
         ] {
             auth_results.hostname = receiver;
-            auth_results.add_spf_result(
+            auth_results = auth_results.with_spf_result(
                 &SPFOutput {
                     result,
                     report: None,
@@ -446,7 +452,7 @@ mod test {
                 },
             ),
         ] {
-            auth_results.add_dmarc_result(&dmarc);
+            auth_results = auth_results.with_dmarc_result(&dmarc);
             assert_eq!(
                 auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
                 expected_auth_results
@@ -465,7 +471,7 @@ mod test {
                 "1:2:3::a".parse().unwrap(),
             ),
         ] {
-            auth_results.add_arc_result(
+            auth_results = auth_results.with_arc_result(
                 &ARCOutput {
                     result: arc,
                     set: vec![],
