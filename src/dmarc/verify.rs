@@ -29,10 +29,8 @@ impl Resolver {
             }
         }
 
-        if from_domain.is_empty()
-            || (spf_output.result != SPFResult::Pass
-                && !dkim_output.iter().any(|o| o.result == DKIMResult::Pass))
-        {
+        let has_dkim_pass = dkim_output.iter().any(|o| o.result == DKIMResult::Pass);
+        if from_domain.is_empty() || (spf_output.result != SPFResult::Pass && !has_dkim_pass) {
             // No domain found or no mechanism passed, skip DMARC.
             return DMARCOutput::default().with_domain(from_domain);
         }
@@ -42,55 +40,60 @@ impl Resolver {
             Ok(Some(dmarc)) => dmarc,
             Ok(None) => return DMARCOutput::default().with_domain(from_domain),
             Err(err) => {
+                let err = DMARCResult::from(err);
                 return DMARCOutput::default()
                     .with_domain(from_domain)
-                    .with_result(err.into());
+                    .with_dkim_result(err.clone())
+                    .with_spf_result(err);
             }
         };
 
-        let output = DMARCOutput {
-            result: DMARCResult::None,
+        let mut output = DMARCOutput {
+            spf_result: DMARCResult::None,
+            dkim_result: DMARCResult::None,
             domain: from_domain.to_string(),
             policy: dmarc.p,
             record: None,
         };
 
-        // Check SPF and DKIM strict alignment
-        if (spf_output.result == SPFResult::Pass && mail_from_domain == from_domain)
-            || (dkim_output.iter().any(|o| {
-                o.result == DKIMResult::Pass && o.signature.as_ref().unwrap().d.eq(from_domain)
-            }))
-        {
-            output.with_record(dmarc).with_result(DMARCResult::Pass)
-        } else if dmarc.adkim == Alignment::Strict && dmarc.aspf == Alignment::Strict {
-            output
-                .with_record(dmarc)
-                .with_result(DMARCResult::Fail(Error::DMARCNotAligned))
-        } else {
-            // Check SPF relaxed alignment
-            let from_subdomain = format!(".{}", from_domain);
-            if (spf_output.result == SPFResult::Pass
-                && dmarc.aspf == Alignment::Relaxed
-                && (mail_from_domain.ends_with(&from_subdomain)
-                    || from_domain.ends_with(&format!(".{}", mail_from_domain))))
-                || (dmarc.adkim == Alignment::Relaxed
-                    && dkim_output.iter().any(|o| {
-                        o.result == DKIMResult::Pass
-                            && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
-                                || from_domain
-                                    .ends_with(&format!(".{}", o.signature.as_ref().unwrap().d)))
-                    }))
+        // Check SPF alignment
+        let from_subdomain = format!(".{}", from_domain);
+        if spf_output.result == SPFResult::Pass {
+            output.spf_result = if mail_from_domain == from_domain {
+                DMARCResult::Pass
+            } else if dmarc.aspf == Alignment::Relaxed
+                && mail_from_domain.ends_with(&from_subdomain)
+                || from_domain.ends_with(&format!(".{}", mail_from_domain))
             {
-                output
-                    .with_policy(dmarc.sp)
-                    .with_record(dmarc)
-                    .with_result(DMARCResult::Pass)
+                output.policy = dmarc.sp;
+                DMARCResult::Pass
             } else {
-                output
-                    .with_record(dmarc)
-                    .with_result(DMARCResult::Fail(Error::DMARCNotAligned))
-            }
+                DMARCResult::Fail(Error::DMARCNotAligned)
+            };
         }
+
+        // Check DKIM alignment
+        if has_dkim_pass {
+            output.dkim_result = if dkim_output.iter().any(|o| {
+                o.result == DKIMResult::Pass && o.signature.as_ref().unwrap().d.eq(from_domain)
+            }) {
+                DMARCResult::Pass
+            } else if dmarc.adkim == Alignment::Relaxed
+                && dkim_output.iter().any(|o| {
+                    o.result == DKIMResult::Pass
+                        && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
+                            || from_domain
+                                .ends_with(&format!(".{}", o.signature.as_ref().unwrap().d)))
+                })
+            {
+                output.policy = dmarc.sp;
+                DMARCResult::Pass
+            } else {
+                DMARCResult::Fail(Error::DMARCNotAligned)
+            };
+        }
+
+        output.with_record(dmarc)
     }
 
     async fn dmarc_tree_walk(&self, domain: &str) -> crate::Result<Option<Arc<DMARC>>> {

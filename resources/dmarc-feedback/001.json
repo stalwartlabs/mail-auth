@@ -1,0 +1,77 @@
+{
+  "version": 2.0,
+  "report_metadata": {
+    "org_name": "Sample Reporter",
+    "email": "report_sender@example-reporter.com",
+    "extra_contact_info": "...",
+    "report_id": "3v98abbp8ya9n3va8yr8oa3ya",
+    "date_range": {
+      "begin": 161212415,
+      "end": 161221511
+    },
+    "error": []
+  },
+  "policy_published": {
+    "domain": "example.com",
+    "version_published": null,
+    "adkim": "Unspecified",
+    "aspf": "Unspecified",
+    "p": "Quarantine",
+    "sp": "None",
+    "testing": false,
+    "fo": null
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "192.168.4.4",
+        "count": 123,
+        "policy_evaluated": {
+          "disposition": "Quarantine",
+          "dkim": "Pass",
+          "spf": "Fail",
+          "reason": []
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "",
+        "header_from": "example.com"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "example.com",
+            "selector": "abc123",
+            "result": "Pass",
+            "human_result": null
+          }
+        ],
+        "spf": [
+          {
+            "domain": "example.com",
+            "scope": "Unspecified",
+            "result": "Fail",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": [
+        {
+          "name": "extensionName",
+          "definition": "https://path/to/spec"
+        },
+        {
+          "name": "extensionName2",
+          "definition": "https://path/to/spec2"
+        }
+      ]
+    }
+  ],
+  "extensions": [
+    {
+      "name": "otherExtension",
+      "definition": "https://path/to/spec"
+    }
+  ]
+}

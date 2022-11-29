@@ -1,0 +1,69 @@
+{
+  "version": 0.0,
+  "report_metadata": {
+    "org_name": "\"backschues.NET",
+    "email": "noreply-dmarc-support@backschues.net",
+    "extra_contact_info": null,
+    "report_id": "stalw.art.1667948400.1668034800",
+    "date_range": {
+      "begin": 1667948400,
+      "end": 1668034800
+    },
+    "error": []
+  },
+  "policy_published": {
+    "domain": "stalw.art",
+    "version_published": null,
+    "adkim": "Relaxed",
+    "aspf": "Relaxed",
+    "p": "None",
+    "sp": "None",
+    "testing": false,
+    "fo": null
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "50.223.129.194",
+        "count": 1,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Fail",
+          "spf": "Fail",
+          "reason": []
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "",
+        "header_from": "stalw.art"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "ietf.org",
+            "selector": "",
+            "result": "Pass",
+            "human_result": null
+          },
+          {
+            "domain": "stalw.art",
+            "selector": "",
+            "result": "Fail",
+            "human_result": null
+          }
+        ],
+        "spf": [
+          {
+            "domain": "ietf.org",
+            "scope": "Unspecified",
+            "result": "None",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}

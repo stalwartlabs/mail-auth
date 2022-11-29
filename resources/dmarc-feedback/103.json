@@ -1,0 +1,75 @@
+{
+  "version": 1.0,
+  "report_metadata": {
+    "org_name": "Outlook.com",
+    "email": "dmarcreport@microsoft.com",
+    "extra_contact_info": null,
+    "report_id": "725cbfbe133940149987cfc528387235",
+    "date_range": {
+      "begin": 1666483200,
+      "end": 1666569600
+    },
+    "error": []
+  },
+  "policy_published": {
+    "domain": "stalw.art",
+    "version_published": null,
+    "adkim": "Relaxed",
+    "aspf": "Relaxed",
+    "p": "None",
+    "sp": "None",
+    "testing": false,
+    "fo": "0"
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "50.223.129.194",
+        "count": 1,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Fail",
+          "spf": "Fail",
+          "reason": []
+        }
+      },
+      "identifiers": {
+        "envelope_to": "outlook.com",
+        "envelope_from": "ietf.org",
+        "header_from": "stalw.art"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "ietf.org",
+            "selector": "ietf1",
+            "result": "Pass",
+            "human_result": null
+          },
+          {
+            "domain": "ietf.org",
+            "selector": "ietf1",
+            "result": "Pass",
+            "human_result": null
+          },
+          {
+            "domain": "stalw.art",
+            "selector": "velikisrpan22",
+            "result": "Fail",
+            "human_result": null
+          }
+        ],
+        "spf": [
+          {
+            "domain": "ietf.org",
+            "scope": "MailFrom",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}

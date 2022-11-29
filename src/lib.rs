@@ -137,13 +137,15 @@ pub enum SPFResult {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SPFOutput {
     result: SPFResult,
+    domain: String,
     report: Option<String>,
     explanation: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DMARCOutput {
-    result: DMARCResult,
+    spf_result: DMARCResult,
+    dkim_result: DMARCResult,
     domain: String,
     policy: dmarc::Policy,
     record: Option<Arc<DMARC>>,

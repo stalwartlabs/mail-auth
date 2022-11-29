@@ -7,20 +7,20 @@ pub mod verify;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DMARC {
-    v: Version,
-    adkim: Alignment,
-    aspf: Alignment,
-    fo: Report,
-    np: Policy,
-    p: Policy,
-    psd: Psd,
-    pct: u8,
-    rf: u8,
-    ri: u32,
-    rua: Vec<URI>,
-    ruf: Vec<URI>,
-    sp: Policy,
-    t: bool,
+    pub(crate) v: Version,
+    pub(crate) adkim: Alignment,
+    pub(crate) aspf: Alignment,
+    pub(crate) fo: Report,
+    pub(crate) np: Policy,
+    pub(crate) p: Policy,
+    pub(crate) psd: Psd,
+    pub(crate) pct: u8,
+    pub(crate) rf: u8,
+    pub(crate) ri: u32,
+    pub(crate) rua: Vec<URI>,
+    pub(crate) ruf: Vec<URI>,
+    pub(crate) sp: Policy,
+    pub(crate) t: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -95,10 +95,11 @@ impl From<Error> for DMARCResult {
 impl Default for DMARCOutput {
     fn default() -> Self {
         Self {
-            result: DMARCResult::None,
             domain: String::new(),
             policy: Policy::None,
             record: None,
+            spf_result: DMARCResult::None,
+            dkim_result: DMARCResult::None,
         }
     }
 }
@@ -109,13 +110,13 @@ impl DMARCOutput {
         self
     }
 
-    pub(crate) fn with_result(mut self, result: DMARCResult) -> Self {
-        self.result = result;
+    pub(crate) fn with_spf_result(mut self, result: DMARCResult) -> Self {
+        self.spf_result = result;
         self
     }
 
-    pub(crate) fn with_policy(mut self, policy: Policy) -> Self {
-        self.policy = policy;
+    pub(crate) fn with_dkim_result(mut self, result: DMARCResult) -> Self {
+        self.dkim_result = result;
         self
     }
 
@@ -127,14 +128,10 @@ impl DMARCOutput {
 
 impl Display for Policy {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                Policy::Quarantine => "quarantine",
-                Policy::Reject => "reject",
-                Policy::None | Policy::Unspecified => "none",
-            }
-        )
+        f.write_str(match self {
+            Policy::Quarantine => "quarantine",
+            Policy::Reject => "reject",
+            Policy::None | Policy::Unspecified => "none",
+        })
     }
 }

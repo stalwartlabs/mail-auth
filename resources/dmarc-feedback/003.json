@@ -1,0 +1,192 @@
+{
+  "version": 1.0,
+  "report_metadata": {
+    "org_name": "Fastmail Pty Ltd",
+    "email": "reports@fastmaildmarc.com",
+    "extra_contact_info": "https://fastmail.com/",
+    "report_id": "758848224",
+    "date_range": {
+      "begin": 1667347200,
+      "end": 1667433599
+    },
+    "error": []
+  },
+  "policy_published": {
+    "domain": "stalw.art",
+    "version_published": null,
+    "adkim": "Unspecified",
+    "aspf": "Unspecified",
+    "p": "None",
+    "sp": "None",
+    "testing": false,
+    "fo": "0"
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "64.147.108.117",
+        "count": 3,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Fail",
+          "spf": "Fail",
+          "reason": [
+            {
+              "type_": "TrustedForwarder",
+              "comment": "Policy ignored due to local white list"
+            }
+          ]
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "jmap.bounce.topicbox.com",
+        "header_from": "stalw.art"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "jmap.topicbox.com",
+            "selector": "dkim-1",
+            "result": "Pass",
+            "human_result": "pass"
+          }
+        ],
+        "spf": [
+          {
+            "domain": "jmap.bounce.topicbox.com",
+            "scope": "MailFrom",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    },
+    {
+      "row": {
+        "source_ip": "173.228.157.66",
+        "count": 4,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Fail",
+          "spf": "Fail",
+          "reason": [
+            {
+              "type_": "TrustedForwarder",
+              "comment": "Policy ignored due to local white list"
+            }
+          ]
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "jmap.bounce.topicbox.com",
+        "header_from": "stalw.art"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "jmap.topicbox.com",
+            "selector": "dkim-1",
+            "result": "Pass",
+            "human_result": "pass"
+          }
+        ],
+        "spf": [
+          {
+            "domain": "jmap.bounce.topicbox.com",
+            "scope": "MailFrom",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    },
+    {
+      "row": {
+        "source_ip": "64.147.108.173",
+        "count": 1,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Fail",
+          "spf": "Fail",
+          "reason": [
+            {
+              "type_": "TrustedForwarder",
+              "comment": "Policy ignored due to local white list"
+            }
+          ]
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "jmap.bounce.topicbox.com",
+        "header_from": "stalw.art"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "jmap.topicbox.com",
+            "selector": "dkim-1",
+            "result": "Pass",
+            "human_result": "pass"
+          }
+        ],
+        "spf": [
+          {
+            "domain": "jmap.bounce.topicbox.com",
+            "scope": "MailFrom",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    },
+    {
+      "row": {
+        "source_ip": "54.240.8.13",
+        "count": 1,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Pass",
+          "spf": "Fail",
+          "reason": []
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "amazonses.com",
+        "header_from": "stalw.art"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "stalw.art",
+            "selector": "kvoujh5guu2jpweurhpt2ioscpkpukc3",
+            "result": "Pass",
+            "human_result": "pass"
+          },
+          {
+            "domain": "amazonses.com",
+            "selector": "6gbrjpgwjskckoa6a5zn6fwqkn67xbtw",
+            "result": "Pass",
+            "human_result": "pass"
+          }
+        ],
+        "spf": [
+          {
+            "domain": "amazonses.com",
+            "scope": "MailFrom",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}

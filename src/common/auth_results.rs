@@ -88,21 +88,14 @@ impl<'x> AuthenticationResults<'x> {
 
     pub fn with_dmarc_result(mut self, dmarc: &DMARCOutput) -> Self {
         self.auth_results.push_str(";\r\n\tdmarc=");
-        match &dmarc.result {
-            DMARCResult::Pass => self.auth_results.push_str("pass"),
-            DMARCResult::Fail(err) => {
-                self.auth_results.push_str("fail");
-                err.as_auth_result(&mut self.auth_results);
-            }
-            DMARCResult::PermError(err) => {
-                self.auth_results.push_str("permerror");
-                err.as_auth_result(&mut self.auth_results);
-            }
-            DMARCResult::TempError(err) => {
-                self.auth_results.push_str("temperror");
-                err.as_auth_result(&mut self.auth_results);
-            }
-            DMARCResult::None => self.auth_results.push_str("none"),
+        if dmarc.spf_result == DMARCResult::Pass || dmarc.dkim_result == DMARCResult::Pass {
+            DMARCResult::Pass.as_auth_result(&mut self.auth_results);
+        } else if dmarc.spf_result != DMARCResult::None {
+            dmarc.spf_result.as_auth_result(&mut self.auth_results);
+        } else if dmarc.dkim_result != DMARCResult::None {
+            dmarc.dkim_result.as_auth_result(&mut self.auth_results);
+        } else {
+            DMARCResult::None.as_auth_result(&mut self.auth_results);
         }
         write!(
             self.auth_results,
@@ -209,6 +202,27 @@ impl SPFResult {
 
 pub trait AsAuthResult {
     fn as_auth_result(&self, header: &mut String);
+}
+
+impl AsAuthResult for DMARCResult {
+    fn as_auth_result(&self, header: &mut String) {
+        match &self {
+            DMARCResult::Pass => header.push_str("pass"),
+            DMARCResult::Fail(err) => {
+                header.push_str("fail");
+                err.as_auth_result(header);
+            }
+            DMARCResult::PermError(err) => {
+                header.push_str("permerror");
+                err.as_auth_result(header);
+            }
+            DMARCResult::TempError(err) => {
+                header.push_str("temperror");
+                err.as_auth_result(header);
+            }
+            DMARCResult::None => header.push_str("none"),
+        }
+    }
 }
 
 impl AsAuthResult for DKIMResult {
@@ -407,6 +421,7 @@ mod test {
             auth_results = auth_results.with_spf_result(
                 &SPFOutput {
                     result,
+                    domain: "".to_string(),
                     report: None,
                     explanation: None,
                 },
@@ -417,6 +432,7 @@ mod test {
             let received_spf = ReceivedSPF::new(
                 &SPFOutput {
                     result,
+                    domain: "".to_string(),
                     report: None,
                     explanation: None,
                 },
@@ -436,7 +452,8 @@ mod test {
             (
                 "dmarc=pass header.from=example.org policy.dmarc=none",
                 DMARCOutput {
-                    result: DMARCResult::Pass,
+                    spf_result: DMARCResult::Pass,
+                    dkim_result: DMARCResult::None,
                     domain: "example.org".to_string(),
                     policy: Policy::None,
                     record: None,
@@ -445,7 +462,8 @@ mod test {
             (
                 "dmarc=fail (dmarc not aligned) header.from=example.com policy.dmarc=quarantine",
                 DMARCOutput {
-                    result: DMARCResult::Fail(Error::DMARCNotAligned),
+                    dkim_result: DMARCResult::Fail(Error::DMARCNotAligned),
+                    spf_result: DMARCResult::None,
                     domain: "example.com".to_string(),
                     policy: Policy::Quarantine,
                     record: None,

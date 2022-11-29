@@ -193,11 +193,12 @@ impl TryFrom<String> for SPFResult {
 }
 
 impl SPFOutput {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(domain: String) -> Self {
         SPFOutput {
             result: SPFResult::None,
             report: None,
             explanation: None,
+            domain,
         }
     }
 
@@ -206,7 +207,7 @@ impl SPFOutput {
         self
     }
 
-    pub(crate) fn with_report(mut self, spf: &SPF, domain: &str) -> Self {
+    pub(crate) fn with_report(mut self, spf: &SPF) -> Self {
         match &spf.ra {
             Some(ra) if is_within_pct(spf.rp) => {
                 if match self.result {
@@ -218,7 +219,7 @@ impl SPFOutput {
                     }
                     SPFResult::Pass => false,
                 } {
-                    self.report = format!("{}@{}", String::from_utf8_lossy(ra), domain).into();
+                    self.report = format!("{}@{}", String::from_utf8_lossy(ra), self.domain).into();
                 }
             }
             _ => (),

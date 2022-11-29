@@ -17,6 +17,10 @@ lru-cache = "0.1.2"
 parking_lot = "0.12.0"
 ahash = "0.8.0"
 quick-xml = "0.26.0"
+serde = { version = "1.0", features = ["derive"] }
+zip = "0.6.3"
+flate2 = "1.0.25"
 
 [dev-dependencies]
 tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
+serde_json = "1.0"

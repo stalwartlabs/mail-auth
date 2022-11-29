@@ -1,0 +1,56 @@
+{
+  "version": 0.1,
+  "report_metadata": {
+    "org_name": "AMAZON-SES",
+    "email": "postmaster@amazonses.com",
+    "extra_contact_info": null,
+    "report_id": "6b06c366-0631-4ca0-8337-f5aecf137918",
+    "date_range": {
+      "begin": 1663545600,
+      "end": 1663632000
+    },
+    "error": []
+  },
+  "policy_published": {
+    "domain": "stalw.art",
+    "version_published": null,
+    "adkim": "Relaxed",
+    "aspf": "Relaxed",
+    "p": "None",
+    "sp": "None",
+    "testing": false,
+    "fo": "0"
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "207.171.188.200",
+        "count": 1,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Fail",
+          "spf": "Fail",
+          "reason": []
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "amazon.nl",
+        "header_from": "stalw.art"
+      },
+      "auth_results": {
+        "dkim": [],
+        "spf": [
+          {
+            "domain": "amazon.nl",
+            "scope": "Unspecified",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}

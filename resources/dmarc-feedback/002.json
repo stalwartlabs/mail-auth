@@ -1,0 +1,63 @@
+{
+  "version": 0.0,
+  "report_metadata": {
+    "org_name": "google.com",
+    "email": "noreply-dmarc-support@google.com",
+    "extra_contact_info": "https://support.google.com/a/answer/2466580",
+    "report_id": "2122885654478337555",
+    "date_range": {
+      "begin": 1661558400,
+      "end": 1661644799
+    },
+    "error": []
+  },
+  "policy_published": {
+    "domain": "example.org",
+    "version_published": null,
+    "adkim": "Relaxed",
+    "aspf": "Relaxed",
+    "p": "None",
+    "sp": "None",
+    "testing": false,
+    "fo": null
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "209.85.220.41",
+        "count": 2,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Fail",
+          "spf": "Pass",
+          "reason": []
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "",
+        "header_from": "example.org"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "example-org.20210112.gappssmtp.com",
+            "selector": "20210112",
+            "result": "Pass",
+            "human_result": null
+          }
+        ],
+        "spf": [
+          {
+            "domain": "example.org",
+            "scope": "Unspecified",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}

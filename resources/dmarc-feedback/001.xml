@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <feedback>
+  <version>2.0</version>
   <report_metadata>
-    <version>2.0</version>
     <org_name>Sample Reporter</org_name>
     <email>report_sender@example-reporter.com</email>
     <extra_contact_info>...</extra_contact_info>
@@ -9,6 +9,7 @@
     <date_range>
       <begin>161212415</begin>
       <end>161221511</end>
+      <unknown-tag1><unknown-tag2></unknown-tag2></unknown-tag1>
     </date_range>
   </report_metadata>
   <policy_published>
@@ -16,6 +17,7 @@
     <p>quarantine</p>
     <sp>none</sp>
     <testing>n</testing>
+    <unknown-tag1><unknown-tag2></unknown-tag2></unknown-tag1>
   </policy_published>
   <record>
     <row>
@@ -42,8 +44,17 @@
       </spf>
     </auth_results>
     <extensions>
+        <extension name="extensionName" definition="https://path/to/spec">
+          <data>...</data>
+        </extension>
+        <extension name="extensionName2" definition="https://path/to/spec2">
+          <data>...</data>
+        </extension>
     </extensions>
   </record>
   <extensions>
+    <extension name="otherExtension" definition="https://path/to/spec">
+        <data>...</data>
+    </extension>  
   </extensions>
 </feedback>

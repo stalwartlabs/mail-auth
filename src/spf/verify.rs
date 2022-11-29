@@ -18,7 +18,7 @@ impl Resolver {
             )
             .await
         } else {
-            SPFOutput::new().with_result(SPFResult::None)
+            SPFOutput::new(helo_domain.to_string()).with_result(SPFResult::None)
         }
     }
 
@@ -58,10 +58,10 @@ impl Resolver {
         helo_domain: &str,
         sender: &str,
     ) -> SPFOutput {
+        let output = SPFOutput::new(domain.to_string());
         if domain.is_empty() || domain.len() > 63 || !domain.has_labels() {
-            return SPFOutput::new().with_result(SPFResult::None);
+            return output.with_result(SPFResult::None);
         }
-        let base_domain = domain;
         let mut vars = Variables::new();
         let mut has_p_var = false;
         vars.set_ip(&ip);
@@ -77,7 +77,7 @@ impl Resolver {
         let mut lookup_limit = LookupLimit::new();
         let mut spf_record = match self.txt_lookup::<SPF>(domain).await {
             Ok(spf_record) => spf_record,
-            Err(err) => return SPFOutput::new().with_result(err.into()),
+            Err(err) => return output.with_result(err.into()),
         };
 
         let mut domain = domain.to_string();
@@ -90,9 +90,9 @@ impl Resolver {
             while let Some((pos, directive)) = directives.next() {
                 if !has_p_var && directive.mechanism.needs_ptr() {
                     if !lookup_limit.can_lookup() {
-                        return SPFOutput::new()
+                        return output
                             .with_result(SPFResult::PermError)
-                            .with_report(&spf_record, base_domain);
+                            .with_report(&spf_record);
                     }
                     if let Some(ptr) = self
                         .ptr_lookup(ip)
@@ -115,9 +115,9 @@ impl Resolver {
                         ip6_mask,
                     } => {
                         if !lookup_limit.can_lookup() {
-                            return SPFOutput::new()
+                            return output
                                 .with_result(SPFResult::PermError)
-                                .with_report(&spf_record, base_domain);
+                                .with_report(&spf_record);
                         }
                         match self
                             .ip_matches(
@@ -131,9 +131,9 @@ impl Resolver {
                             Ok(true) => true,
                             Ok(false) | Err(Error::DNSRecordNotFound(_)) => false,
                             Err(_) => {
-                                return SPFOutput::new()
+                                return output
                                     .with_result(SPFResult::TempError)
-                                    .with_report(&spf_record, base_domain);
+                                    .with_report(&spf_record);
                             }
                         }
                     }
@@ -143,9 +143,9 @@ impl Resolver {
                         ip6_mask,
                     } => {
                         if !lookup_limit.can_lookup() {
-                            return SPFOutput::new()
+                            return output
                                 .with_result(SPFResult::PermError)
-                                .with_report(&spf_record, base_domain);
+                                .with_report(&spf_record);
                         }
 
                         let mut matches = false;
@@ -156,9 +156,9 @@ impl Resolver {
                             Ok(records) => {
                                 for record in records.iter() {
                                     if !lookup_limit.can_lookup() {
-                                        return SPFOutput::new()
+                                        return output
                                             .with_result(SPFResult::PermError)
-                                            .with_report(&spf_record, base_domain);
+                                            .with_report(&spf_record);
                                     }
 
                                     match self
@@ -171,27 +171,27 @@ impl Resolver {
                                         }
                                         Ok(false) | Err(Error::DNSRecordNotFound(_)) => (),
                                         Err(_) => {
-                                            return SPFOutput::new()
+                                            return output
                                                 .with_result(SPFResult::TempError)
-                                                .with_report(&spf_record, base_domain);
+                                                .with_report(&spf_record);
                                         }
                                     }
                                 }
                             }
                             Err(Error::DNSRecordNotFound(_)) => (),
                             Err(_) => {
-                                return SPFOutput::new()
+                                return output
                                     .with_result(SPFResult::TempError)
-                                    .with_report(&spf_record, base_domain);
+                                    .with_report(&spf_record);
                             }
                         }
                         matches
                     }
                     Mechanism::Include { macro_string } => {
                         if !lookup_limit.can_lookup() {
-                            return SPFOutput::new()
+                            return output
                                 .with_result(SPFResult::PermError)
-                                .with_report(&spf_record, base_domain);
+                                .with_report(&spf_record);
                         }
 
                         let target_name = macro_string.eval(&vars, &domain, true);
@@ -213,22 +213,22 @@ impl Resolver {
                                 | Error::InvalidRecordType
                                 | Error::ParseError,
                             ) => {
-                                return SPFOutput::new()
+                                return output
                                     .with_result(SPFResult::PermError)
-                                    .with_report(&spf_record, base_domain)
+                                    .with_report(&spf_record)
                             }
                             Err(_) => {
-                                return SPFOutput::new()
+                                return output
                                     .with_result(SPFResult::TempError)
-                                    .with_report(&spf_record, base_domain)
+                                    .with_report(&spf_record)
                             }
                         }
                     }
                     Mechanism::Ptr { macro_string } => {
                         if !lookup_limit.can_lookup() {
-                            return SPFOutput::new()
+                            return output
                                 .with_result(SPFResult::PermError)
-                                .with_report(&spf_record, base_domain);
+                                .with_report(&spf_record);
                         }
 
                         let target_addr = macro_string.eval(&vars, &domain, true).to_lowercase();
@@ -254,9 +254,9 @@ impl Resolver {
                     }
                     Mechanism::Exists { macro_string } => {
                         if !lookup_limit.can_lookup() {
-                            return SPFOutput::new()
+                            return output
                                 .with_result(SPFResult::PermError)
-                                .with_report(&spf_record, base_domain);
+                                .with_report(&spf_record);
                         }
 
                         if let Ok(result) = self
@@ -265,9 +265,9 @@ impl Resolver {
                         {
                             result
                         } else {
-                            return SPFOutput::new()
+                            return output
                                 .with_result(SPFResult::TempError)
-                                .with_report(&spf_record, base_domain);
+                                .with_report(&spf_record);
                         }
                     }
                 };
@@ -295,9 +295,9 @@ impl Resolver {
                 // Follow redirect
                 if let (Some(macro_string), None) = (&spf_record.redirect, &result) {
                     if !lookup_limit.can_lookup() {
-                        return SPFOutput::new()
+                        return output
                             .with_result(SPFResult::PermError)
-                            .with_report(&spf_record, base_domain);
+                            .with_report(&spf_record);
                     }
 
                     let target_name = macro_string.eval(&vars, &domain, true);
@@ -315,14 +315,14 @@ impl Resolver {
                             | Error::InvalidRecordType
                             | Error::ParseError,
                         ) => {
-                            return SPFOutput::new()
+                            return output
                                 .with_result(SPFResult::PermError)
-                                .with_report(&spf_record, base_domain)
+                                .with_report(&spf_record)
                         }
                         Err(_) => {
-                            return SPFOutput::new()
+                            return output
                                 .with_result(SPFResult::TempError)
-                                .with_report(&spf_record, base_domain)
+                                .with_report(&spf_record)
                         }
                     }
                 }
@@ -337,16 +337,16 @@ impl Resolver {
                 .txt_lookup::<Macro>(macro_string.eval(&vars, &domain, true).to_string())
                 .await
             {
-                return SPFOutput::new()
+                return output
                     .with_result(SPFResult::Fail)
                     .with_explanation(macro_string.eval(&vars, &domain, false).to_string())
-                    .with_report(&spf_record, base_domain);
+                    .with_report(&spf_record);
             }
         }
 
-        SPFOutput::new()
+        output
             .with_result(result.unwrap_or(SPFResult::Neutral))
-            .with_report(&spf_record, base_domain)
+            .with_report(&spf_record)
     }
 
     async fn ip_matches(

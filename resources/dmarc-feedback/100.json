@@ -1,0 +1,63 @@
+{
+  "version": 0.0,
+  "report_metadata": {
+    "org_name": "google.com",
+    "email": "noreply-dmarc-support@google.com",
+    "extra_contact_info": "https://support.google.com/a/answer/2466580",
+    "report_id": "5264580628977113351",
+    "date_range": {
+      "begin": 1669507200,
+      "end": 1669593599
+    },
+    "error": []
+  },
+  "policy_published": {
+    "domain": "stalw.art",
+    "version_published": null,
+    "adkim": "Relaxed",
+    "aspf": "Relaxed",
+    "p": "None",
+    "sp": "None",
+    "testing": false,
+    "fo": null
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "2a01:4f9:c011:b43c::1",
+        "count": 1,
+        "policy_evaluated": {
+          "disposition": "None",
+          "dkim": "Pass",
+          "spf": "Pass",
+          "reason": []
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "",
+        "header_from": "stalw.art"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "stalw.art",
+            "selector": "velikisrpan22",
+            "result": "Pass",
+            "human_result": null
+          }
+        ],
+        "spf": [
+          {
+            "domain": "stalw.art",
+            "scope": "Unspecified",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}

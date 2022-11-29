@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<feedback>
+  <report_metadata>
+    <org_name>google.com</org_name>
+    <email>noreply-dmarc-support@google.com</email>
+    <extra_contact_info>https://support.google.com/a/answer/2466580</extra_contact_info>
+    <report_id>2122885654478337555</report_id>
+    <date_range>
+      <begin>1661558400</begin>
+      <end>1661644799</end>
+    </date_range>
+  </report_metadata>
+  <policy_published>
+    <domain>example.org</domain>
+    <adkim>r</adkim>
+    <aspf>r</aspf>
+    <p>none</p>
+    <sp>none</sp>
+    <pct>100</pct>
+  </policy_published>
+  <record>
+    <row>
+      <source_ip>209.85.220.41</source_ip>
+      <count>2</count>
+      <policy_evaluated>
+        <disposition>none</disposition>
+        <dkim>fail</dkim>
+        <spf>pass</spf>
+      </policy_evaluated>
+    </row>
+    <identifiers>
+      <header_from>example.org</header_from>
+    </identifiers>
+    <auth_results>
+      <dkim>
+        <domain>example-org.20210112.gappssmtp.com</domain>
+        <result>pass</result>
+        <selector>20210112</selector>
+      </dkim>
+      <spf>
+        <domain>example.org</domain>
+        <result>pass</result>
+      </spf>
+    </auth_results>
+  </record>
+</feedback>
