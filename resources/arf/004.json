@@ -1,0 +1,34 @@
+{
+  "feedback_type": "AuthFailure",
+  "arrival_date": null,
+  "authentication_results": [
+    "box.mydomain.name; dmarc=fail header.from=interpublication.org"
+  ],
+  "incidents": 1,
+  "original_envelope_id": "8BE2660E72",
+  "original_mail_from": "info@interpublication.org",
+  "original_rcpt_to": null,
+  "reported_domain": [
+    "interpublication.org"
+  ],
+  "reported_uri": [],
+  "reporting_mta": null,
+  "source_ip": "148.163.85.135",
+  "user_agent": "OpenDMARC-Filter/1.3.2",
+  "version": 1,
+  "source_port": 0,
+  "message": null,
+  "auth_failure": {
+    "auth_failure": "Dmarc",
+    "delivery_result": "Other",
+    "dkim_adsp_dns": null,
+    "dkim_canonicalized_body": null,
+    "dkim_canonicalized_header": null,
+    "dkim_domain": null,
+    "dkim_identity": null,
+    "dkim_selector": null,
+    "dkim_selector_dns": null,
+    "spf_dns": null,
+    "identity_alignment": "None"
+  }
+}

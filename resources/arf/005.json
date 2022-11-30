@@ -1,0 +1,36 @@
+{
+  "feedback_type": "AuthFailure",
+  "arrival_date": 1318104958,
+  "authentication_results": [
+    "mta1011.mail.tp2.receiver.example;\n    dkim=fail (bodyhash) header.d=sender.example"
+  ],
+  "incidents": 1,
+  "original_envelope_id": "o3F52gxO029144",
+  "original_mail_from": "anexample.reply@a.sender.example",
+  "original_rcpt_to": null,
+  "reported_domain": [
+    "a.sender.example"
+  ],
+  "reported_uri": [
+    "http://www.sender.example/"
+  ],
+  "reporting_mta": null,
+  "source_ip": "192.0.2.1",
+  "user_agent": "Someisp!Mail-Feedback/1.0",
+  "version": 1,
+  "source_port": 0,
+  "message": null,
+  "auth_failure": {
+    "auth_failure": "BodyHash",
+    "delivery_result": "Other",
+    "dkim_adsp_dns": null,
+    "dkim_canonicalized_body": "VGhpcyBpcyBhIG1lc3NhZ2UgYm9keSB0\n    aGF0IGdvdCBtb2RpZmllZCBpbiB0cmFuc2l0LgoKQXQgdGhlIHNhbWU\n    gdGltZSB0aGF0IHRoZSBib2R5aGFzaCBmYWlscyB0byB2ZXJpZnksIH\n    RoZQptZXNzYWdlIGNvbnRlbnQgaXMgY2xlYXJseSBhYnVzaXZlIG9yI\n    HBoaXNoeSwgYXMgdGhlClN1YmplY3QgYWxyZWFkeSBoaW50cy4gIElu\n    ZGVlZCwgdGhpcyBib2R5IGFsc28gY29udGFpbnMKdGhlIGZvbGxvd2l\n    uZyB0ZXh0OgoKICAgUGxlYXNlIGVudGVyIHlvdXIgZnVsbCBiYW5rIG\n    NyZWRlbnRpYWxzIGF0CiAgIGh0dHA6Ly93d3cuc2VuZGVyLmV4YW1wb\n    GUvCgpXZSBhcmUgaW1wbHlpbmcgdGhhdCwgYWx0aG91Z2ggbXVsdGlw\n    bGUgZmFpbHVyZXMKcmVxdWlyZSBtdWx0aXBsZSByZXBvcnRzLCBhIHN\n    pbmdsZSBmYWlsdXJlIGNhbiBiZQpyZXBvcnRlZCBhbG9uZyB3aXRoIH\n    BoaXNoaW5nIGluIGEgc2luZ2xlIHJlcG9ydC4K",
+    "dkim_canonicalized_header": null,
+    "dkim_domain": "sender.example",
+    "dkim_identity": "@sender.example",
+    "dkim_selector": "testkey",
+    "dkim_selector_dns": null,
+    "spf_dns": null,
+    "identity_alignment": "None"
+  }
+}

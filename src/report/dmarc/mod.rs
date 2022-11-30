@@ -8,13 +8,13 @@ use crate::{
     dmarc::DMARC,
     report::{
         ActionDisposition, Alignment, DKIMAuthResult, DKIMResult, DMARCResult, Disposition,
-        Feedback, PolicyOverride, PolicyOverrideReason, Record, SPFAuthResult, SPFDomainScope,
+        PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
         SPFResult,
     },
     ARCOutput, DKIMOutput, DMARCOutput, SPFOutput,
 };
 
-impl Feedback {
+impl Report {
     pub fn new() -> Self {
         Self::default()
     }

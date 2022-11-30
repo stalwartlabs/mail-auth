@@ -1,0 +1,25 @@
+{
+  "feedback_type": "Abuse",
+  "arrival_date": 1110290400,
+  "authentication_results": [
+    "mail.example.com;\n                spf=fail smtp.mail=somespammer@example.com"
+  ],
+  "incidents": 1,
+  "original_envelope_id": null,
+  "original_mail_from": "<somespammer@example.net>",
+  "original_rcpt_to": "<user@example.com>",
+  "reported_domain": [
+    "example.net"
+  ],
+  "reported_uri": [
+    "http://example.net/earn_money.html",
+    "mailto:user@example.com"
+  ],
+  "reporting_mta": "dns; mail.example.com",
+  "source_ip": "192.0.2.1",
+  "user_agent": "SomeGenerator/1.0",
+  "version": 1,
+  "source_port": 0,
+  "message": null,
+  "auth_failure": null
+}

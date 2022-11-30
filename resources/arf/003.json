@@ -1,0 +1,34 @@
+{
+  "feedback_type": "AuthFailure",
+  "arrival_date": 1271272531,
+  "authentication_results": [
+    "mail.example.com; dkim=fail\n    header.d=example.net"
+  ],
+  "incidents": 1,
+  "original_envelope_id": null,
+  "original_mail_from": "<randomuser@example.net>",
+  "original_rcpt_to": "<user@example.com>",
+  "reported_domain": [
+    "example.net"
+  ],
+  "reported_uri": [],
+  "reporting_mta": null,
+  "source_ip": "192.0.2.1",
+  "user_agent": "SomeDKIMFilter/1.0",
+  "version": 1,
+  "source_port": 0,
+  "message": null,
+  "auth_failure": {
+    "auth_failure": "BodyHash",
+    "delivery_result": "Other",
+    "dkim_adsp_dns": null,
+    "dkim_canonicalized_body": null,
+    "dkim_canonicalized_header": null,
+    "dkim_domain": "example.net",
+    "dkim_identity": null,
+    "dkim_selector": null,
+    "dkim_selector_dns": null,
+    "spf_dns": null,
+    "identity_alignment": "None"
+  }
+}

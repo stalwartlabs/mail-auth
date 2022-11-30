@@ -3,8 +3,8 @@ use mail_builder::{headers::HeaderType, MessageBuilder};
 
 use crate::report::{
     ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DKIMResult, DMARCResult, DateRange,
-    Disposition, Feedback, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
-    PolicyPublished, Record, ReportMetadata, Row, SPFAuthResult, SPFDomainScope, SPFResult,
+    Disposition, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
+    PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult, SPFDomainScope, SPFResult,
 };
 
 use std::{
@@ -12,7 +12,7 @@ use std::{
     fmt::{Display, Formatter, Write},
 };
 
-impl Feedback {
+impl Report {
     pub fn write_rfc5322<'x>(
         &self,
         receiver_domain: &'x str,
@@ -411,13 +411,13 @@ fn escape_xml(text: &str) -> Cow<'_, str> {
 mod test {
     use crate::report::{
         ActionDisposition, Alignment, DKIMAuthResult, DKIMResult, DMARCResult, Disposition,
-        Feedback, PolicyOverride, PolicyOverrideReason, Record, SPFAuthResult, SPFDomainScope,
+        PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
         SPFResult,
     };
 
     #[test]
-    fn dmarc_aggregate_report_generate() {
-        let feedback = Feedback::new()
+    fn dmarc_report_generate() {
+        let report = Report::new()
             .with_version(2.0)
             .with_org_name("Initech Industries Incorporated")
             .with_email("dmarc@initech.net")
@@ -500,7 +500,7 @@ mod test {
                     ),
             );
 
-        let message = feedback
+        let message = report
             .as_rfc5322(
                 "initech.net",
                 "Initech Industries",
@@ -508,8 +508,8 @@ mod test {
                 "dmarc-reports@example.org",
             )
             .unwrap();
-        let parsed_feedback = Feedback::parse_rfc5322(message.as_bytes()).unwrap();
+        let parsed_report = Report::parse_rfc5322(message.as_bytes()).unwrap();
 
-        assert_eq!(feedback, parsed_feedback);
+        assert_eq!(report, parsed_report);
     }
 }

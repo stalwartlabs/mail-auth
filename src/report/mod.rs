@@ -1,6 +1,10 @@
-mod feedback;
+pub mod arf;
+pub mod dmarc;
 
-use std::net::{IpAddr, Ipv4Addr};
+use std::{
+    borrow::Cow,
+    net::{IpAddr, Ipv4Addr},
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -169,7 +173,7 @@ pub struct Record {
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-pub struct Feedback {
+pub struct Report {
     version: f32,
     report_metadata: ReportMetadata,
     policy_published: PolicyPublished,
@@ -177,7 +181,7 @@ pub struct Feedback {
     extensions: Vec<Extension>,
 }
 
-impl Eq for Feedback {}
+impl Eq for Report {}
 
 impl Default for Row {
     fn default() -> Self {
@@ -248,5 +252,103 @@ pub enum Error {
 impl From<String> for Error {
     fn from(err: String) -> Self {
         Error::ReportParseError(err)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct Feedback<'x> {
+    feedback_type: FeedbackType,
+    arrival_date: Option<i64>,
+    authentication_results: Vec<Cow<'x, str>>,
+    incidents: u32,
+    original_envelope_id: Option<Cow<'x, str>>,
+    original_mail_from: Option<Cow<'x, str>>,
+    original_rcpt_to: Option<Cow<'x, str>>,
+    reported_domain: Vec<Cow<'x, str>>,
+    reported_uri: Vec<Cow<'x, str>>,
+    reporting_mta: Option<Cow<'x, str>>,
+    source_ip: Option<IpAddr>,
+    user_agent: Option<Cow<'x, str>>,
+    version: u32,
+    source_port: u32,
+
+    // Auth-Failure keys
+    auth_failure: AuthFailureType,
+    delivery_result: DeliveryResult,
+    dkim_adsp_dns: Option<Cow<'x, str>>,
+    dkim_canonicalized_body: Option<Cow<'x, str>>,
+    dkim_canonicalized_header: Option<Cow<'x, str>>,
+    dkim_domain: Option<Cow<'x, str>>,
+    dkim_identity: Option<Cow<'x, str>>,
+    dkim_selector: Option<Cow<'x, str>>,
+    dkim_selector_dns: Option<Cow<'x, str>>,
+    spf_dns: Option<Cow<'x, str>>,
+    identity_alignment: IdentityAlignment,
+
+    message: Option<Cow<'x, [u8]>>,
+    headers: Option<Cow<'x, [u8]>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
+pub enum AuthFailureType {
+    Adsp,
+    BodyHash,
+    Revoked,
+    Signature,
+    Spf,
+    Dmarc,
+    Unspecified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
+pub enum IdentityAlignment {
+    None,
+    Spf,
+    Dkim,
+    DkimSpf,
+    Unspecified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
+pub enum DeliveryResult {
+    Delivered,
+    Spam,
+    Policy,
+    Reject,
+    Other,
+    Unspecified,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
+pub enum FeedbackType {
+    Abuse,
+    AuthFailure,
+    Fraud,
+    NotSpam,
+    Other,
+    Virus,
+}
+
+impl Default for AuthFailureType {
+    fn default() -> Self {
+        AuthFailureType::Unspecified
+    }
+}
+
+impl Default for IdentityAlignment {
+    fn default() -> Self {
+        IdentityAlignment::Unspecified
+    }
+}
+
+impl Default for DeliveryResult {
+    fn default() -> Self {
+        DeliveryResult::Unspecified
+    }
+}
+
+impl Default for FeedbackType {
+    fn default() -> Self {
+        FeedbackType::Other
     }
 }

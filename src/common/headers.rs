@@ -66,6 +66,16 @@ impl<'x> HeaderIterator<'x> {
         }
     }
 
+    pub fn seek_start(&mut self) {
+        while let Some((_, ch)) = self.iter.peek() {
+            if !ch.is_ascii_whitespace() {
+                break;
+            } else {
+                self.iter.next();
+            }
+        }
+    }
+
     pub fn body_offset(&mut self) -> Option<usize> {
         self.iter.peek().map(|(pos, _)| *pos)
     }

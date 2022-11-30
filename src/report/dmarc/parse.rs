@@ -8,12 +8,12 @@ use quick_xml::reader::Reader;
 
 use crate::report::{
     ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DKIMResult, DMARCResult, DateRange,
-    Disposition, Error, Extension, Feedback, Identifier, PolicyEvaluated, PolicyOverride,
-    PolicyOverrideReason, PolicyPublished, Record, ReportMetadata, Row, SPFAuthResult,
+    Disposition, Error, Extension, Identifier, PolicyEvaluated, PolicyOverride,
+    PolicyOverrideReason, PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult,
     SPFDomainScope, SPFResult,
 };
 
-impl Feedback {
+impl Report {
     pub fn parse_rfc5322(report: &[u8]) -> Result<Self, Error> {
         let message = Message::parse(report).ok_or(Error::MailParseError)?;
         let mut error = Error::NoReportsFound;
@@ -30,7 +30,7 @@ impl Feedback {
                             .and_then(|n| n.rsplit_once('.'))
                             .map_or(false, |(_, e)| e.eq_ignore_ascii_case("xml")) =>
                 {
-                    match Feedback::parse_xml(report.as_bytes()) {
+                    match Report::parse_xml(report.as_bytes()) {
                         Ok(feedback) => return Ok(feedback),
                         Err(err) => {
                             error = err.into();
@@ -76,7 +76,7 @@ impl Feedback {
                             file.read_to_end(&mut buf)
                                 .map_err(|err| Error::UncompressError(err.to_string()))?;
 
-                            match Feedback::parse_xml(&buf) {
+                            match Report::parse_xml(&buf) {
                                 Ok(feedback) => return Ok(feedback),
                                 Err(err) => {
                                     error = err.into();
@@ -94,7 +94,7 @@ impl Feedback {
                                         file.read_to_end(&mut buf).map_err(|err| {
                                             Error::UncompressError(err.to_string())
                                         })?;
-                                        match Feedback::parse_xml(&buf) {
+                                        match Report::parse_xml(&buf) {
                                             Ok(feedback) => return Ok(feedback),
                                             Err(err) => {
                                                 error = err.into();
@@ -107,7 +107,7 @@ impl Feedback {
                                 }
                             }
                         }
-                        ReportType::Xml => match Feedback::parse_xml(report) {
+                        ReportType::Xml => match Report::parse_xml(report) {
                             Ok(feedback) => return Ok(feedback),
                             Err(err) => {
                                 error = err.into();
@@ -167,7 +167,7 @@ impl Feedback {
             }
         }
 
-        Ok(Feedback {
+        Ok(Report {
             version,
             report_metadata: report_metadata.ok_or("Missing feedback/report_metadata tag.")?,
             policy_published: policy_published.ok_or("Missing feedback/policy_published tag.")?,
@@ -757,10 +757,10 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
 mod test {
     use std::{fs, path::PathBuf};
 
-    use crate::report::Feedback;
+    use crate::report::Report;
 
     #[test]
-    fn dmarc_aggregate_report_parse() {
+    fn dmarc_report_parse() {
         let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         test_dir.push("resources");
         test_dir.push("dmarc-feedback");
@@ -772,12 +772,12 @@ mod test {
             }
             println!("Parsing DMARC feedback {}", file_name.to_str().unwrap());
 
-            let feedback = Feedback::parse_xml(&fs::read(&file_name).unwrap()).unwrap();
+            let feedback = Report::parse_xml(&fs::read(&file_name).unwrap()).unwrap();
 
             file_name.set_extension("json");
 
             let expected_feedback =
-                serde_json::from_slice::<Feedback>(&fs::read(&file_name).unwrap()).unwrap();
+                serde_json::from_slice::<Report>(&fs::read(&file_name).unwrap()).unwrap();
 
             assert_eq!(expected_feedback, feedback);
 
@@ -790,7 +790,7 @@ mod test {
     }
 
     #[test]
-    fn dmarc_aggregate_report_eml_parse() {
+    fn dmarc_report_eml_parse() {
         let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         test_dir.push("resources");
         test_dir.push("dmarc-feedback");
@@ -802,12 +802,12 @@ mod test {
             }
             println!("Parsing DMARC feedback {}", file_name.to_str().unwrap());
 
-            let feedback = Feedback::parse_rfc5322(&fs::read(&file_name).unwrap()).unwrap();
+            let feedback = Report::parse_rfc5322(&fs::read(&file_name).unwrap()).unwrap();
 
             file_name.set_extension("json");
 
             let expected_feedback =
-                serde_json::from_slice::<Feedback>(&fs::read(&file_name).unwrap()).unwrap();
+                serde_json::from_slice::<Report>(&fs::read(&file_name).unwrap()).unwrap();
 
             assert_eq!(expected_feedback, feedback);
 

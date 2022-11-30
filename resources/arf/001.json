@@ -1,0 +1,18 @@
+{
+  "feedback_type": "Abuse",
+  "arrival_date": null,
+  "authentication_results": [],
+  "incidents": 1,
+  "original_envelope_id": null,
+  "original_mail_from": null,
+  "original_rcpt_to": null,
+  "reported_domain": [],
+  "reported_uri": [],
+  "reporting_mta": null,
+  "source_ip": null,
+  "user_agent": "SomeGenerator/1.0",
+  "version": 1,
+  "source_port": 0,
+  "message": null,
+  "auth_failure": null
+}
