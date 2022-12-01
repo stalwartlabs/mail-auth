@@ -1,12 +1,22 @@
 [package]
 name = "mail-auth"
+description = "DKIM, ARC, SPF and DMARC library for Rust"
 version = "0.1.0"
 edition = "2021"
+authors = [ "Stalwart Labs <hello@stalw.art>"]
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/stalwartlabs/mail-auth"
+homepage = "https://github.com/stalwartlabs/mail-auth"
+keywords = ["dkim", "dmarc", "spf", "arc", "email", "mail", "e-mail"]
+categories = ["email", "authentication"]
+readme = "README.md"
+resolver = "2"
 
+[lib]
+doctest = false
 
 [dependencies]
-#mail-parser = { version = "0.7", git = "https://github.com/stalwartlabs/mail-parser", features = ["ludicrous_mode", "full_encoding"] 
-mail-parser = { path = "/home/vagrant/code/mail-parser", features = ["ludicrous_mode", "full_encoding"] }
+mail-parser = { version = "0.8", git = "https://github.com/stalwartlabs/mail-parser", features = ["ludicrous_mode", "full_encoding"] }
 mail-builder = { version = "0.2.4", git = "https://github.com/stalwartlabs/mail-builder", features = ["ludicrous_mode"] } 
 rsa = {version = "0.7.0"}
 ed25519-dalek = "1.0.1"

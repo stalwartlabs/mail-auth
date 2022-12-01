@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 use std::{borrow::Cow, io::Write, time::SystemTime};
 
 use sha1::{Digest, Sha1};
@@ -5,10 +15,13 @@ use sha2::Sha256;
 
 use crate::{
     common::{base32::Base32Writer, verify::VerifySignature},
-    AuthenticatedMessage, DKIMOutput, Error, Resolver,
+    is_within_pct, AuthenticatedMessage, DKIMOutput, DKIMResult, Error, Resolver,
 };
 
-use super::{Algorithm, Atps, DomainKey, Flag, HashAlgorithm, Signature};
+use super::{
+    Algorithm, Atps, DomainKey, DomainKeyReport, Flag, HashAlgorithm, Signature, RR_DNS,
+    RR_EXPIRATION, RR_OTHER, RR_SIGNATURE, RR_VERIFICATION,
+};
 
 impl Resolver {
     /// Verifies DKIM headers of an RFC5322 message.
@@ -33,12 +46,17 @@ impl Resolver {
         now: u64,
     ) -> Vec<DKIMOutput<'x>> {
         let mut output = Vec::with_capacity(message.dkim_headers.len());
+        let mut report_requested = false;
 
         // Validate DKIM headers
         for header in &message.dkim_headers {
             // Validate body hash
             let signature = match &header.header {
                 Ok(signature) => {
+                    if signature.r {
+                        report_requested = true;
+                    }
+
                     if signature.x == 0 || (signature.x > signature.t && signature.x > now) {
                         signature
                     } else {
@@ -157,6 +175,80 @@ impl Resolver {
             // Verification successful
             output.push(DKIMOutput::pass().with_signature(signature));
         }
+
+        // Handle reports
+        if report_requested {
+            for dkim in &mut output {
+                // Process signatures with errors that requested reports
+                let signature = if let Some(signature) = &dkim.signature {
+                    if signature.r && dkim.result != DKIMResult::Pass {
+                        signature
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                };
+
+                // Obtain ._domainkey TXT record
+                let record = if let Ok(record) = self
+                    .txt_lookup::<DomainKeyReport>(format!("_report._domainkey.{}.", signature.d))
+                    .await
+                {
+                    if is_within_pct(record.rp) {
+                        record
+                    } else {
+                        continue;
+                    }
+                } else {
+                    continue;
+                };
+
+                // Set report address
+                dkim.report = match &dkim.result() {
+                    DKIMResult::Neutral(err)
+                    | DKIMResult::Fail(err)
+                    | DKIMResult::PermError(err)
+                    | DKIMResult::TempError(err) => {
+                        let send_report = match err {
+                            Error::CryptoError(_)
+                            | Error::Io(_)
+                            | Error::FailedVerification
+                            | Error::FailedBodyHashMatch
+                            | Error::FailedAUIDMatch => (record.rr & RR_VERIFICATION) != 0,
+                            Error::Base64
+                            | Error::UnsupportedVersion
+                            | Error::UnsupportedAlgorithm
+                            | Error::UnsupportedCanonicalization
+                            | Error::UnsupportedKeyType
+                            | Error::IncompatibleAlgorithms => (record.rr & RR_SIGNATURE) != 0,
+                            Error::SignatureExpired => (record.rr & RR_EXPIRATION) != 0,
+                            Error::DNSError
+                            | Error::DNSRecordNotFound(_)
+                            | Error::InvalidRecordType
+                            | Error::ParseError
+                            | Error::RevokedPublicKey => (record.rr & RR_DNS) != 0,
+                            Error::MissingParameters
+                            | Error::NoHeadersFound
+                            | Error::ARCChainTooLong
+                            | Error::ARCInvalidInstance(_)
+                            | Error::ARCInvalidCV
+                            | Error::ARCHasHeaderTag
+                            | Error::ARCBrokenChain
+                            | Error::DMARCNotAligned => (record.rr & RR_OTHER) != 0,
+                        };
+
+                        if send_report {
+                            format!("{}@{}", record.ra, signature.d).into()
+                        } else {
+                            None
+                        }
+                    }
+                    DKIMResult::None | DKIMResult::Pass => None,
+                };
+            }
+        }
+
         output
     }
 }
@@ -299,7 +391,7 @@ mod test {
             /*if !file_name.to_str().unwrap().contains("002") {
                 continue;
             }*/
-            println!("file {}", file_name.to_str().unwrap());
+            println!("DKIM verifying {}", file_name.to_str().unwrap());
 
             let test = String::from_utf8(fs::read(&file_name).unwrap()).unwrap();
             let (dns_records, raw_message) = test.split_once("\n\n").unwrap();

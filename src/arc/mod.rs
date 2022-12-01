@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 pub mod headers;
 pub mod parse;
 pub mod seal;
@@ -12,7 +22,7 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(crate) struct Signature<'x> {
+pub struct Signature<'x> {
     pub(crate) i: u32,
     pub(crate) a: Algorithm,
     pub(crate) d: Cow<'x, str>,
@@ -29,7 +39,7 @@ pub(crate) struct Signature<'x> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(crate) struct Seal<'x> {
+pub struct Seal<'x> {
     pub(crate) i: u32,
     pub(crate) a: Algorithm,
     pub(crate) b: Vec<u8>,
@@ -40,7 +50,7 @@ pub(crate) struct Seal<'x> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct Results {
+pub struct Results {
     pub(crate) i: u32,
 }
 

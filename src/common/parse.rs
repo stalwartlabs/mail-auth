@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 use std::{borrow::Cow, slice::Iter};
 
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
@@ -23,7 +33,7 @@ pub(crate) const X: u64 = b'x' as u64;
 pub(crate) const Y: u64 = b'y' as u64;
 pub(crate) const Z: u64 = b'z' as u64;
 
-pub(crate) trait TxtRecordParser: Sized {
+pub trait TxtRecordParser: Sized {
     fn parse(record: &[u8]) -> crate::Result<Self>;
 }
 

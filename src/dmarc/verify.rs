@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 use std::sync::Arc;
 
 use crate::{
@@ -5,7 +15,7 @@ use crate::{
     SPFOutput, SPFResult,
 };
 
-use super::{Alignment, DMARC};
+use super::{Alignment, DMARC, URI};
 
 impl Resolver {
     pub async fn verify_dmarc(
@@ -28,11 +38,8 @@ impl Resolver {
                 }
             }
         }
-
-        let has_dkim_pass = dkim_output.iter().any(|o| o.result == DKIMResult::Pass);
-        if from_domain.is_empty() || (spf_output.result != SPFResult::Pass && !has_dkim_pass) {
-            // No domain found or no mechanism passed, skip DMARC.
-            return DMARCOutput::default().with_domain(from_domain);
+        if from_domain.is_empty() {
+            return DMARCOutput::default();
         }
 
         // Obtain DMARC policy
@@ -56,44 +63,87 @@ impl Resolver {
             record: None,
         };
 
-        // Check SPF alignment
-        let from_subdomain = format!(".{}", from_domain);
-        if spf_output.result == SPFResult::Pass {
-            output.spf_result = if mail_from_domain == from_domain {
-                DMARCResult::Pass
-            } else if dmarc.aspf == Alignment::Relaxed
-                && mail_from_domain.ends_with(&from_subdomain)
-                || from_domain.ends_with(&format!(".{}", mail_from_domain))
-            {
-                output.policy = dmarc.sp;
-                DMARCResult::Pass
-            } else {
-                DMARCResult::Fail(Error::DMARCNotAligned)
-            };
-        }
+        let has_dkim_pass = dkim_output.iter().any(|o| o.result == DKIMResult::Pass);
+        if spf_output.result == SPFResult::Pass || has_dkim_pass {
+            // Check SPF alignment
+            let from_subdomain = format!(".{}", from_domain);
+            if spf_output.result == SPFResult::Pass {
+                output.spf_result = if mail_from_domain == from_domain {
+                    DMARCResult::Pass
+                } else if dmarc.aspf == Alignment::Relaxed
+                    && mail_from_domain.ends_with(&from_subdomain)
+                    || from_domain.ends_with(&format!(".{}", mail_from_domain))
+                {
+                    output.policy = dmarc.sp;
+                    DMARCResult::Pass
+                } else {
+                    DMARCResult::Fail(Error::DMARCNotAligned)
+                };
+            }
 
-        // Check DKIM alignment
-        if has_dkim_pass {
-            output.dkim_result = if dkim_output.iter().any(|o| {
-                o.result == DKIMResult::Pass && o.signature.as_ref().unwrap().d.eq(from_domain)
-            }) {
-                DMARCResult::Pass
-            } else if dmarc.adkim == Alignment::Relaxed
-                && dkim_output.iter().any(|o| {
-                    o.result == DKIMResult::Pass
-                        && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
-                            || from_domain
-                                .ends_with(&format!(".{}", o.signature.as_ref().unwrap().d)))
-                })
-            {
-                output.policy = dmarc.sp;
-                DMARCResult::Pass
-            } else {
-                DMARCResult::Fail(Error::DMARCNotAligned)
-            };
+            // Check DKIM alignment
+            if has_dkim_pass {
+                output.dkim_result = if dkim_output.iter().any(|o| {
+                    o.result == DKIMResult::Pass && o.signature.as_ref().unwrap().d.eq(from_domain)
+                }) {
+                    DMARCResult::Pass
+                } else if dmarc.adkim == Alignment::Relaxed
+                    && dkim_output.iter().any(|o| {
+                        o.result == DKIMResult::Pass
+                            && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
+                                || from_domain
+                                    .ends_with(&format!(".{}", o.signature.as_ref().unwrap().d)))
+                    })
+                {
+                    output.policy = dmarc.sp;
+                    DMARCResult::Pass
+                } else {
+                    if dkim_output.iter().any(|o| {
+                        o.result == DKIMResult::Pass
+                            && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
+                                || from_domain
+                                    .ends_with(&format!(".{}", o.signature.as_ref().unwrap().d)))
+                    }) {
+                        output.policy = dmarc.sp;
+                    }
+                    DMARCResult::Fail(Error::DMARCNotAligned)
+                };
+            }
         }
 
         output.with_record(dmarc)
+    }
+
+    pub async fn verify_dmarc_report_address<'x>(
+        &self,
+        domain: &str,
+        addresses: &'x [URI],
+    ) -> Option<Vec<&'x URI>> {
+        let mut result = Vec::with_capacity(addresses.len());
+        for address in addresses {
+            if address.uri.ends_with(domain)
+                || match self
+                    .txt_lookup::<DMARC>(format!(
+                        "{}.report.dmarc.{}.",
+                        domain,
+                        address
+                            .uri
+                            .rsplit_once('@')
+                            .map(|(_, d)| d)
+                            .unwrap_or_default()
+                    ))
+                    .await
+                {
+                    Ok(_) => true,
+                    Err(Error::DNSError) => return None,
+                    _ => false,
+                }
+            {
+                result.push(address);
+            }
+        }
+
+        result.into()
     }
 
     async fn dmarc_tree_walk(&self, domain: &str) -> crate::Result<Option<Arc<DMARC>>> {
@@ -132,5 +182,189 @@ impl Resolver {
         }
 
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::time::{Duration, Instant};
+
+    use crate::{
+        common::parse::TxtRecordParser,
+        dkim::Signature,
+        dmarc::{Policy, DMARC, URI},
+        AuthenticatedMessage, DKIMOutput, DKIMResult, DMARCResult, Error, Resolver, SPFOutput,
+        SPFResult,
+    };
+
+    #[tokio::test]
+    async fn dmarc_verify() {
+        let resolver = Resolver::new_system_conf().unwrap();
+
+        for (
+            dmarc_dns,
+            dmarc,
+            message,
+            mail_from_domain,
+            signature_domain,
+            dkim,
+            spf,
+            expect_dkim,
+            expect_spf,
+            policy,
+        ) in [
+            // Strict - Pass
+            (
+                "_dmarc.example.org.",
+                concat!(
+                    "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo=1;",
+                    "rua=mailto:dmarc-feedback@example.org"
+                ),
+                "From: hello@example.org\r\n\r\n",
+                "example.org",
+                "example.org",
+                DKIMResult::Pass,
+                SPFResult::Pass,
+                DMARCResult::Pass,
+                DMARCResult::Pass,
+                Policy::Reject,
+            ),
+            // Relaxed - Pass
+            (
+                "_dmarc.example.org.",
+                concat!(
+                    "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=r; adkim=r; fo=1;",
+                    "rua=mailto:dmarc-feedback@example.org"
+                ),
+                "From: hello@example.org\r\n\r\n",
+                "subdomain.example.org",
+                "subdomain.example.org",
+                DKIMResult::Pass,
+                SPFResult::Pass,
+                DMARCResult::Pass,
+                DMARCResult::Pass,
+                Policy::Quarantine,
+            ),
+            // Strict - Fail
+            (
+                "_dmarc.example.org.",
+                concat!(
+                    "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo=1;",
+                    "rua=mailto:dmarc-feedback@example.org"
+                ),
+                "From: hello@example.org\r\n\r\n",
+                "subdomain.example.org",
+                "subdomain.example.org",
+                DKIMResult::Pass,
+                SPFResult::Pass,
+                DMARCResult::Fail(Error::DMARCNotAligned),
+                DMARCResult::Fail(Error::DMARCNotAligned),
+                Policy::Quarantine,
+            ),
+            // Strict - Pass with tree walk
+            (
+                "_dmarc.example.org.",
+                concat!(
+                    "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo=1;",
+                    "rua=mailto:dmarc-feedback@example.org"
+                ),
+                "From: hello@a.b.c.example.org\r\n\r\n",
+                "a.b.c.example.org",
+                "a.b.c.example.org",
+                DKIMResult::Pass,
+                SPFResult::Pass,
+                DMARCResult::Pass,
+                DMARCResult::Pass,
+                Policy::Reject,
+            ),
+            // Relaxed - Pass with tree walk
+            (
+                "_dmarc.c.example.org.",
+                concat!(
+                    "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=r; adkim=r; fo=1;",
+                    "rua=mailto:dmarc-feedback@example.org"
+                ),
+                "From: hello@a.b.c.example.org\r\n\r\n",
+                "example.org",
+                "example.org",
+                DKIMResult::Pass,
+                SPFResult::Pass,
+                DMARCResult::Pass,
+                DMARCResult::Pass,
+                Policy::Quarantine,
+            ),
+            // Failed mechanisms
+            (
+                "_dmarc.example.org.",
+                concat!(
+                    "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo=1;",
+                    "rua=mailto:dmarc-feedback@example.org"
+                ),
+                "From: hello@example.org\r\n\r\n",
+                "example.org",
+                "example.org",
+                DKIMResult::Fail(Error::SignatureExpired),
+                SPFResult::Fail,
+                DMARCResult::None,
+                DMARCResult::None,
+                Policy::Reject,
+            ),
+        ] {
+            resolver.txt_add(
+                dmarc_dns,
+                DMARC::parse(dmarc.as_bytes()).unwrap(),
+                Instant::now() + Duration::new(3200, 0),
+            );
+
+            let auth_message = AuthenticatedMessage::parse(message.as_bytes()).unwrap();
+            let signature = Signature {
+                d: signature_domain.into(),
+                ..Default::default()
+            };
+            let dkim = DKIMOutput {
+                result: dkim,
+                signature: (&signature).into(),
+                report: None,
+                is_atps: false,
+            };
+            let spf = SPFOutput {
+                result: spf,
+                domain: mail_from_domain.to_string(),
+                report: None,
+                explanation: None,
+            };
+            let result = resolver
+                .verify_dmarc(&auth_message, &[dkim], mail_from_domain, &spf)
+                .await;
+            assert_eq!(result.dkim_result, expect_dkim);
+            assert_eq!(result.spf_result, expect_spf);
+            assert_eq!(result.policy, policy);
+        }
+    }
+
+    #[tokio::test]
+    async fn dmarc_verify_report_address() {
+        let resolver = Resolver::new_system_conf().unwrap();
+        resolver.txt_add(
+            "example.org.report.dmarc.external.org.",
+            DMARC::parse(b"v=DMARC1").unwrap(),
+            Instant::now() + Duration::new(3200, 0),
+        );
+        let uris = vec![
+            URI::new("dmarc@example.org", 0),
+            URI::new("dmarc@external.org", 0),
+            URI::new("domain@other.org", 0),
+        ];
+
+        assert_eq!(
+            resolver
+                .verify_dmarc_report_address("example.org", &uris)
+                .await
+                .unwrap(),
+            vec![
+                &URI::new("dmarc@example.org", 0),
+                &URI::new("dmarc@external.org", 0),
+            ]
+        );
     }
 }

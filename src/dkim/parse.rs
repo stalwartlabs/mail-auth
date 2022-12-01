@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 use std::slice::Iter;
 
 use mail_parser::decoders::base64::base64_decode_stream;
@@ -10,8 +20,8 @@ use crate::{
 };
 
 use super::{
-    Algorithm, Atps, Canonicalization, DomainKey, Flag, HashAlgorithm, PublicKey, Report, Service,
-    Signature, Version, RR_DNS, RR_OTHER, RR_POLICY,
+    Algorithm, Atps, Canonicalization, DomainKey, DomainKeyReport, Flag, HashAlgorithm, PublicKey,
+    Service, Signature, Version, RR_DNS, RR_OTHER, RR_POLICY,
 };
 
 const ATPSH: u64 = (b'a' as u64)
@@ -312,12 +322,12 @@ impl TxtRecordParser for DomainKey {
     }
 }
 
-impl TxtRecordParser for Report {
+impl TxtRecordParser for DomainKeyReport {
     #[allow(clippy::while_let_on_iterator)]
     fn parse(header: &[u8]) -> crate::Result<Self> {
         let mut header = header.iter();
-        let mut record = Report {
-            ra: None,
+        let mut record = DomainKeyReport {
+            ra: String::new(),
             rp: 100,
             rr: u8::MAX,
             rs: None,
@@ -326,7 +336,7 @@ impl TxtRecordParser for Report {
         while let Some(key) = header.key() {
             match key {
                 RA => {
-                    record.ra = header.text_qp(true).into();
+                    record.ra = header.text_qp(true);
                 }
                 RP => {
                     record.rp = std::cmp::min(header.number().unwrap_or(0), 100) as u8;
@@ -378,7 +388,7 @@ impl TxtRecordParser for Report {
             }
         }
 
-        if record.ra.is_some() {
+        if !record.ra.is_empty() {
             Ok(record)
         } else {
             Err(Error::InvalidRecordType)
@@ -471,10 +481,10 @@ mod test {
     use crate::{
         common::parse::TxtRecordParser,
         dkim::{
-            Algorithm, Canonicalization, DomainKey, PublicKey, Report, Signature, Version, RR_DNS,
-            RR_EXPIRATION, RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION,
-            R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_HASH_SHA1, R_HASH_SHA256, R_SVC_ALL,
-            R_SVC_EMAIL,
+            Algorithm, Canonicalization, DomainKey, DomainKeyReport, PublicKey, Signature, Version,
+            RR_DNS, RR_EXPIRATION, RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG,
+            RR_VERIFICATION, R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_HASH_SHA1, R_HASH_SHA256,
+            R_SVC_ALL, R_SVC_EMAIL,
         },
     };
 
@@ -743,8 +753,8 @@ mod test {
         for (record, expected_result) in [
             (
                 "ra=dkim-errors; rp=97; rr=v:x",
-                Report {
-                    ra: "dkim-errors".to_string().into(),
+                DomainKeyReport {
+                    ra: "dkim-errors".to_string(),
                     rp: 97,
                     rr: RR_VERIFICATION | RR_EXPIRATION,
                     rs: None,
@@ -752,8 +762,8 @@ mod test {
             ),
             (
                 "ra=postmaster; rp=1; rr=d:o:p:s:u:v:x; rs=Error=20Message;",
-                Report {
-                    ra: "postmaster".to_string().into(),
+                DomainKeyReport {
+                    ra: "postmaster".to_string(),
                     rp: 1,
                     rr: RR_DNS
                         | RR_OTHER
@@ -766,7 +776,10 @@ mod test {
                 },
             ),
         ] {
-            assert_eq!(Report::parse(record.as_bytes()).unwrap(), expected_result);
+            assert_eq!(
+                DomainKeyReport::parse(record.as_bytes()).unwrap(),
+                expected_result
+            );
         }
     }
 }

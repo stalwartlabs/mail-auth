@@ -2,7 +2,6 @@ arc-20160816._domainkey.google.com k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIB
 ietf1._domainkey.ietf.org k=rsa; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQDNzNnjKTd5cczd2CDzHflCZuv1tMWYwd7zE+deoJ6s/fXR7/n9ZIBnDS5egt7HAHjNjZrmjcoRlfSsNxRJvUQFyYvaU1BT1s8R+mkPgSOqZ4t9HqAVjiczn2B9+dbjdNN+S/zvSyMMuSCSJDKKAXhBpDeQTpeY7/UdP9s6ws0yjQIDAQAB
 velikisrpan22._domainkey.stalw.art v=DKIM1; k=rsa; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvzwKQIIWzQXv0nihasFTT3+JO23hXCge+ESWNxCJdVLxKL5edxrumEU3DnrPeGD6q6E/vjoXwBabpm8F5o96MEPm7v12O5IIK7wx7gIJiQWvexwh+GJvW4aFFa0g13Ai75UdZjGFNKHAEGeLmkQYybK/EHW5ymRlSg3g8zydJGEcI/melLCiBoShHjfZFJEThxLmPHNSi+KOUMypxqYHd7hzg6W7qnq6t9puZYXMWj6tEaf6ORWgb7DOXZSTJJjAJPBWa2+UrxXX6Ro7L7Xy1zzeYFCk8W5vmn0wMgGpjkWw0ljJWNwIpxZAj9p5wMedWasaPS74TZ1b7tI39ncp6QIDAQAB
 
-Delivered-To: mauro@degennaro.me
 Received: by 2002:adf:b343:0:0:0:0:0 with SMTP id k3csp2230702wrd;
         Mon, 7 Nov 2022 23:51:18 -0800 (PST)
 X-Google-Smtp-Source: AMsMyM7H9v9q2HbUtfgLEbIKzpE2HA/rU5t0NWXFi8ofP0dnpTMVE1iS6XCwU854K6aOmoFdAKGT
@@ -36,11 +35,6 @@ ARC-Authentication-Results: i=1; mx.google.com;
        spf=pass (google.com: domain of jmap-bounces@ietf.org designates 50.223.129.194 as permitted sender) smtp.mailfrom=jmap-bounces@ietf.org;
        dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=stalw.art
 Return-Path: <jmap-bounces@ietf.org>
-Received: from mail.ietf.org (mail.ietf.org. [50.223.129.194])
-        by mx.google.com with ESMTPS id r7-20020a1709028bc700b0018862b71d11si11837558plo.381.2022.11.07.23.51.17
-        for <mauro@degennaro.me>
-        (version=TLS1_3 cipher=TLS_AES_256_GCM_SHA384 bits=256/256);
-        Mon, 07 Nov 2022 23:51:18 -0800 (PST)
 Received-SPF: pass (google.com: domain of jmap-bounces@ietf.org designates 50.223.129.194 as permitted sender) client-ip=50.223.129.194;
 Authentication-Results: mx.google.com;
        dkim=pass header.i=@ietf.org header.s=ietf1 header.b=jqktrzno;
@@ -48,9 +42,6 @@ Authentication-Results: mx.google.com;
        dkim=neutral (body hash did not verify) header.i=@stalw.art header.s=velikisrpan22 header.b=QS+O8z2Y;
        spf=pass (google.com: domain of jmap-bounces@ietf.org designates 50.223.129.194 as permitted sender) smtp.mailfrom=jmap-bounces@ietf.org;
        dmarc=fail (p=NONE sp=NONE dis=NONE) header.from=stalw.art
-Received: from ietfa.amsl.com (localhost [IPv6:::1])
-	by ietfa.amsl.com (Postfix) with ESMTP id C3412C1594A9
-	for <mauro@degennaro.me>; Mon,  7 Nov 2022 23:51:12 -0800 (PST)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
 	t=1667893872; bh=wA8UHicgWC9Xhbg+MPaDDXiNuk7OpeLzC4PgU7LJ3mQ=;
 	h=From:To:Date:Subject:List-Id:List-Unsubscribe:List-Archive:

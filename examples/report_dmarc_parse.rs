@@ -8,11 +8,14 @@
  * except according to those terms.
  */
 
-pub mod auth_results;
-pub mod base32;
-pub mod headers;
-pub mod lru;
-pub mod message;
-pub mod parse;
-pub mod resolver;
-pub mod verify;
+use mail_auth::report::Report;
+
+const TEST_MESSAGE: &str = include_str!("../resources/dmarc-feedback/100.eml");
+
+fn main() {
+    // Parse DMARC aggregate report
+    let report = Report::parse_rfc5322(TEST_MESSAGE.as_bytes()).unwrap();
+
+    // Write report to stdout at JSPON
+    println!("{}", serde_json::to_string_pretty(&report).unwrap());
+}

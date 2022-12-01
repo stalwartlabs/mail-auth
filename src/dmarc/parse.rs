@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 use std::slice::Iter;
 
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
@@ -168,6 +178,8 @@ impl DMARCParser for Iter<'_, u8> {
     fn uris(&mut self) -> crate::Result<Vec<URI>> {
         let mut uris = Vec::new();
         let mut uri = Vec::with_capacity(16);
+        let mut found_uri = false;
+        let mut found_at = false;
         let mut size: usize = 0;
 
         'outer: while let Some(&ch) = self.next() {
@@ -179,7 +191,17 @@ impl DMARCParser for Iter<'_, u8> {
                         if ch.is_ascii_hexdigit() {
                             if hex1 != 0 {
                                 if let Some(ch) = quoted_printable_decode_char(hex1, ch) {
-                                    uri.push(ch);
+                                    match ch {
+                                        b'@' => {
+                                            found_at = true;
+                                            uri.push(ch);
+                                        }
+                                        _ => {
+                                            if !ch.is_ascii_whitespace() {
+                                                uri.push(ch);
+                                            }
+                                        }
+                                    }
                                 }
                                 break;
                             } else {
@@ -224,10 +246,14 @@ impl DMARCParser for Iter<'_, u8> {
                             }
                             b',' => {
                                 if !uri.is_empty() {
-                                    uris.push(URI {
-                                        uri: uri.to_vec(),
-                                        max_size: size,
-                                    });
+                                    if found_uri && found_at {
+                                        uris.push(URI {
+                                            uri: String::from_utf8_lossy(&uri).to_lowercase(),
+                                            max_size: size,
+                                        });
+                                    }
+                                    found_uri = false;
+                                    found_at = false;
                                     uri.clear();
                                 }
                                 size = 0;
@@ -243,16 +269,28 @@ impl DMARCParser for Iter<'_, u8> {
                 }
                 b',' => {
                     if !uri.is_empty() {
-                        uris.push(URI {
-                            uri: uri.to_vec(),
-                            max_size: size,
-                        });
+                        if found_uri && found_at {
+                            uris.push(URI {
+                                uri: String::from_utf8_lossy(&uri).to_lowercase(),
+                                max_size: size,
+                            });
+                        }
+                        found_uri = false;
+                        found_at = false;
                         uri.clear();
                     }
                     size = 0;
                 }
+                b':' if !found_uri => {
+                    found_uri = uri.eq_ignore_ascii_case(b"mailto");
+                    uri.clear();
+                }
                 b';' => {
                     break;
+                }
+                b'@' => {
+                    found_at = true;
+                    uri.push(ch);
                 }
                 _ => {
                     if !ch.is_ascii_whitespace() {
@@ -262,9 +300,9 @@ impl DMARCParser for Iter<'_, u8> {
             }
         }
 
-        if !uri.is_empty() {
+        if !uri.is_empty() && found_uri && found_at {
             uris.push(URI {
-                uri,
+                uri: String::from_utf8_lossy(&uri).to_lowercase(),
                 max_size: size,
             })
         }
@@ -322,7 +360,7 @@ mod test {
                     pct: 100,
                     rf: Format::Afrf as u8,
                     ri: 86400,
-                    rua: vec![URI::new("mailto:dmarc-feedback@example.com", 0)],
+                    rua: vec![URI::new("dmarc-feedback@example.com", 0)],
                     ruf: vec![],
                     sp: Policy::None,
                     psd: Psd::Default,
@@ -344,8 +382,8 @@ mod test {
                     pct: 100,
                     rf: Format::Afrf as u8,
                     ri: 86400,
-                    rua: vec![URI::new("mailto:dmarc-feedback@example.com", 0)],
-                    ruf: vec![URI::new("mailto:auth-reports@example.com", 0)],
+                    rua: vec![URI::new("dmarc-feedback@example.com", 0)],
+                    ruf: vec![URI::new("auth-reports@example.com", 0)],
                     sp: Policy::None,
                     psd: Psd::Default,
                     t: false,
@@ -368,8 +406,8 @@ mod test {
                     ri: 86400,
                     ruf: vec![],
                     rua: vec![
-                        URI::new("mailto:dmarc-feedback@example.com", 0),
-                        URI::new("mailto:tld-test@thirdparty.example.net", 10 * 1024 * 1024),
+                        URI::new("dmarc-feedback@example.com", 0),
+                        URI::new("tld-test@thirdparty.example.net", 10 * 1024 * 1024),
                     ],
                     sp: Policy::Quarantine,
                     psd: Psd::Default,
@@ -391,7 +429,7 @@ mod test {
                     pct: 100,
                     rf: Format::Afrf as u8,
                     ri: 86400,
-                    rua: vec![URI::new("mailto:dmarc-feedback@example.com", 0)],
+                    rua: vec![URI::new("dmarc-feedback@example.com", 0)],
                     ruf: vec![],
                     sp: Policy::Quarantine,
                     psd: Psd::Default,
@@ -415,8 +453,8 @@ mod test {
                     rf: Format::Afrf as u8,
                     ri: 3600,
                     rua: vec![
-                        URI::new("mailto:dmarc-feedback@example.com", 10 * 1024),
-                        URI::new("mailto:user @example.com", 2 * 1024 * 1024 * 1024),
+                        URI::new("dmarc-feedback@example.com", 10 * 1024),
+                        URI::new("user@example.com", 2 * 1024 * 1024 * 1024),
                     ],
                     ruf: vec![],
                     sp: Policy::Reject,
@@ -440,8 +478,8 @@ mod test {
                     rf: Format::Afrf as u8,
                     ri: 86400,
                     rua: vec![
-                        URI::new("mailto:dmarc-feedback@example.com", 0),
-                        URI::new("mailto:tld-test@thirdparty.example.net", 0),
+                        URI::new("dmarc-feedback@example.com", 0),
+                        URI::new("tld-test@thirdparty.example.net", 0),
                     ],
                     ruf: vec![],
                     sp: Policy::Quarantine,

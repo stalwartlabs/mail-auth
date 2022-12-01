@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 pub mod macros;
 pub mod parse;
 pub mod verify;
@@ -87,7 +97,7 @@ pub(crate) struct Directive {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 #[repr(u8)]
-pub(crate) enum Variable {
+pub enum Variable {
     Sender = 0,
     SenderLocalPart = 1,
     SenderDomainPart = 2,
@@ -102,12 +112,12 @@ pub(crate) enum Variable {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(crate) struct Variables<'x> {
+pub struct Variables<'x> {
     vars: [Cow<'x, [u8]>; 11],
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Macro {
+pub enum Macro {
     Literal(Vec<u8>),
     Variable {
         letter: Variable,
@@ -234,6 +244,10 @@ impl SPFOutput {
 
     pub fn result(&self) -> SPFResult {
         self.result
+    }
+
+    pub fn domain(&self) -> &str {
+        &self.domain
     }
 
     pub fn explanation(&self) -> Option<&str> {

@@ -1,6 +1,5 @@
 /*
- * Copyright Stalwart Labs Ltd. See the COPYING
- * file at the top-level directory of this distribution.
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
  *
  * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
  * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -77,15 +76,15 @@ impl Default for Canonicalization {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct DomainKey {
+pub struct DomainKey {
     pub(crate) v: Version,
     pub(crate) p: PublicKey,
     pub(crate) f: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct Report {
-    pub(crate) ra: Option<String>,
+pub struct DomainKeyReport {
+    pub(crate) ra: String,
     pub(crate) rp: u8,
     pub(crate) rr: u8,
     pub(crate) rs: Option<String>,
@@ -248,6 +247,10 @@ impl<'x> DKIMOutput<'x> {
 
     pub fn signature(&self) -> Option<&Signature> {
         self.signature
+    }
+
+    pub fn failure_report_addr(&self) -> Option<&str> {
+        self.report.as_deref()
     }
 }
 

@@ -1,6 +1,5 @@
 /*
- * Copyright Stalwart Labs Ltd. See the COPYING
- * file at the top-level directory of this distribution.
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
  *
  * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
  * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -218,8 +217,8 @@ mod test {
 
     use crate::{
         common::parse::TxtRecordParser,
-        dkim::{Atps, Canonicalization, DomainKey, HashAlgorithm, Signature},
-        AuthenticatedMessage, DKIMResult, PrivateKey, Resolver,
+        dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport, HashAlgorithm, Signature},
+        AuthenticatedMessage, DKIMOutput, DKIMResult, PrivateKey, Resolver,
     };
 
     const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -315,8 +314,27 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         )
         .unwrap();
 
+        // Create resolver
+        let resolver = Resolver::new_system_conf().unwrap();
+        resolver.txt_add(
+            "default._domainkey.example.com.".to_string(),
+            DomainKey::parse(RSA_PUBLIC_KEY.as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
+        resolver.txt_add(
+            "ed._domainkey.example.com.".to_string(),
+            DomainKey::parse(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
+        resolver.txt_add(
+            "_report._domainkey.example.com.".to_string(),
+            DomainKeyReport::parse("ra=dkim-failures; rp=100; rr=x".as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
+
         // Test RSA-SHA256 relaxed/relaxed
         verify(
+            &resolver,
             Signature::new()
                 .headers(["From", "To", "Subject"])
                 .domain("example.com")
@@ -325,29 +343,27 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .sign(message.as_bytes(), &pk_rsa)
                 .unwrap(),
             message,
-            RSA_PUBLIC_KEY,
-            "",
             Ok(()),
         )
         .await;
 
         // Test ED25519-SHA256 relaxed/relaxed
         verify(
+            &resolver,
             Signature::new()
                 .headers(["From", "To", "Subject"])
                 .domain("example.com")
-                .selector("default")
+                .selector("ed")
                 .sign(message.as_bytes(), &pk_ed)
                 .unwrap(),
             message,
-            ED25519_PUBLIC_KEY,
-            "",
             Ok(()),
         )
         .await;
 
         // Test RSA-SHA256 simple/simple with duplicated headers
         verify(
+            &resolver,
             Signature::new()
                 .headers([
                     "From",
@@ -363,14 +379,13 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .sign(message_multiheader.as_bytes(), &pk_rsa)
                 .unwrap(),
             message_multiheader,
-            RSA_PUBLIC_KEY,
-            "",
             Ok(()),
         )
         .await;
 
         // Test RSA-SHA256 simple/relaxed with fixed body length
         verify(
+            &resolver,
             Signature::new()
                 .headers(["From", "To", "Subject"])
                 .domain("example.com")
@@ -380,14 +395,13 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .sign(message.as_bytes(), &pk_rsa)
                 .unwrap(),
             &(message.to_string() + "\r\n----- Mailing list"),
-            RSA_PUBLIC_KEY,
-            "",
             Ok(()),
         )
         .await;
 
         // Test AUID not matching domain
         verify(
+            &resolver,
             Signature::new()
                 .headers(["From", "To", "Subject"])
                 .domain("example.com")
@@ -396,30 +410,33 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .sign(message.as_bytes(), &pk_rsa)
                 .unwrap(),
             message,
-            RSA_PUBLIC_KEY,
-            "",
             Err(super::Error::FailedAUIDMatch),
         )
         .await;
 
-        // Test expired signature
-        verify(
+        // Test expired signature and reporting
+        let r = verify(
+            &resolver,
             Signature::new()
                 .headers(["From", "To", "Subject"])
                 .domain("example.com")
                 .selector("default")
                 .expiration(12345)
+                .reporting(true)
                 .sign_::<Sha256>(message.as_bytes(), &pk_rsa, 12345)
                 .unwrap(),
             message,
-            RSA_PUBLIC_KEY,
-            "",
             Err(super::Error::SignatureExpired),
         )
-        .await;
+        .await
+        .pop()
+        .unwrap()
+        .report;
+        assert_eq!(r.as_deref(), Some("dkim-failures@example.com"));
 
         // Verify ATPS (failure)
         verify(
+            &resolver,
             Signature::new()
                 .headers(["From", "To", "Subject"])
                 .domain("example.com")
@@ -429,14 +446,18 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .sign_::<Sha256>(message.as_bytes(), &pk_rsa, 12345)
                 .unwrap(),
             message,
-            RSA_PUBLIC_KEY,
-            "",
             Err(super::Error::DNSRecordNotFound(ResponseCode::NXDomain)),
         )
         .await;
 
         // Verify ATPS (success)
+        resolver.txt_add(
+            "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.".to_string(),
+            Atps::parse(b"v=ATPS1;").unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
         verify(
+            &resolver,
             Signature::new()
                 .headers(["From", "To", "Subject"])
                 .domain("example.com")
@@ -446,14 +467,18 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .sign_::<Sha256>(message.as_bytes(), &pk_rsa, 12345)
                 .unwrap(),
             message,
-            RSA_PUBLIC_KEY,
-            "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.",
             Ok(()),
         )
         .await;
 
         // Verify ATPS (success - no hash)
+        resolver.txt_add(
+            "example.com._atps.example.com.".to_string(),
+            Atps::parse(b"v=ATPS1;").unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
         verify(
+            &resolver,
             Signature::new()
                 .headers(["From", "To", "Subject"])
                 .domain("example.com")
@@ -462,38 +487,21 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .sign_::<Sha256>(message.as_bytes(), &pk_rsa, 12345)
                 .unwrap(),
             message,
-            RSA_PUBLIC_KEY,
-            "example.com._atps.example.com.",
             Ok(()),
         )
         .await;
     }
 
-    async fn verify(
-        signature: Signature<'_>,
-        message_: &str,
-        public_key: &str,
-        atps: &str,
+    async fn verify<'x>(
+        resolver: &Resolver,
+        signature: Signature<'x>,
+        message_: &'x str,
         expect: Result<(), super::Error>,
-    ) {
+    ) -> Vec<DKIMOutput<'x>> {
         let mut message = Vec::with_capacity(message_.len() + 100);
         signature.write(&mut message, true).unwrap();
         message.extend_from_slice(message_.as_bytes());
-        //println!("[{}]", String::from_utf8_lossy(&message));
 
-        let resolver = Resolver::new_system_conf().unwrap();
-        resolver.txt_add(
-            "default._domainkey.example.com.".to_string(),
-            DomainKey::parse(public_key.as_bytes()).unwrap(),
-            Instant::now() + Duration::new(3600, 0),
-        );
-        if !atps.is_empty() {
-            resolver.txt_add(
-                atps.to_string(),
-                Atps::parse(b"v=ATPS1;").unwrap(),
-                Instant::now() + Duration::new(3600, 0),
-            );
-        }
         let message = AuthenticatedMessage::parse(&message).unwrap();
         let dkim = resolver.verify_dkim(&message).await;
 
@@ -505,5 +513,14 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             ) if hdr == err => (),
             (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
         }
+
+        dkim.into_iter()
+            .map(|d| DKIMOutput {
+                result: d.result,
+                signature: None,
+                report: d.report,
+                is_atps: d.is_atps,
+            })
+            .collect()
     }
 }

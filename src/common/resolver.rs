@@ -1,3 +1,13 @@
+/*
+ * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 use std::{
     borrow::Cow,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -13,7 +23,7 @@ use trust_dns_resolver::{
 };
 
 use crate::{
-    dkim::{Atps, DomainKey},
+    dkim::{Atps, DomainKey, DomainKeyReport},
     dmarc::DMARC,
     spf::{Macro, SPF},
     Error, Policy, Resolver, Txt, MX,
@@ -334,6 +344,12 @@ impl From<DomainKey> for Txt {
     }
 }
 
+impl From<DomainKeyReport> for Txt {
+    fn from(v: DomainKeyReport) -> Self {
+        Txt::DomainKeyReport(v.into())
+    }
+}
+
 impl From<Atps> for Txt {
     fn from(v: Atps) -> Self {
         Txt::Atps(v.into())
@@ -375,6 +391,16 @@ impl UnwrapTxtRecord for DomainKey {
     fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
         match txt {
             Txt::DomainKey(a) => Ok(a),
+            Txt::Error(err) => Err(err),
+            _ => Err(Error::Io("Invalid record type".to_string())),
+        }
+    }
+}
+
+impl UnwrapTxtRecord for DomainKeyReport {
+    fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
+        match txt {
+            Txt::DomainKeyReport(a) => Ok(a),
             Txt::Error(err) => Err(err),
             _ => Err(Error::Io("Invalid record type".to_string())),
         }

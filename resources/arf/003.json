@@ -17,18 +17,17 @@
   "user_agent": "SomeDKIMFilter/1.0",
   "version": 1,
   "source_port": 0,
+  "auth_failure": "BodyHash",
+  "delivery_result": "Unspecified",
+  "dkim_adsp_dns": null,
+  "dkim_canonicalized_body": null,
+  "dkim_canonicalized_header": null,
+  "dkim_domain": "example.net",
+  "dkim_identity": null,
+  "dkim_selector": null,
+  "dkim_selector_dns": null,
+  "spf_dns": null,
+  "identity_alignment": "Unspecified",
   "message": null,
-  "auth_failure": {
-    "auth_failure": "BodyHash",
-    "delivery_result": "Other",
-    "dkim_adsp_dns": null,
-    "dkim_canonicalized_body": null,
-    "dkim_canonicalized_header": null,
-    "dkim_domain": "example.net",
-    "dkim_identity": null,
-    "dkim_selector": null,
-    "dkim_selector_dns": null,
-    "spf_dns": null,
-    "identity_alignment": "None"
-  }
+  "headers": null
 }
