@@ -28,7 +28,7 @@
 //!   - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 chain verification.
 //!   - ARC sealing.
 //! - **Sender Policy Framework (SPF)**:
-//!   - Policy evalution.
+//!   - Policy evaluation.
 //!   - SPF failure reporting using the Abuse Reporting Format.
 //! - **Domain-based Message Authentication, Reporting, and Conformance (DMARC)**:
 //!   - Policy evaluation.
