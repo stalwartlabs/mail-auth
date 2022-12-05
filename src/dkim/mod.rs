@@ -13,7 +13,7 @@ use std::borrow::Cow;
 use rsa::RsaPublicKey;
 
 use crate::{
-    arc::Set, common::verify::VerifySignature, ARCOutput, DKIMOutput, DKIMResult, Error, Version,
+    arc::Set, common::verify::VerifySignature, ArcOutput, DkimOutput, DkimResult, Error, Version,
 };
 
 pub mod canonicalize;
@@ -177,10 +177,10 @@ impl<'x> VerifySignature for Signature<'x> {
     }
 }
 
-impl<'x> DKIMOutput<'x> {
+impl<'x> DkimOutput<'x> {
     pub(crate) fn pass() -> Self {
-        DKIMOutput {
-            result: DKIMResult::Pass,
+        DkimOutput {
+            result: DkimResult::Pass,
             signature: None,
             report: None,
             is_atps: false,
@@ -188,8 +188,8 @@ impl<'x> DKIMOutput<'x> {
     }
 
     pub(crate) fn perm_err(err: Error) -> Self {
-        DKIMOutput {
-            result: DKIMResult::PermError(err),
+        DkimOutput {
+            result: DkimResult::PermError(err),
             signature: None,
             report: None,
             is_atps: false,
@@ -197,8 +197,8 @@ impl<'x> DKIMOutput<'x> {
     }
 
     pub(crate) fn temp_err(err: Error) -> Self {
-        DKIMOutput {
-            result: DKIMResult::TempError(err),
+        DkimOutput {
+            result: DkimResult::TempError(err),
             signature: None,
             report: None,
             is_atps: false,
@@ -206,8 +206,8 @@ impl<'x> DKIMOutput<'x> {
     }
 
     pub(crate) fn fail(err: Error) -> Self {
-        DKIMOutput {
-            result: DKIMResult::Fail(err),
+        DkimOutput {
+            result: DkimResult::Fail(err),
             signature: None,
             report: None,
             is_atps: false,
@@ -215,8 +215,8 @@ impl<'x> DKIMOutput<'x> {
     }
 
     pub(crate) fn neutral(err: Error) -> Self {
-        DKIMOutput {
-            result: DKIMResult::Neutral(err),
+        DkimOutput {
+            result: DkimResult::Neutral(err),
             signature: None,
             report: None,
             is_atps: false,
@@ -225,9 +225,9 @@ impl<'x> DKIMOutput<'x> {
 
     pub(crate) fn dns_error(err: Error) -> Self {
         if matches!(&err, Error::DNSError) {
-            DKIMOutput::temp_err(err)
+            DkimOutput::temp_err(err)
         } else {
-            DKIMOutput::perm_err(err)
+            DkimOutput::perm_err(err)
         }
     }
 
@@ -241,7 +241,7 @@ impl<'x> DKIMOutput<'x> {
         self
     }
 
-    pub fn result(&self) -> &DKIMResult {
+    pub fn result(&self) -> &DkimResult {
         &self.result
     }
 
@@ -254,8 +254,8 @@ impl<'x> DKIMOutput<'x> {
     }
 }
 
-impl<'x> ARCOutput<'x> {
-    pub fn result(&self) -> &DKIMResult {
+impl<'x> ArcOutput<'x> {
+    pub fn result(&self) -> &DkimResult {
         &self.result
     }
 
@@ -264,12 +264,12 @@ impl<'x> ARCOutput<'x> {
     }
 }
 
-impl From<Error> for DKIMResult {
+impl From<Error> for DkimResult {
     fn from(err: Error) -> Self {
         if matches!(&err, Error::DNSError) {
-            DKIMResult::TempError(err)
+            DkimResult::TempError(err)
         } else {
-            DKIMResult::PermError(err)
+            DkimResult::PermError(err)
         }
     }
 }

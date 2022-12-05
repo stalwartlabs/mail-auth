@@ -10,13 +10,13 @@
 
 use std::{fmt::Display, sync::Arc};
 
-use crate::{DMARCOutput, DMARCResult, Error, Version};
+use crate::{DmarcOutput, DmarcResult, Error, Version};
 
 pub mod parse;
 pub mod verify;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DMARC {
+pub struct Dmarc {
     pub(crate) v: Version,
     pub(crate) adkim: Alignment,
     pub(crate) aspf: Alignment,
@@ -92,45 +92,45 @@ impl URI {
     }
 }
 
-impl From<Error> for DMARCResult {
+impl From<Error> for DmarcResult {
     fn from(err: Error) -> Self {
         if matches!(&err, Error::DNSError) {
-            DMARCResult::TempError(err)
+            DmarcResult::TempError(err)
         } else {
-            DMARCResult::PermError(err)
+            DmarcResult::PermError(err)
         }
     }
 }
 
-impl Default for DMARCOutput {
+impl Default for DmarcOutput {
     fn default() -> Self {
         Self {
             domain: String::new(),
             policy: Policy::None,
             record: None,
-            spf_result: DMARCResult::None,
-            dkim_result: DMARCResult::None,
+            spf_result: DmarcResult::None,
+            dkim_result: DmarcResult::None,
         }
     }
 }
 
-impl DMARCOutput {
+impl DmarcOutput {
     pub(crate) fn with_domain(mut self, domain: &str) -> Self {
         self.domain = domain.to_string();
         self
     }
 
-    pub(crate) fn with_spf_result(mut self, result: DMARCResult) -> Self {
+    pub(crate) fn with_spf_result(mut self, result: DmarcResult) -> Self {
         self.spf_result = result;
         self
     }
 
-    pub(crate) fn with_dkim_result(mut self, result: DMARCResult) -> Self {
+    pub(crate) fn with_dkim_result(mut self, result: DmarcResult) -> Self {
         self.dkim_result = result;
         self
     }
 
-    pub(crate) fn with_record(mut self, record: Arc<DMARC>) -> Self {
+    pub(crate) fn with_record(mut self, record: Arc<Dmarc>) -> Self {
         self.record = record.into();
         self
     }
@@ -143,15 +143,15 @@ impl DMARCOutput {
         self.policy
     }
 
-    pub fn dkim_result(&self) -> &DMARCResult {
+    pub fn dkim_result(&self) -> &DmarcResult {
         &self.dkim_result
     }
 
-    pub fn spf_result(&self) -> &DMARCResult {
+    pub fn spf_result(&self) -> &DmarcResult {
         &self.spf_result
     }
 
-    pub fn dmarc_record(&self) -> Option<&DMARC> {
+    pub fn dmarc_record(&self) -> Option<&Dmarc> {
         self.record.as_deref()
     }
 
@@ -161,12 +161,12 @@ impl DMARCOutput {
         match &self.record {
             Some(record)
                 if !record.ruf.is_empty()
-                    && (self.dkim_result != DMARCResult::Pass
+                    && (self.dkim_result != DmarcResult::Pass
                         && matches!(record.fo, Report::Any | Report::Dkim | Report::DkimSpf))
-                    || (self.spf_result != DMARCResult::Pass
+                    || (self.spf_result != DmarcResult::Pass
                         && matches!(record.fo, Report::Any | Report::Spf | Report::DkimSpf))
-                    || (self.dkim_result != DMARCResult::Pass
-                        && self.spf_result != DMARCResult::Pass
+                    || (self.dkim_result != DmarcResult::Pass
+                        && self.spf_result != DmarcResult::Pass
                         && record.fo == Report::All) =>
             {
                 Some(record.fo.clone())
@@ -176,7 +176,7 @@ impl DMARCOutput {
     }
 }
 
-impl DMARC {
+impl Dmarc {
     pub fn ruf(&self) -> &[URI] {
         &self.ruf
     }

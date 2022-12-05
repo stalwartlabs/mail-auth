@@ -73,7 +73,7 @@ pub struct PolicyPublished {
 impl Eq for PolicyPublished {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DMARCResult {
+pub enum DmarcResult {
     Pass,
     Fail,
     Unspecified,
@@ -98,8 +98,8 @@ pub struct PolicyOverrideReason {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PolicyEvaluated {
     disposition: ActionDisposition,
-    dkim: DMARCResult,
-    spf: DMARCResult,
+    dkim: DmarcResult,
+    spf: DmarcResult,
     reason: Vec<PolicyOverrideReason>,
 }
 
@@ -124,7 +124,7 @@ pub struct Identifier {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DKIMResult {
+pub enum DkimResult {
     None,
     Pass,
     Fail,
@@ -138,7 +138,7 @@ pub enum DKIMResult {
 pub struct DKIMAuthResult {
     domain: String,
     selector: String,
-    result: DKIMResult,
+    result: DkimResult,
     human_result: Option<String>,
 }
 
@@ -150,7 +150,7 @@ pub enum SPFDomainScope {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SPFResult {
+pub enum SpfResult {
     None,
     Neutral,
     Pass,
@@ -164,7 +164,7 @@ pub enum SPFResult {
 pub struct SPFAuthResult {
     domain: String,
     scope: SPFDomainScope,
-    result: SPFResult,
+    result: SpfResult,
     human_result: Option<String>,
 }
 
@@ -221,9 +221,9 @@ impl Default for ActionDisposition {
     }
 }
 
-impl Default for DMARCResult {
+impl Default for DmarcResult {
     fn default() -> Self {
-        DMARCResult::Unspecified
+        DmarcResult::Unspecified
     }
 }
 
@@ -233,15 +233,15 @@ impl Default for PolicyOverride {
     }
 }
 
-impl Default for DKIMResult {
+impl Default for DkimResult {
     fn default() -> Self {
-        DKIMResult::None
+        DkimResult::None
     }
 }
 
-impl Default for SPFResult {
+impl Default for SpfResult {
     fn default() -> Self {
-        SPFResult::None
+        SpfResult::None
     }
 }
 

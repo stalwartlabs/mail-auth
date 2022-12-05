@@ -19,12 +19,12 @@ use crate::{
 };
 
 use super::{
-    Directive, Macro, Mechanism, Qualifier, Variable, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
-    RR_TEMP_PERM_ERROR, SPF,
+    Directive, Macro, Mechanism, Qualifier, Spf, Variable, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
+    RR_TEMP_PERM_ERROR,
 };
 
-impl TxtRecordParser for SPF {
-    fn parse(bytes: &[u8]) -> crate::Result<SPF> {
+impl TxtRecordParser for Spf {
+    fn parse(bytes: &[u8]) -> crate::Result<Spf> {
         let mut record = bytes.iter();
         if !matches!(record.key(), Some(k) if k == V)
             || !record.match_bytes(b"spf1")
@@ -33,7 +33,7 @@ impl TxtRecordParser for SPF {
             return Err(Error::InvalidRecordType);
         }
 
-        let mut spf = SPF {
+        let mut spf = Spf {
             version: Version::V1,
             directives: Vec::new(),
             redirect: None,
@@ -738,8 +738,8 @@ mod test {
     use crate::{
         common::parse::TxtRecordParser,
         spf::{
-            Directive, Macro, Mechanism, Qualifier, Variable, Version, RR_FAIL, RR_NEUTRAL_NONE,
-            RR_SOFTFAIL, RR_TEMP_PERM_ERROR, SPF,
+            Directive, Macro, Mechanism, Qualifier, Spf, Variable, Version, RR_FAIL,
+            RR_NEUTRAL_NONE, RR_SOFTFAIL, RR_TEMP_PERM_ERROR,
         },
     };
 
@@ -750,7 +750,7 @@ mod test {
         for (record, expected_result) in [
             (
                 "v=spf1 +mx a:colo.example.com/28 -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -780,7 +780,7 @@ mod test {
             ),
             (
                 "v=spf1 a:A.EXAMPLE.COM -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -802,7 +802,7 @@ mod test {
             ),
             (
                 "v=spf1 +mx -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -824,7 +824,7 @@ mod test {
             ),
             (
                 "v=spf1 +mx redirect=_spf.example.com",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -843,7 +843,7 @@ mod test {
             ),
             (
                 "v=spf1 a mx -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -873,7 +873,7 @@ mod test {
             ),
             (
                 "v=spf1 include:example.com include:example.org -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -899,7 +899,7 @@ mod test {
             ),
             (
                 "v=spf1 exists:%{ir}.%{l1r+-}._spf.%{d} -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -943,7 +943,7 @@ mod test {
             ),
             (
                 "v=spf1 mx -all exp=explain._spf.%{d}",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -975,7 +975,7 @@ mod test {
             ),
             (
                 "v=spf1 ip4:192.0.2.1 ip4:192.0.2.129 -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1003,7 +1003,7 @@ mod test {
             ),
             (
                 "v=spf1 ip4:192.0.2.0/24 mx -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1032,7 +1032,7 @@ mod test {
             ),
             (
                 "v=spf1 mx/30 mx:example.org/30 -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1062,7 +1062,7 @@ mod test {
             ),
             (
                 "v=spf1 ptr -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1082,7 +1082,7 @@ mod test {
             ),
             (
                 "v=spf1 exists:%{l1r+}.%{d}",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1115,7 +1115,7 @@ mod test {
             ),
             (
                 "v=spf1 exists:%{ir}.%{l1r+}.%{d}",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1156,7 +1156,7 @@ mod test {
             ),
             (
                 "v=spf1 exists:_h.%{h}._l.%{l}._o.%{o}._i.%{i}._spf.%{d} ?all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1217,7 +1217,7 @@ mod test {
             ),
             (
                 "v=spf1 mx ?exists:%{ir}.whitelist.example.org -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1254,7 +1254,7 @@ mod test {
             ),
             (
                 "v=spf1 mx exists:%{l}._%-spf_%_verify%%.%{d} -all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1298,7 +1298,7 @@ mod test {
             ),
             (
                 "v=spf1 mx redirect=%{l1r+}._at_.%{o,=_/}._spf.%{d}",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1345,7 +1345,7 @@ mod test {
             ),
             (
                 "v=spf1 -ip4:192.0.2.0/24 a//96 +all",
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1377,7 +1377,7 @@ mod test {
                     "v=spf1 +mx/11//100 ~a:domain.com/12/123 ?ip6:::1 ",
                     "-ip6:a::b/111 ip6:1080::8:800:68.0.3.1/96 "
                 ),
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: None,
                     rp: 100,
@@ -1427,7 +1427,7 @@ mod test {
             ),
             (
                 concat!("v=spf1 mx:example.org -all ra=postmaster rp=15 rr=e:f:s:n"),
-                SPF {
+                Spf {
                     version: Version::V1,
                     ra: b"postmaster".to_vec().into(),
                     rp: 15,
@@ -1449,7 +1449,7 @@ mod test {
             ),
         ] {
             assert_eq!(
-                SPF::parse(record.as_bytes())
+                Spf::parse(record.as_bytes())
                     .unwrap_or_else(|err| panic!("{:?} : {:?}", record, err)),
                 expected_result,
                 "{}",

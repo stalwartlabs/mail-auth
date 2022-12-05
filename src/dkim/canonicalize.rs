@@ -8,7 +8,10 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, io::Write};
+use std::{
+    borrow::Cow,
+    io::{self},
+};
 
 use sha1::Digest;
 
@@ -17,7 +20,7 @@ use crate::common::headers::HeaderIterator;
 use super::{Canonicalization, Signature};
 
 impl Canonicalization {
-    pub fn canonicalize_body(&self, body: &[u8], mut hasher: impl Write) -> std::io::Result<()> {
+    pub fn canonicalize_body(&self, body: &[u8], mut hasher: impl io::Write) -> io::Result<()> {
         let mut crlf_seq = 0;
 
         match self {
@@ -78,8 +81,8 @@ impl Canonicalization {
     pub fn canonicalize_headers<'x>(
         &self,
         headers: impl Iterator<Item = (&'x [u8], &'x [u8])>,
-        mut hasher: impl Write,
-    ) -> std::io::Result<()> {
+        mut hasher: impl io::Write,
+    ) -> io::Result<()> {
         match self {
             Canonicalization::Relaxed => {
                 for (name, value) in headers {
@@ -121,18 +124,18 @@ impl Canonicalization {
     pub fn hash_headers<'x, T>(
         &self,
         headers: impl Iterator<Item = (&'x [u8], &'x [u8])>,
-    ) -> std::io::Result<Vec<u8>>
+    ) -> io::Result<Vec<u8>>
     where
-        T: Digest + std::io::Write,
+        T: Digest + io::Write,
     {
         let mut hasher = T::new();
         self.canonicalize_headers(headers, &mut hasher)?;
         Ok(hasher.finalize().to_vec())
     }
 
-    pub fn hash_body<T>(&self, body: &[u8], l: u64) -> std::io::Result<Vec<u8>>
+    pub fn hash_body<T>(&self, body: &[u8], l: u64) -> io::Result<Vec<u8>>
     where
-        T: Digest + std::io::Write,
+        T: Digest + io::Write,
     {
         let mut hasher = T::new();
         self.canonicalize_body(
@@ -146,7 +149,7 @@ impl Canonicalization {
         Ok(hasher.finalize().to_vec())
     }
 
-    pub fn serialize_name(&self, mut writer: impl Write) -> std::io::Result<()> {
+    pub fn serialize_name(&self, mut writer: impl io::Write) -> io::Result<()> {
         writer.write_all(match self {
             Canonicalization::Relaxed => b"relaxed",
             Canonicalization::Simple => b"simple",
@@ -159,8 +162,8 @@ impl<'x> Signature<'x> {
     pub(crate) fn canonicalize(
         &self,
         message: &'x [u8],
-        header_hasher: impl Write,
-        body_hasher: impl Write,
+        header_hasher: impl io::Write,
+        body_hasher: impl io::Write,
     ) -> crate::Result<(usize, Vec<Cow<'x, str>>)> {
         let mut headers_it = HeaderIterator::new(message);
         let mut headers = Vec::with_capacity(self.h.len());

@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use mail_auth::{AuthenticatedMessage, DKIMResult, Resolver};
+use mail_auth::{AuthenticatedMessage, DkimResult, Resolver};
 
 const TEST_MESSAGE: &str = r#"DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;
 d=football.example.com; i=@football.example.com;
@@ -49,5 +49,5 @@ async fn main() {
     let result = resolver.verify_dkim(&authenticated_message).await;
 
     // Make sure all signatures passed verification
-    assert!(result.iter().all(|s| s.result() == &DKIMResult::Pass));
+    assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
 }

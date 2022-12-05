@@ -15,9 +15,9 @@ use mail_auth::{
     arc,
     common::parse::TxtRecordParser,
     dkim::{self, Atps, DomainKey, DomainKeyReport},
-    dmarc::DMARC,
+    dmarc::Dmarc,
     report::{Feedback, Report},
-    spf::{Macro, SPF},
+    spf::{Macro, Spf},
     AuthenticatedMessage,
 };
 
@@ -53,11 +53,11 @@ fuzz_target!(|data: &[u8]| {
     Atps::parse(data).ok();
     Atps::parse(&data_txt).ok();
 
-    DMARC::parse(data).ok();
-    DMARC::parse(&data_txt).ok();
+    Dmarc::parse(data).ok();
+    Dmarc::parse(&data_txt).ok();
 
-    SPF::parse(data).ok();
-    SPF::parse(&data_txt).ok();
+    Spf::parse(data).ok();
+    Spf::parse(&data_txt).ok();
 
     Macro::parse(data).ok();
     Macro::parse(&data_txt).ok();

@@ -17,9 +17,9 @@ use crate::{
     Error, Version,
 };
 
-use super::{Alignment, Format, Policy, Psd, Report, DMARC, URI};
+use super::{Alignment, Dmarc, Format, Policy, Psd, Report, URI};
 
-impl TxtRecordParser for DMARC {
+impl TxtRecordParser for Dmarc {
     fn parse(bytes: &[u8]) -> crate::Result<Self> {
         let mut record = bytes.iter();
         if record.key().unwrap_or(0) != V
@@ -29,7 +29,7 @@ impl TxtRecordParser for DMARC {
             return Err(Error::InvalidRecordType);
         }
 
-        let mut dmarc = DMARC {
+        let mut dmarc = Dmarc {
             adkim: Alignment::Relaxed,
             aspf: Alignment::Relaxed,
             fo: Report::All,
@@ -342,7 +342,7 @@ const PSD: u64 = (b'p' as u64) | (b's' as u64) << 8 | (b'd' as u64) << 16;
 mod test {
     use crate::{
         common::parse::TxtRecordParser,
-        dmarc::{Alignment, Format, Policy, Psd, Report, DMARC, URI},
+        dmarc::{Alignment, Dmarc, Format, Policy, Psd, Report, URI},
         Version,
     };
 
@@ -351,7 +351,7 @@ mod test {
         for (record, expected_result) in [
             (
                 "v=DMARC1; p=none; rua=mailto:dmarc-feedback@example.com",
-                DMARC {
+                Dmarc {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
                     fo: Report::All,
@@ -373,7 +373,7 @@ mod test {
                     "v=DMARC1; p=none; rua=mailto:dmarc-feedback@example.com;",
                     "ruf=mailto:auth-reports@example.com"
                 ),
-                DMARC {
+                Dmarc {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
                     fo: Report::All,
@@ -395,7 +395,7 @@ mod test {
                     "v=DMARC1; p=quarantine; rua=mailto:dmarc-feedback@example.com,",
                     "mailto:tld-test@thirdparty.example.net!10m; pct=25; fo=d:s"
                 ),
-                DMARC {
+                Dmarc {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
                     fo: Report::DkimSpf,
@@ -420,7 +420,7 @@ mod test {
                     "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo = 1;",
                     "rua=mailto:dmarc-feedback@example.com"
                 ),
-                DMARC {
+                Dmarc {
                     adkim: Alignment::Strict,
                     aspf: Alignment::Strict,
                     fo: Report::Any,
@@ -443,7 +443,7 @@ mod test {
                     "rua=mailto:dmarc-feedback@example.com!10 K , mailto:user%20@example.com ! 2G;",
                     "ignore_me= true; fo=s; rf = AfrF; ",
                 ),
-                DMARC {
+                Dmarc {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
                     fo: Report::Spf,
@@ -468,7 +468,7 @@ mod test {
                     "v=DMARC1; p=quarantine; rua=mailto:dmarc-feedback@example.com,",
                     "mailto:tld-test@thirdparty.example.net; fo=s:d; t=y; psd=y;;",
                 ),
-                DMARC {
+                Dmarc {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
                     fo: Report::DkimSpf,
@@ -490,7 +490,7 @@ mod test {
             ),
         ] {
             assert_eq!(
-                DMARC::parse(record.as_bytes())
+                Dmarc::parse(record.as_bytes())
                     .unwrap_or_else(|err| panic!("{:?} : {:?}", record, err)),
                 expected_result,
                 "{}",

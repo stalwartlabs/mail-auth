@@ -16,22 +16,23 @@ use sha2::Sha256;
 use crate::{
     common::{headers::Header, verify::VerifySignature},
     dkim::{verify::Verifier, Algorithm, Canonicalization, DomainKey, HashAlgorithm},
-    ARCOutput, AuthenticatedMessage, DKIMResult, Error, Resolver,
+    ArcOutput, AuthenticatedMessage, DkimResult, Error, Resolver,
 };
 
 use super::{ChainValidation, Set};
 
 impl Resolver {
-    pub async fn verify_arc<'x>(&self, message: &'x AuthenticatedMessage<'x>) -> ARCOutput<'x> {
+    /// Verifies ARC headers of an RFC5322 message.
+    pub async fn verify_arc<'x>(&self, message: &'x AuthenticatedMessage<'x>) -> ArcOutput<'x> {
         let arc_headers = message.ams_headers.len();
         if arc_headers == 0 {
-            return ARCOutput::default();
+            return ArcOutput::default();
         } else if arc_headers > 50 {
-            return ARCOutput::default().with_result(DKIMResult::Fail(Error::ARCChainTooLong));
+            return ArcOutput::default().with_result(DkimResult::Fail(Error::ARCChainTooLong));
         } else if (arc_headers != message.as_headers.len())
             || (arc_headers != message.aar_headers.len())
         {
-            return ARCOutput::default().with_result(DKIMResult::Fail(Error::ARCBrokenChain));
+            return ArcOutput::default().with_result(DkimResult::Fail(Error::ARCBrokenChain));
         }
 
         let now = SystemTime::now()
@@ -39,8 +40,8 @@ impl Resolver {
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        let mut output = ARCOutput {
-            result: DKIMResult::None,
+        let mut output = ArcOutput {
+            result: DkimResult::None,
             set: Vec::with_capacity(message.aar_headers.len() / 3),
         };
 
@@ -54,27 +55,27 @@ impl Resolver {
         {
             let seal = match &seal_.header {
                 Ok(seal) => seal,
-                Err(err) => return output.with_result(DKIMResult::Neutral(err.clone())),
+                Err(err) => return output.with_result(DkimResult::Neutral(err.clone())),
             };
             let signature = match &signature_.header {
                 Ok(signature) => signature,
-                Err(err) => return output.with_result(DKIMResult::Neutral(err.clone())),
+                Err(err) => return output.with_result(DkimResult::Neutral(err.clone())),
             };
             let results = match &results_.header {
                 Ok(results) => results,
-                Err(err) => return output.with_result(DKIMResult::Neutral(err.clone())),
+                Err(err) => return output.with_result(DkimResult::Neutral(err.clone())),
             };
 
-            if output.result == DKIMResult::None {
+            if output.result == DkimResult::None {
                 if (seal.i as usize != (pos + 1))
                     || (signature.i as usize != (pos + 1))
                     || (results.i as usize != (pos + 1))
                 {
-                    output.result = DKIMResult::Fail(Error::ARCInvalidInstance((pos + 1) as u32));
+                    output.result = DkimResult::Fail(Error::ARCInvalidInstance((pos + 1) as u32));
                 } else if (pos == 0 && seal.cv != ChainValidation::None)
                     || (pos > 0 && seal.cv != ChainValidation::Pass)
                 {
-                    output.result = DKIMResult::Fail(Error::ARCInvalidCV);
+                    output.result = DkimResult::Fail(Error::ARCInvalidCV);
                 } else if pos == arc_headers - 1 {
                     // Validate last signature in the chain
                     if signature.x == 0 || (signature.x > signature.t && signature.x > now) {
@@ -89,10 +90,10 @@ impl Resolver {
                             .unwrap()
                             .3;
                         if bh != &signature.bh {
-                            output.result = DKIMResult::Neutral(Error::FailedBodyHashMatch);
+                            output.result = DkimResult::Neutral(Error::FailedBodyHashMatch);
                         }
                     } else {
-                        output.result = DKIMResult::Neutral(Error::SignatureExpired);
+                        output.result = DkimResult::Neutral(Error::SignatureExpired);
                     }
                 }
             }
@@ -104,7 +105,7 @@ impl Resolver {
             });
         }
 
-        if output.result != DKIMResult::None {
+        if output.result != DkimResult::None {
             return output;
         }
 
@@ -134,7 +135,7 @@ impl Resolver {
 
         // Verify signature
         if let Err(err) = signature.verify(record.as_ref(), &hh) {
-            return output.with_result(DKIMResult::Fail(err));
+            return output.with_result(DkimResult::Fail(err));
         }
 
         // Validate ARC Seals
@@ -178,12 +179,12 @@ impl Resolver {
 
             // Verify ARC Seal
             if let Err(err) = seal.verify(record.as_ref(), &hh) {
-                return output.with_result(DKIMResult::Fail(err));
+                return output.with_result(DkimResult::Fail(err));
             }
         }
 
         // ARC Validation successful
-        output.with_result(DKIMResult::Pass)
+        output.with_result(DkimResult::Pass)
     }
 }
 
@@ -196,7 +197,7 @@ mod test {
     };
 
     use crate::{
-        common::parse::TxtRecordParser, dkim::DomainKey, AuthenticatedMessage, DKIMResult, Resolver,
+        common::parse::TxtRecordParser, dkim::DomainKey, AuthenticatedMessage, DkimResult, Resolver,
     };
 
     #[tokio::test]
@@ -219,10 +220,10 @@ mod test {
             let message = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
 
             let arc = resolver.verify_arc(&message).await;
-            assert_eq!(arc.result(), &DKIMResult::Pass);
+            assert_eq!(arc.result(), &DkimResult::Pass);
 
             let dkim = resolver.verify_dkim(&message).await;
-            assert!(dkim.iter().any(|o| o.result() == &DKIMResult::Pass));
+            assert!(dkim.iter().any(|o| o.result() == &DkimResult::Pass));
         }
     }
 

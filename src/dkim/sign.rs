@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, time::SystemTime};
+use std::{borrow::Cow, io, time::SystemTime};
 
 use ed25519_dalek::Signer;
 use mail_builder::encoders::base64::base64_encode;
@@ -89,7 +89,7 @@ impl<'x> Signature<'x> {
 
     fn sign_<T>(mut self, message: &'x [u8], with_key: &PrivateKey, now: u64) -> crate::Result<Self>
     where
-        T: Digest + AssociatedOid + std::io::Write,
+        T: Digest + AssociatedOid + io::Write,
     {
         let mut body_hasher = T::new();
         let mut header_hasher = T::new();
@@ -218,7 +218,7 @@ mod test {
     use crate::{
         common::parse::TxtRecordParser,
         dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport, HashAlgorithm, Signature},
-        AuthenticatedMessage, DKIMOutput, DKIMResult, PrivateKey, Resolver,
+        AuthenticatedMessage, DkimOutput, DkimResult, PrivateKey, Resolver,
     };
 
     const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -497,7 +497,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         signature: Signature<'x>,
         message_: &'x str,
         expect: Result<(), super::Error>,
-    ) -> Vec<DKIMOutput<'x>> {
+    ) -> Vec<DkimOutput<'x>> {
         let mut message = Vec::with_capacity(message_.len() + 100);
         signature.write(&mut message, true).unwrap();
         message.extend_from_slice(message_.as_bytes());
@@ -506,16 +506,16 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         let dkim = resolver.verify_dkim(&message).await;
 
         match (dkim.last().unwrap().result(), &expect) {
-            (DKIMResult::Pass, Ok(_)) => (),
+            (DkimResult::Pass, Ok(_)) => (),
             (
-                DKIMResult::Fail(hdr) | DKIMResult::PermError(hdr) | DKIMResult::Neutral(hdr),
+                DkimResult::Fail(hdr) | DkimResult::PermError(hdr) | DkimResult::Neutral(hdr),
                 Err(err),
             ) if hdr == err => (),
             (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
         }
 
         dkim.into_iter()
-            .map(|d| DKIMOutput {
+            .map(|d| DkimOutput {
                 result: d.result,
                 signature: None,
                 report: d.report,

@@ -17,10 +17,10 @@ use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 
 use crate::report::{
-    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DKIMResult, DMARCResult, DateRange,
-    Disposition, Error, Extension, Identifier, PolicyEvaluated, PolicyOverride,
+    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Disposition, DkimResult,
+    DmarcResult, Error, Extension, Identifier, PolicyEvaluated, PolicyOverride,
     PolicyOverrideReason, PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult,
-    SPFDomainScope, SPFResult,
+    SPFDomainScope, SpfResult,
 };
 
 impl Report {
@@ -589,48 +589,48 @@ impl FromStr for PolicyOverride {
     }
 }
 
-impl FromStr for DMARCResult {
+impl FromStr for DmarcResult {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.as_bytes() {
-            b"pass" => DMARCResult::Pass,
-            b"fail" => DMARCResult::Fail,
-            _ => DMARCResult::Unspecified,
+            b"pass" => DmarcResult::Pass,
+            b"fail" => DmarcResult::Fail,
+            _ => DmarcResult::Unspecified,
         })
     }
 }
 
-impl FromStr for DKIMResult {
+impl FromStr for DkimResult {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.as_bytes() {
-            b"none" => DKIMResult::None,
-            b"pass" => DKIMResult::Pass,
-            b"fail" => DKIMResult::Fail,
-            b"policy" => DKIMResult::Policy,
-            b"neutral" => DKIMResult::Neutral,
-            b"temperror" => DKIMResult::TempError,
-            b"permerror" => DKIMResult::PermError,
-            _ => DKIMResult::None,
+            b"none" => DkimResult::None,
+            b"pass" => DkimResult::Pass,
+            b"fail" => DkimResult::Fail,
+            b"policy" => DkimResult::Policy,
+            b"neutral" => DkimResult::Neutral,
+            b"temperror" => DkimResult::TempError,
+            b"permerror" => DkimResult::PermError,
+            _ => DkimResult::None,
         })
     }
 }
 
-impl FromStr for SPFResult {
+impl FromStr for SpfResult {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(match s.as_bytes() {
-            b"none" => SPFResult::None,
-            b"pass" => SPFResult::Pass,
-            b"fail" => SPFResult::Fail,
-            b"softfail" => SPFResult::SoftFail,
-            b"neutral" => SPFResult::Neutral,
-            b"temperror" => SPFResult::TempError,
-            b"permerror" => SPFResult::PermError,
-            _ => SPFResult::None,
+            b"none" => SpfResult::None,
+            b"pass" => SpfResult::Pass,
+            b"fail" => SpfResult::Fail,
+            b"softfail" => SpfResult::SoftFail,
+            b"neutral" => SpfResult::Neutral,
+            b"temperror" => SpfResult::TempError,
+            b"permerror" => SpfResult::PermError,
+            _ => SpfResult::None,
         })
     }
 }

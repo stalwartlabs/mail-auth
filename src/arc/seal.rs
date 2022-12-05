@@ -18,14 +18,14 @@ use sha2::Sha256;
 
 use crate::{
     dkim::{Algorithm, Canonicalization},
-    ARCOutput, AuthenticatedMessage, AuthenticationResults, DKIMResult, Error, PrivateKey,
+    ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error, PrivateKey,
 };
 
-use super::{ChainValidation, Seal, Signature, ARC};
+use super::{ArcSet, ChainValidation, Seal, Signature};
 
-impl<'x> ARC<'x> {
+impl<'x> ArcSet<'x> {
     pub fn new(results: &'x AuthenticationResults) -> Self {
-        ARC {
+        ArcSet {
             signature: Signature::default(),
             seal: Seal::default(),
             results,
@@ -35,7 +35,7 @@ impl<'x> ARC<'x> {
     pub fn seal(
         mut self,
         message: &'x AuthenticatedMessage<'x>,
-        arc_output: &ARCOutput,
+        arc_output: &ArcOutput,
         with_key: &PrivateKey,
     ) -> crate::Result<Self> {
         if !arc_output.can_be_sealed() {
@@ -61,7 +61,7 @@ impl<'x> ARC<'x> {
             self.signature.i = i;
             self.seal.i = i;
             self.seal.cv = match &arc_output.result {
-                DKIMResult::Pass => ChainValidation::Pass,
+                DkimResult::Pass => ChainValidation::Pass,
                 _ => ChainValidation::Fail,
             };
         }
@@ -246,10 +246,10 @@ mod test {
     use mail_parser::decoders::base64::base64_decode;
 
     use crate::{
-        arc::ARC,
+        arc::ArcSet,
         common::{headers::HeaderWriter, parse::TxtRecordParser},
         dkim::{DomainKey, Signature},
-        AuthenticatedMessage, AuthenticationResults, DKIMResult, PrivateKey, Resolver,
+        AuthenticatedMessage, AuthenticationResults, DkimResult, PrivateKey, Resolver,
     };
 
     const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -344,12 +344,12 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         let dkim_result = resolver.verify_dkim(&message).await;
         let arc_result = resolver.verify_arc(&message).await;
         assert!(
-            matches!(arc_result.result(), DKIMResult::Pass | DKIMResult::None),
+            matches!(arc_result.result(), DkimResult::Pass | DkimResult::None),
             "ARC validation failed: {:?}",
             arc_result.result()
         );
         let auth_results = AuthenticationResults::new(d).with_dkim_result(&dkim_result, d);
-        let arc = ARC::new(&auth_results)
+        let arc = ArcSet::new(&auth_results)
             .domain(d)
             .selector(s)
             .headers(["From", "To", "Subject", "DKIM-Signature"])

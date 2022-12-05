@@ -15,7 +15,7 @@ use sha2::Sha256;
 
 use crate::{
     common::{base32::Base32Writer, verify::VerifySignature},
-    is_within_pct, AuthenticatedMessage, DKIMOutput, DKIMResult, Error, Resolver,
+    is_within_pct, AuthenticatedMessage, DkimOutput, DkimResult, Error, Resolver,
 };
 
 use super::{
@@ -29,7 +29,7 @@ impl Resolver {
     pub async fn verify_dkim<'x>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
-    ) -> Vec<DKIMOutput<'x>> {
+    ) -> Vec<DkimOutput<'x>> {
         self.verify_dkim_(
             message,
             SystemTime::now()
@@ -44,7 +44,7 @@ impl Resolver {
         &self,
         message: &'x AuthenticatedMessage<'x>,
         now: u64,
-    ) -> Vec<DKIMOutput<'x>> {
+    ) -> Vec<DkimOutput<'x>> {
         let mut output = Vec::with_capacity(message.dkim_headers.len());
         let mut report_requested = false;
 
@@ -61,13 +61,13 @@ impl Resolver {
                         signature
                     } else {
                         output.push(
-                            DKIMOutput::neutral(Error::SignatureExpired).with_signature(signature),
+                            DkimOutput::neutral(Error::SignatureExpired).with_signature(signature),
                         );
                         continue;
                     }
                 }
                 Err(err) => {
-                    output.push(DKIMOutput::neutral(err.clone()));
+                    output.push(DkimOutput::neutral(err.clone()));
                     continue;
                 }
             };
@@ -83,7 +83,7 @@ impl Resolver {
 
             if bh != &signature.bh {
                 output.push(
-                    DKIMOutput::neutral(Error::FailedBodyHashMatch).with_signature(signature),
+                    DkimOutput::neutral(Error::FailedBodyHashMatch).with_signature(signature),
                 );
                 continue;
             }
@@ -92,14 +92,14 @@ impl Resolver {
             let record = match self.txt_lookup::<DomainKey>(signature.domain_key()).await {
                 Ok(record) => record,
                 Err(err) => {
-                    output.push(DKIMOutput::dns_error(err).with_signature(signature));
+                    output.push(DkimOutput::dns_error(err).with_signature(signature));
                     continue;
                 }
             };
 
             // Enforce t=s flag
             if !signature.validate_auid(&record) {
-                output.push(DKIMOutput::fail(Error::FailedAUIDMatch).with_signature(signature));
+                output.push(DkimOutput::fail(Error::FailedAUIDMatch).with_signature(signature));
                 continue;
             }
 
@@ -116,7 +116,7 @@ impl Resolver {
 
             // Verify signature
             if let Err(err) = signature.verify(record.as_ref(), &hh) {
-                output.push(DKIMOutput::fail(err).with_signature(signature));
+                output.push(DkimOutput::fail(err).with_signature(signature));
                 continue;
             }
 
@@ -158,11 +158,11 @@ impl Resolver {
                     match self.txt_lookup::<Atps>(query_domain).await {
                         Ok(_) => {
                             // ATPS Verification successful
-                            output.push(DKIMOutput::pass().with_atps().with_signature(signature));
+                            output.push(DkimOutput::pass().with_atps().with_signature(signature));
                         }
                         Err(err) => {
                             output.push(
-                                DKIMOutput::dns_error(err)
+                                DkimOutput::dns_error(err)
                                     .with_atps()
                                     .with_signature(signature),
                             );
@@ -173,7 +173,7 @@ impl Resolver {
             }
 
             // Verification successful
-            output.push(DKIMOutput::pass().with_signature(signature));
+            output.push(DkimOutput::pass().with_signature(signature));
         }
 
         // Handle reports
@@ -181,7 +181,7 @@ impl Resolver {
             for dkim in &mut output {
                 // Process signatures with errors that requested reports
                 let signature = if let Some(signature) = &dkim.signature {
-                    if signature.r && dkim.result != DKIMResult::Pass {
+                    if signature.r && dkim.result != DkimResult::Pass {
                         signature
                     } else {
                         continue;
@@ -206,10 +206,10 @@ impl Resolver {
 
                 // Set report address
                 dkim.report = match &dkim.result() {
-                    DKIMResult::Neutral(err)
-                    | DKIMResult::Fail(err)
-                    | DKIMResult::PermError(err)
-                    | DKIMResult::TempError(err) => {
+                    DkimResult::Neutral(err)
+                    | DkimResult::Fail(err)
+                    | DkimResult::PermError(err)
+                    | DkimResult::TempError(err) => {
                         let send_report = match err {
                             Error::CryptoError(_)
                             | Error::Io(_)
@@ -244,7 +244,7 @@ impl Resolver {
                             None
                         }
                     }
-                    DKIMResult::None | DKIMResult::Pass => None,
+                    DkimResult::None | DkimResult::Pass => None,
                 };
             }
         }
@@ -377,7 +377,7 @@ mod test {
     use crate::{
         common::parse::TxtRecordParser,
         dkim::{verify::Verifier, DomainKey},
-        AuthenticatedMessage, DKIMResult, Resolver,
+        AuthenticatedMessage, DkimResult, Resolver,
     };
 
     #[tokio::test]
@@ -401,7 +401,7 @@ mod test {
 
             let dkim = resolver.verify_dkim_(&message, 1667843664).await;
 
-            assert_eq!(dkim.last().unwrap().result(), &DKIMResult::Pass);
+            assert_eq!(dkim.last().unwrap().result(), &DkimResult::Pass);
         }
     }
 

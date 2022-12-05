@@ -8,6 +8,8 @@
  * except according to those terms.
  */
 
+use std::io;
+
 pub(crate) static BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
 pub(crate) struct Base32Writer {
@@ -66,8 +68,8 @@ impl Base32Writer {
     }
 }
 
-impl std::io::Write for Base32Writer {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+impl io::Write for Base32Writer {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
         let start_pos = self.pos;
 
         for &byte in bytes {
@@ -77,13 +79,14 @@ impl std::io::Write for Base32Writer {
         Ok(self.pos - start_pos)
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
+
     use std::io::Write;
 
     use sha1::{Digest, Sha1};

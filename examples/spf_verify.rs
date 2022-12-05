@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use mail_auth::{Resolver, SPFResult};
+use mail_auth::{Resolver, SpfResult};
 
 #[tokio::main]
 async fn main() {
@@ -19,11 +19,11 @@ async fn main() {
     let result = resolver
         .verify_spf_helo("127.0.0.1".parse().unwrap(), "gmail.com")
         .await;
-    assert_eq!(result.result(), SPFResult::Fail);
+    assert_eq!(result.result(), SpfResult::Fail);
 
     // Verify MAIL-FROM identity
     let result = resolver
         .verify_spf_sender("::1".parse().unwrap(), "gmail.com", "sender@gmail.com")
         .await;
-    assert_eq!(result.result(), SPFResult::Fail);
+    assert_eq!(result.result(), SpfResult::Fail);
 }

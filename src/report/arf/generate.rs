@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use std::{fmt::Write, time::SystemTime};
+use std::{fmt::Write, io, time::SystemTime};
 
 use mail_builder::{
     headers::{content_type::ContentType, HeaderType},
@@ -25,8 +25,8 @@ impl<'x> Feedback<'x> {
         from: &'x str,
         to: &'x str,
         subject: &'x str,
-        writer: impl std::io::Write,
-    ) -> std::io::Result<()> {
+        writer: impl io::Write,
+    ) -> io::Result<()> {
         // Generate ARF
 
         let arf = self.as_arf();
@@ -101,10 +101,10 @@ impl<'x> Feedback<'x> {
             .write_to(writer)
     }
 
-    pub fn as_rfc5322(&self, from: &str, to: &str, subject: &str) -> std::io::Result<String> {
+    pub fn as_rfc5322(&self, from: &str, to: &str, subject: &str) -> io::Result<String> {
         let mut buf = Vec::new();
         self.write_rfc5322(from, to, subject, &mut buf)?;
-        String::from_utf8(buf).map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
+        String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
     pub fn as_arf(&self) -> String {

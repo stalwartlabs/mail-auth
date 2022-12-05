@@ -12,14 +12,15 @@ use flate2::{write::GzEncoder, Compression};
 use mail_builder::{headers::HeaderType, MessageBuilder};
 
 use crate::report::{
-    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DKIMResult, DMARCResult, DateRange,
-    Disposition, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
-    PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult, SPFDomainScope, SPFResult,
+    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Disposition, DkimResult,
+    DmarcResult, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
+    PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult, SPFDomainScope, SpfResult,
 };
 
 use std::{
     borrow::Cow,
     fmt::{Display, Formatter, Write},
+    io,
 };
 
 impl Report {
@@ -29,12 +30,12 @@ impl Report {
         submitter: &'x str,
         from: &'x str,
         to: &'x str,
-        writer: impl std::io::Write,
-    ) -> std::io::Result<()> {
+        writer: impl io::Write,
+    ) -> io::Result<()> {
         // Compress XML report
         let xml = self.as_xnl();
         let mut e = GzEncoder::new(Vec::with_capacity(xml.len()), Compression::default());
-        std::io::Write::write_all(&mut e, xml.as_bytes())?;
+        io::Write::write_all(&mut e, xml.as_bytes())?;
         let compressed_bytes = e.finish()?;
 
         MessageBuilder::new()
@@ -79,10 +80,10 @@ impl Report {
         submitter: &'x str,
         from: &'x str,
         to: &'x str,
-    ) -> std::io::Result<String> {
+    ) -> io::Result<String> {
         let mut buf = Vec::new();
         self.write_rfc5322(receiver_domain, submitter, from, to, &mut buf)?;
-        String::from_utf8(buf).map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))
+        String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
     pub fn as_xnl(&self) -> String {
@@ -324,12 +325,12 @@ impl Display for ActionDisposition {
     }
 }
 
-impl Display for DMARCResult {
+impl Display for DmarcResult {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            DMARCResult::Pass => "pass",
-            DMARCResult::Fail => "fail",
-            DMARCResult::Unspecified => "",
+            DmarcResult::Pass => "pass",
+            DmarcResult::Fail => "fail",
+            DmarcResult::Unspecified => "",
         })
     }
 }
@@ -347,16 +348,16 @@ impl Display for PolicyOverride {
     }
 }
 
-impl Display for DKIMResult {
+impl Display for DkimResult {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            DKIMResult::None => "none",
-            DKIMResult::Pass => "pass",
-            DKIMResult::Fail => "fail",
-            DKIMResult::Policy => "policy",
-            DKIMResult::Neutral => "neutral",
-            DKIMResult::TempError => "temperror",
-            DKIMResult::PermError => "permerror",
+            DkimResult::None => "none",
+            DkimResult::Pass => "pass",
+            DkimResult::Fail => "fail",
+            DkimResult::Policy => "policy",
+            DkimResult::Neutral => "neutral",
+            DkimResult::TempError => "temperror",
+            DkimResult::PermError => "permerror",
         })
     }
 }
@@ -370,16 +371,16 @@ impl Display for SPFDomainScope {
     }
 }
 
-impl Display for SPFResult {
+impl Display for SpfResult {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            SPFResult::None => "none",
-            SPFResult::Neutral => "neutral",
-            SPFResult::Pass => "pass",
-            SPFResult::Fail => "fail",
-            SPFResult::SoftFail => "softfail",
-            SPFResult::TempError => "temperror",
-            SPFResult::PermError => "permerror",
+            SpfResult::None => "none",
+            SpfResult::Neutral => "neutral",
+            SpfResult::Pass => "pass",
+            SpfResult::Fail => "fail",
+            SpfResult::SoftFail => "softfail",
+            SpfResult::TempError => "temperror",
+            SpfResult::PermError => "permerror",
         })
     }
 }
@@ -420,9 +421,9 @@ fn escape_xml(text: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod test {
     use crate::report::{
-        ActionDisposition, Alignment, DKIMAuthResult, DKIMResult, DMARCResult, Disposition,
+        ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
         PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
-        SPFResult,
+        SpfResult,
     };
 
     #[test]
@@ -448,8 +449,8 @@ mod test {
                     .with_source_ip("192.168.1.2".parse().unwrap())
                     .with_count(3)
                     .with_action_disposition(ActionDisposition::Pass)
-                    .with_dmarc_dkim_result(DMARCResult::Pass)
-                    .with_dmarc_spf_result(DMARCResult::Fail)
+                    .with_dmarc_dkim_result(DmarcResult::Pass)
+                    .with_dmarc_spf_result(DmarcResult::Fail)
                     .with_policy_override_reason(
                         PolicyOverrideReason::new(PolicyOverride::Forwarded)
                             .with_comment("it was forwarded"),
@@ -465,14 +466,14 @@ mod test {
                         DKIMAuthResult::new()
                             .with_domain("test.org")
                             .with_selector("my-selector")
-                            .with_result(DKIMResult::PermError)
+                            .with_result(DkimResult::PermError)
                             .with_human_result("failed to parse record"),
                     )
                     .with_spf_auth_result(
                         SPFAuthResult::new()
                             .with_domain("test.org")
                             .with_scope(SPFDomainScope::Helo)
-                            .with_result(SPFResult::SoftFail)
+                            .with_result(SpfResult::SoftFail)
                             .with_human_result("dns timed out"),
                     ),
             )
@@ -481,8 +482,8 @@ mod test {
                     .with_source_ip("a:b:c::e:f".parse().unwrap())
                     .with_count(99)
                     .with_action_disposition(ActionDisposition::Reject)
-                    .with_dmarc_dkim_result(DMARCResult::Fail)
-                    .with_dmarc_spf_result(DMARCResult::Pass)
+                    .with_dmarc_dkim_result(DmarcResult::Fail)
+                    .with_dmarc_spf_result(DmarcResult::Pass)
                     .with_policy_override_reason(
                         PolicyOverrideReason::new(PolicyOverride::LocalPolicy)
                             .with_comment("on the white list"),
@@ -498,14 +499,14 @@ mod test {
                         DKIMAuthResult::new()
                             .with_domain("test2.org")
                             .with_selector("my-other-selector")
-                            .with_result(DKIMResult::Neutral)
+                            .with_result(DkimResult::Neutral)
                             .with_human_result("something went wrong"),
                     )
                     .with_spf_auth_result(
                         SPFAuthResult::new()
                             .with_domain("test.org")
                             .with_scope(SPFDomainScope::MailFrom)
-                            .with_result(SPFResult::None)
+                            .with_result(SpfResult::None)
                             .with_human_result("no policy found"),
                     ),
             );

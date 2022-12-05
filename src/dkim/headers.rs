@@ -10,7 +10,7 @@
 
 use std::{
     fmt::{Display, Formatter},
-    io::Write,
+    io,
 };
 
 use crate::common::headers::HeaderWriter;
@@ -18,7 +18,7 @@ use crate::common::headers::HeaderWriter;
 use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
 
 impl<'x> Signature<'x> {
-    pub(crate) fn write(&self, mut writer: impl Write, as_header: bool) -> std::io::Result<()> {
+    pub(crate) fn write(&self, mut writer: impl io::Write, as_header: bool) -> io::Result<()> {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"dkim-signature:"[..], &b" "[..]),
             _ => (&b"DKIM-Signature: "[..], &b"\r\n\t"[..]),
@@ -136,7 +136,7 @@ impl<'x> Signature<'x> {
 }
 
 impl<'x> HeaderWriter for Signature<'x> {
-    fn write_header(&self, writer: impl Write) -> std::io::Result<()> {
+    fn write_header(&self, writer: impl io::Write) -> io::Result<()> {
         self.write(writer, true)
     }
 }

@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use mail_auth::{AuthenticatedMessage, DMARCResult, Resolver};
+use mail_auth::{AuthenticatedMessage, DmarcResult, Resolver};
 
 const TEST_MESSAGE: &str = r#"DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;
 d=football.example.com; i=@football.example.com;
@@ -60,6 +60,6 @@ async fn main() {
             &spf_result,
         )
         .await;
-    assert_eq!(dmarc_result.dkim_result(), &DMARCResult::Pass);
-    assert_eq!(dmarc_result.spf_result(), &DMARCResult::Pass);
+    assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);
+    assert_eq!(dmarc_result.spf_result(), &DmarcResult::Pass);
 }

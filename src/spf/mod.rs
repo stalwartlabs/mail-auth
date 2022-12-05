@@ -17,7 +17,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
-use crate::{is_within_pct, SPFOutput, SPFResult, Version};
+use crate::{is_within_pct, SpfOutput, SpfResult, Version};
 
 /*
       "+" pass
@@ -131,7 +131,7 @@ pub enum Macro {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct SPF {
+pub struct Spf {
     version: Version,
     directives: Vec<Directive>,
     exp: Option<Macro>,
@@ -170,31 +170,31 @@ impl Mechanism {
     }
 }
 
-impl TryFrom<&str> for SPFResult {
+impl TryFrom<&str> for SpfResult {
     type Error = ();
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value.eq_ignore_ascii_case("pass") {
-            Ok(SPFResult::Pass)
+            Ok(SpfResult::Pass)
         } else if value.eq_ignore_ascii_case("fail") {
-            Ok(SPFResult::Fail)
+            Ok(SpfResult::Fail)
         } else if value.eq_ignore_ascii_case("softfail") {
-            Ok(SPFResult::SoftFail)
+            Ok(SpfResult::SoftFail)
         } else if value.eq_ignore_ascii_case("neutral") {
-            Ok(SPFResult::Neutral)
+            Ok(SpfResult::Neutral)
         } else if value.eq_ignore_ascii_case("temperror") {
-            Ok(SPFResult::TempError)
+            Ok(SpfResult::TempError)
         } else if value.eq_ignore_ascii_case("permerror") {
-            Ok(SPFResult::PermError)
+            Ok(SpfResult::PermError)
         } else if value.eq_ignore_ascii_case("none") {
-            Ok(SPFResult::None)
+            Ok(SpfResult::None)
         } else {
             Err(())
         }
     }
 }
 
-impl TryFrom<String> for SPFResult {
+impl TryFrom<String> for SpfResult {
     type Error = ();
 
     fn try_from(value: String) -> Result<Self, Self::Error> {
@@ -202,32 +202,32 @@ impl TryFrom<String> for SPFResult {
     }
 }
 
-impl SPFOutput {
+impl SpfOutput {
     pub(crate) fn new(domain: String) -> Self {
-        SPFOutput {
-            result: SPFResult::None,
+        SpfOutput {
+            result: SpfResult::None,
             report: None,
             explanation: None,
             domain,
         }
     }
 
-    pub(crate) fn with_result(mut self, result: SPFResult) -> Self {
+    pub(crate) fn with_result(mut self, result: SpfResult) -> Self {
         self.result = result;
         self
     }
 
-    pub(crate) fn with_report(mut self, spf: &SPF) -> Self {
+    pub(crate) fn with_report(mut self, spf: &Spf) -> Self {
         match &spf.ra {
             Some(ra) if is_within_pct(spf.rp) => {
                 if match self.result {
-                    SPFResult::Fail => (spf.rr & RR_FAIL) != 0,
-                    SPFResult::SoftFail => (spf.rr & RR_SOFTFAIL) != 0,
-                    SPFResult::Neutral | SPFResult::None => (spf.rr & RR_NEUTRAL_NONE) != 0,
-                    SPFResult::TempError | SPFResult::PermError => {
+                    SpfResult::Fail => (spf.rr & RR_FAIL) != 0,
+                    SpfResult::SoftFail => (spf.rr & RR_SOFTFAIL) != 0,
+                    SpfResult::Neutral | SpfResult::None => (spf.rr & RR_NEUTRAL_NONE) != 0,
+                    SpfResult::TempError | SpfResult::PermError => {
                         (spf.rr & RR_TEMP_PERM_ERROR) != 0
                     }
-                    SPFResult::Pass => false,
+                    SpfResult::Pass => false,
                 } {
                     self.report = format!("{}@{}", String::from_utf8_lossy(ra), self.domain).into();
                 }
@@ -242,7 +242,7 @@ impl SPFOutput {
         self
     }
 
-    pub fn result(&self) -> SPFResult {
+    pub fn result(&self) -> SpfResult {
         self.result
     }
 

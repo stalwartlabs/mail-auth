@@ -15,13 +15,13 @@ use std::fmt::Write;
 use std::net::IpAddr;
 
 use crate::{
-    dmarc::DMARC,
+    dmarc::Dmarc,
     report::{
-        ActionDisposition, Alignment, DKIMAuthResult, DKIMResult, DMARCResult, Disposition,
+        ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
         PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
-        SPFResult,
+        SpfResult,
     },
-    ARCOutput, DKIMOutput, DMARCOutput, SPFOutput,
+    ArcOutput, DkimOutput, DmarcOutput, SpfOutput,
 };
 
 impl Report {
@@ -182,7 +182,7 @@ impl Report {
         self
     }
 
-    pub fn with_policy_published(mut self, dmarc: &DMARC) -> Self {
+    pub fn with_policy_published(mut self, dmarc: &Dmarc) -> Self {
         self.policy_published.adkim = (&dmarc.adkim).into();
         self.policy_published.aspf = (&dmarc.aspf).into();
         self.policy_published.p = (&dmarc.p).into();
@@ -206,22 +206,22 @@ impl Record {
         Record::default()
     }
 
-    pub fn with_dkim_output(mut self, dkim_output: &[DKIMOutput]) {
+    pub fn with_dkim_output(mut self, dkim_output: &[DkimOutput]) {
         for dkim in dkim_output {
             if let Some(signature) = &dkim.signature {
                 let (result, human_result) = match &dkim.result {
-                    crate::DKIMResult::Pass => (DKIMResult::Pass, None),
-                    crate::DKIMResult::Neutral(err) => {
-                        (DKIMResult::Neutral, err.to_string().into())
+                    crate::DkimResult::Pass => (DkimResult::Pass, None),
+                    crate::DkimResult::Neutral(err) => {
+                        (DkimResult::Neutral, err.to_string().into())
                     }
-                    crate::DKIMResult::Fail(err) => (DKIMResult::Fail, err.to_string().into()),
-                    crate::DKIMResult::PermError(err) => {
-                        (DKIMResult::PermError, err.to_string().into())
+                    crate::DkimResult::Fail(err) => (DkimResult::Fail, err.to_string().into()),
+                    crate::DkimResult::PermError(err) => {
+                        (DkimResult::PermError, err.to_string().into())
                     }
-                    crate::DKIMResult::TempError(err) => {
-                        (DKIMResult::TempError, err.to_string().into())
+                    crate::DkimResult::TempError(err) => {
+                        (DkimResult::TempError, err.to_string().into())
                     }
-                    crate::DKIMResult::None => (DKIMResult::None, None),
+                    crate::DkimResult::None => (DkimResult::None, None),
                 };
 
                 self.auth_results.dkim.push(DKIMAuthResult {
@@ -234,24 +234,24 @@ impl Record {
         }
     }
 
-    pub fn with_spf_output(mut self, spf_output: &SPFOutput, scope: SPFDomainScope) {
+    pub fn with_spf_output(mut self, spf_output: &SpfOutput, scope: SPFDomainScope) {
         self.auth_results.spf.push(SPFAuthResult {
             domain: spf_output.domain.to_string(),
             scope,
             result: match spf_output.result {
-                crate::SPFResult::Pass => SPFResult::Pass,
-                crate::SPFResult::Fail => SPFResult::Fail,
-                crate::SPFResult::SoftFail => SPFResult::SoftFail,
-                crate::SPFResult::Neutral => SPFResult::Neutral,
-                crate::SPFResult::TempError => SPFResult::TempError,
-                crate::SPFResult::PermError => SPFResult::PermError,
-                crate::SPFResult::None => SPFResult::None,
+                crate::SpfResult::Pass => SpfResult::Pass,
+                crate::SpfResult::Fail => SpfResult::Fail,
+                crate::SpfResult::SoftFail => SpfResult::SoftFail,
+                crate::SpfResult::Neutral => SpfResult::Neutral,
+                crate::SpfResult::TempError => SpfResult::TempError,
+                crate::SpfResult::PermError => SpfResult::PermError,
+                crate::SpfResult::None => SpfResult::None,
             },
             human_result: None,
         });
     }
 
-    pub fn with_dmarc_output(mut self, dmarc_output: &DMARCOutput) {
+    pub fn with_dmarc_output(mut self, dmarc_output: &DmarcOutput) {
         self.row.policy_evaluated.disposition = match dmarc_output.policy {
             crate::dmarc::Policy::None => ActionDisposition::None,
             crate::dmarc::Policy::Quarantine => ActionDisposition::Quarantine,
@@ -262,8 +262,8 @@ impl Record {
         self.row.policy_evaluated.spf = (&dmarc_output.spf_result).into();
     }
 
-    pub fn with_arc_output(mut self, arc_output: &ARCOutput) {
-        if arc_output.result == crate::DKIMResult::Pass {
+    pub fn with_arc_output(mut self, arc_output: &ArcOutput) {
+        if arc_output.result == crate::DkimResult::Pass {
             let mut comment = "arc=pass".to_string();
             for set in arc_output.set.iter().rev() {
                 let seal = &set.seal.header;
@@ -308,20 +308,20 @@ impl Record {
         self
     }
 
-    pub fn dmarc_dkim_result(&self) -> DMARCResult {
+    pub fn dmarc_dkim_result(&self) -> DmarcResult {
         self.row.policy_evaluated.dkim
     }
 
-    pub fn with_dmarc_dkim_result(mut self, dkim: DMARCResult) -> Self {
+    pub fn with_dmarc_dkim_result(mut self, dkim: DmarcResult) -> Self {
         self.row.policy_evaluated.dkim = dkim;
         self
     }
 
-    pub fn dmarc_spf_result(&self) -> DMARCResult {
+    pub fn dmarc_spf_result(&self) -> DmarcResult {
         self.row.policy_evaluated.spf
     }
 
-    pub fn with_dmarc_spf_result(mut self, spf: DMARCResult) -> Self {
+    pub fn with_dmarc_spf_result(mut self, spf: DmarcResult) -> Self {
         self.row.policy_evaluated.spf = spf;
         self
     }
@@ -404,11 +404,11 @@ impl DKIMAuthResult {
         self
     }
 
-    pub fn result(&self) -> DKIMResult {
+    pub fn result(&self) -> DkimResult {
         self.result
     }
 
-    pub fn with_result(mut self, result: DKIMResult) -> Self {
+    pub fn with_result(mut self, result: DkimResult) -> Self {
         self.result = result;
         self
     }
@@ -446,11 +446,11 @@ impl SPFAuthResult {
         self
     }
 
-    pub fn result(&self) -> SPFResult {
+    pub fn result(&self) -> SpfResult {
         self.result
     }
 
-    pub fn with_result(mut self, result: SPFResult) -> Self {
+    pub fn with_result(mut self, result: SpfResult) -> Self {
         self.result = result;
         self
     }
@@ -487,11 +487,11 @@ impl PolicyOverrideReason {
     }
 }
 
-impl From<&crate::DMARCResult> for DMARCResult {
-    fn from(result: &crate::DMARCResult) -> Self {
+impl From<&crate::DmarcResult> for DmarcResult {
+    fn from(result: &crate::DmarcResult) -> Self {
         match result {
-            crate::DMARCResult::Pass => DMARCResult::Pass,
-            _ => DMARCResult::Fail,
+            crate::DmarcResult::Pass => DmarcResult::Pass,
+            _ => DmarcResult::Fail,
         }
     }
 }

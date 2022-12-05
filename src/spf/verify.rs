@@ -13,12 +13,13 @@ use std::{
     time::Instant,
 };
 
-use crate::{Error, Policy, Resolver, SPFOutput, SPFResult};
+use crate::{Error, Policy, Resolver, SpfOutput, SpfResult};
 
-use super::{Macro, Mechanism, Qualifier, Variables, SPF};
+use super::{Macro, Mechanism, Qualifier, Spf, Variables};
 
 impl Resolver {
-    pub async fn verify_spf_helo(&self, ip: IpAddr, helo_domain: &str) -> SPFOutput {
+    /// Verifies the SPF EHLO identity
+    pub async fn verify_spf_helo(&self, ip: IpAddr, helo_domain: &str) -> SpfOutput {
         if helo_domain.has_labels() {
             self.check_host(
                 ip,
@@ -28,16 +29,17 @@ impl Resolver {
             )
             .await
         } else {
-            SPFOutput::new(helo_domain.to_string()).with_result(SPFResult::None)
+            SpfOutput::new(helo_domain.to_string()).with_result(SpfResult::None)
         }
     }
 
+    /// Verifies the SPF MAIL FROM identity
     pub async fn verify_spf_sender(
         &self,
         ip: IpAddr,
         helo_domain: &str,
         sender: &str,
-    ) -> SPFOutput {
+    ) -> SpfOutput {
         self.check_host(
             ip,
             sender.rsplit_once('@').map_or(helo_domain, |(_, d)| d),
@@ -47,12 +49,13 @@ impl Resolver {
         .await
     }
 
-    pub async fn verify_spf(&self, ip: IpAddr, helo_domain: &str, mail_from: &str) -> SPFOutput {
+    /// Verifies both the SPF EHLO and MAIL FROM identities
+    pub async fn verify_spf(&self, ip: IpAddr, helo_domain: &str, mail_from: &str) -> SpfOutput {
         // Verify HELO identity
         let output = self.verify_spf_helo(ip, helo_domain).await;
         match output.result() {
-            SPFResult::TempError | SPFResult::Pass => (),
-            SPFResult::None | SPFResult::PermError if self.verify_policy != Policy::VeryStrict => {}
+            SpfResult::TempError | SpfResult::Pass => (),
+            SpfResult::None | SpfResult::PermError if self.verify_policy != Policy::VeryStrict => {}
             _ => return output,
         }
 
@@ -67,10 +70,10 @@ impl Resolver {
         domain: &str,
         helo_domain: &str,
         sender: &str,
-    ) -> SPFOutput {
-        let output = SPFOutput::new(domain.to_string());
+    ) -> SpfOutput {
+        let output = SpfOutput::new(domain.to_string());
         if domain.is_empty() || domain.len() > 63 || !domain.has_labels() {
-            return output.with_result(SPFResult::None);
+            return output.with_result(SpfResult::None);
         }
         let mut vars = Variables::new();
         let mut has_p_var = false;
@@ -85,7 +88,7 @@ impl Resolver {
         vars.set_helo_domain(helo_domain.as_bytes());
 
         let mut lookup_limit = LookupLimit::new();
-        let mut spf_record = match self.txt_lookup::<SPF>(domain).await {
+        let mut spf_record = match self.txt_lookup::<Spf>(domain).await {
             Ok(spf_record) => spf_record,
             Err(err) => return output.with_result(err.into()),
         };
@@ -101,7 +104,7 @@ impl Resolver {
                 if !has_p_var && directive.mechanism.needs_ptr() {
                     if !lookup_limit.can_lookup() {
                         return output
-                            .with_result(SPFResult::PermError)
+                            .with_result(SpfResult::PermError)
                             .with_report(&spf_record);
                     }
                     if let Some(ptr) = self
@@ -126,7 +129,7 @@ impl Resolver {
                     } => {
                         if !lookup_limit.can_lookup() {
                             return output
-                                .with_result(SPFResult::PermError)
+                                .with_result(SpfResult::PermError)
                                 .with_report(&spf_record);
                         }
                         match self
@@ -142,7 +145,7 @@ impl Resolver {
                             Ok(false) | Err(Error::DNSRecordNotFound(_)) => false,
                             Err(_) => {
                                 return output
-                                    .with_result(SPFResult::TempError)
+                                    .with_result(SpfResult::TempError)
                                     .with_report(&spf_record);
                             }
                         }
@@ -154,7 +157,7 @@ impl Resolver {
                     } => {
                         if !lookup_limit.can_lookup() {
                             return output
-                                .with_result(SPFResult::PermError)
+                                .with_result(SpfResult::PermError)
                                 .with_report(&spf_record);
                         }
 
@@ -167,7 +170,7 @@ impl Resolver {
                                 for record in records.iter() {
                                     if !lookup_limit.can_lookup() {
                                         return output
-                                            .with_result(SPFResult::PermError)
+                                            .with_result(SpfResult::PermError)
                                             .with_report(&spf_record);
                                     }
 
@@ -182,7 +185,7 @@ impl Resolver {
                                         Ok(false) | Err(Error::DNSRecordNotFound(_)) => (),
                                         Err(_) => {
                                             return output
-                                                .with_result(SPFResult::TempError)
+                                                .with_result(SpfResult::TempError)
                                                 .with_report(&spf_record);
                                         }
                                     }
@@ -191,7 +194,7 @@ impl Resolver {
                             Err(Error::DNSRecordNotFound(_)) => (),
                             Err(_) => {
                                 return output
-                                    .with_result(SPFResult::TempError)
+                                    .with_result(SpfResult::TempError)
                                     .with_report(&spf_record);
                             }
                         }
@@ -200,12 +203,12 @@ impl Resolver {
                     Mechanism::Include { macro_string } => {
                         if !lookup_limit.can_lookup() {
                             return output
-                                .with_result(SPFResult::PermError)
+                                .with_result(SpfResult::PermError)
                                 .with_report(&spf_record);
                         }
 
                         let target_name = macro_string.eval(&vars, &domain, true);
-                        match self.txt_lookup::<SPF>(target_name.as_ref()).await {
+                        match self.txt_lookup::<Spf>(target_name.as_ref()).await {
                             Ok(included_spf) => {
                                 let new_domain = target_name.to_string();
                                 include_stack.push((
@@ -224,12 +227,12 @@ impl Resolver {
                                 | Error::ParseError,
                             ) => {
                                 return output
-                                    .with_result(SPFResult::PermError)
+                                    .with_result(SpfResult::PermError)
                                     .with_report(&spf_record)
                             }
                             Err(_) => {
                                 return output
-                                    .with_result(SPFResult::TempError)
+                                    .with_result(SpfResult::TempError)
                                     .with_report(&spf_record)
                             }
                         }
@@ -237,7 +240,7 @@ impl Resolver {
                     Mechanism::Ptr { macro_string } => {
                         if !lookup_limit.can_lookup() {
                             return output
-                                .with_result(SPFResult::PermError)
+                                .with_result(SpfResult::PermError)
                                 .with_report(&spf_record);
                         }
 
@@ -265,7 +268,7 @@ impl Resolver {
                     Mechanism::Exists { macro_string } => {
                         if !lookup_limit.can_lookup() {
                             return output
-                                .with_result(SPFResult::PermError)
+                                .with_result(SpfResult::PermError)
                                 .with_report(&spf_record);
                         }
 
@@ -276,7 +279,7 @@ impl Resolver {
                             result
                         } else {
                             return output
-                                .with_result(SPFResult::TempError)
+                                .with_result(SpfResult::TempError)
                                 .with_report(&spf_record);
                         }
                     }
@@ -293,7 +296,7 @@ impl Resolver {
                 directives = spf_record.directives.iter().enumerate().skip(prev_pos);
                 let (_, directive) = directives.next().unwrap();
 
-                if matches!(result, Some(SPFResult::Pass)) {
+                if matches!(result, Some(SpfResult::Pass)) {
                     result = Some((&directive.qualifier).into());
                     break;
                 } else {
@@ -306,12 +309,12 @@ impl Resolver {
                 if let (Some(macro_string), None) = (&spf_record.redirect, &result) {
                     if !lookup_limit.can_lookup() {
                         return output
-                            .with_result(SPFResult::PermError)
+                            .with_result(SpfResult::PermError)
                             .with_report(&spf_record);
                     }
 
                     let target_name = macro_string.eval(&vars, &domain, true);
-                    match self.txt_lookup::<SPF>(target_name.as_ref()).await {
+                    match self.txt_lookup::<Spf>(target_name.as_ref()).await {
                         Ok(redirect_spf) => {
                             let new_domain = target_name.to_string();
                             spf_record = redirect_spf;
@@ -326,12 +329,12 @@ impl Resolver {
                             | Error::ParseError,
                         ) => {
                             return output
-                                .with_result(SPFResult::PermError)
+                                .with_result(SpfResult::PermError)
                                 .with_report(&spf_record)
                         }
                         Err(_) => {
                             return output
-                                .with_result(SPFResult::TempError)
+                                .with_result(SpfResult::TempError)
                                 .with_report(&spf_record)
                         }
                     }
@@ -342,20 +345,20 @@ impl Resolver {
         }
 
         // Evaluate explain
-        if let (Some(macro_string), Some(SPFResult::Fail { .. })) = (&spf_record.exp, &result) {
+        if let (Some(macro_string), Some(SpfResult::Fail { .. })) = (&spf_record.exp, &result) {
             if let Ok(macro_string) = self
                 .txt_lookup::<Macro>(macro_string.eval(&vars, &domain, true).to_string())
                 .await
             {
                 return output
-                    .with_result(SPFResult::Fail)
+                    .with_result(SpfResult::Fail)
                     .with_explanation(macro_string.eval(&vars, &domain, false).to_string())
                     .with_report(&spf_record);
             }
         }
 
         output
-            .with_result(result.unwrap_or(SPFResult::Neutral))
+            .with_result(result.unwrap_or(SpfResult::Neutral))
             .with_report(&spf_record)
     }
 
@@ -430,23 +433,23 @@ impl IpMask for Ipv4Addr {
     }
 }
 
-impl From<&Qualifier> for SPFResult {
+impl From<&Qualifier> for SpfResult {
     fn from(q: &Qualifier) -> Self {
         match q {
-            Qualifier::Pass => SPFResult::Pass,
-            Qualifier::Fail => SPFResult::Fail,
-            Qualifier::SoftFail => SPFResult::SoftFail,
-            Qualifier::Neutral => SPFResult::Neutral,
+            Qualifier::Pass => SpfResult::Pass,
+            Qualifier::Fail => SpfResult::Fail,
+            Qualifier::SoftFail => SpfResult::SoftFail,
+            Qualifier::Neutral => SpfResult::Neutral,
         }
     }
 }
 
-impl From<Error> for SPFResult {
+impl From<Error> for SpfResult {
     fn from(err: Error) -> Self {
         match err {
-            Error::DNSRecordNotFound(_) | Error::InvalidRecordType => SPFResult::None,
-            Error::ParseError => SPFResult::PermError,
-            _ => SPFResult::TempError,
+            Error::DNSRecordNotFound(_) | Error::InvalidRecordType => SpfResult::None,
+            Error::ParseError => SpfResult::PermError,
+            _ => SpfResult::TempError,
         }
     }
 }
@@ -509,8 +512,8 @@ mod test {
 
     use crate::{
         common::parse::TxtRecordParser,
-        spf::{Macro, SPF},
-        Resolver, SPFResult, MX,
+        spf::{Macro, Spf},
+        Resolver, SpfResult, MX,
     };
 
     #[tokio::test]
@@ -548,7 +551,7 @@ mod test {
                         let (name, record) = record.trim().split_once(' ').unwrap();
                         resolver.txt_add(
                             name.trim().to_string(),
-                            SPF::parse(record.as_bytes()),
+                            Spf::parse(record.as_bytes()),
                             valid_until,
                         );
                     } else if let Some(record) = line.strip_prefix("exp:") {
@@ -616,7 +619,7 @@ mod test {
                         client_ip = value.trim().parse().unwrap();
                     } else if let Some(value) = line.strip_prefix("expect:") {
                         let value = value.trim();
-                        let (result, exp): (SPFResult, &str) =
+                        let (result, exp): (SpfResult, &str) =
                             if let Some((result, exp)) = value.split_once(' ') {
                                 (result.trim().try_into().unwrap(), exp.trim())
                             } else {

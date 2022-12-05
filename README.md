@@ -43,7 +43,7 @@ Features:
     let result = resolver.verify_dkim(&authenticated_message).await;
 
     // Make sure all signatures passed verification
-    assert!(result.iter().all(|s| s.result() == &DKIMResult::Pass));
+    assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
 ```
 
 ### DKIM Signing
@@ -93,7 +93,7 @@ Features:
     let result = resolver.verify_arc(&authenticated_message).await;
 
     // Make sure ARC passed verification
-    assert_eq!(result.result(), &DKIMResult::Pass);
+    assert_eq!(result.result(), &DkimResult::Pass);
 ```
 
 ### ARC Chain Sealing
@@ -118,7 +118,7 @@ Features:
     if arc_result.can_be_sealed() {
         // Seal the e-mail message using RSA-SHA256
         let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        let arc_set = ARC::new(&auth_results)
+        let arc_set = ArcSet::new(&auth_results)
             .domain("example.org")
             .selector("default")
             .headers(["From", "To", "Subject", "DKIM-Signature"])
@@ -142,13 +142,13 @@ Features:
     let result = resolver
         .verify_spf_helo("127.0.0.1".parse().unwrap(), "gmail.com")
         .await;
-    assert_eq!(result.result(), SPFResult::Fail);
+    assert_eq!(result.result(), SpfResult::Fail);
 
     // Verify MAIL-FROM identity
     let result = resolver
         .verify_spf_sender("::1".parse().unwrap(), "gmail.com", "sender@gmail.com")
         .await;
-    assert_eq!(result.result(), SPFResult::Fail);
+    assert_eq!(result.result(), SpfResult::Fail);
 ```
 
 ### DMARC Policy Evaluation
@@ -175,8 +175,8 @@ Features:
             &spf_result,
         )
         .await;
-    assert_eq!(dmarc_result.dkim_result(), &DMARCResult::Pass);
-    assert_eq!(dmarc_result.spf_result(), &DMARCResult::Pass);
+    assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);
+    assert_eq!(dmarc_result.spf_result(), &DmarcResult::Pass);
 ```
 
 More examples available under the [examples](examples) directory.
@@ -192,7 +192,7 @@ To run the testsuite:
 To fuzz the library with `cargo-fuzz`:
 
 ```bash
- $ cargo +nightly fuzz run mail_parser
+ $ cargo +nightly fuzz run mail_auth
 ```
 
 ## Conformed RFCs

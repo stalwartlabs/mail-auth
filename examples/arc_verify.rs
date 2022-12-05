@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use mail_auth::{AuthenticatedMessage, DKIMResult, Resolver};
+use mail_auth::{AuthenticatedMessage, DkimResult, Resolver};
 
 const TEST_MESSAGE: &str = include_str!("../resources/arc/001.txt");
 
@@ -24,5 +24,5 @@ async fn main() {
     let result = resolver.verify_arc(&authenticated_message).await;
 
     // Make sure ARC passed verification
-    assert_eq!(result.result(), &DKIMResult::Pass);
+    assert_eq!(result.result(), &DkimResult::Pass);
 }

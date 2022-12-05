@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use std::io::Write;
+use std::io;
 
 use crate::{
     common::headers::HeaderWriter,
@@ -16,10 +16,10 @@ use crate::{
     AuthenticationResults,
 };
 
-use super::{ChainValidation, Seal, Signature, ARC};
+use super::{ArcSet, ChainValidation, Seal, Signature};
 
 impl<'x> Signature<'x> {
-    pub(crate) fn write(&self, mut writer: impl Write, as_header: bool) -> std::io::Result<()> {
+    pub(crate) fn write(&self, mut writer: impl io::Write, as_header: bool) -> io::Result<()> {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"arc-message-signature:"[..], &b" "[..]),
             _ => (&b"ARC-Message-Signature: "[..], &b"\r\n\t"[..]),
@@ -99,7 +99,7 @@ impl<'x> Signature<'x> {
 }
 
 impl<'x> Seal<'x> {
-    pub(crate) fn write(&self, mut writer: impl Write, as_header: bool) -> std::io::Result<()> {
+    pub(crate) fn write(&self, mut writer: impl io::Write, as_header: bool) -> io::Result<()> {
         let (header, new_line) = if !as_header {
             (&b"arc-seal:"[..], &b" "[..])
         } else {
@@ -156,10 +156,10 @@ impl<'x> Seal<'x> {
 impl<'x> AuthenticationResults<'x> {
     pub(crate) fn write(
         &self,
-        mut writer: impl Write,
+        mut writer: impl io::Write,
         i: u32,
         as_header: bool,
-    ) -> std::io::Result<()> {
+    ) -> io::Result<()> {
         writer.write_all(if !as_header {
             b"arc-authentication-results:"
         } else {
@@ -189,8 +189,8 @@ impl<'x> AuthenticationResults<'x> {
     }
 }
 
-impl<'x> HeaderWriter for ARC<'x> {
-    fn write_header(&self, mut writer: impl Write) -> std::io::Result<()> {
+impl<'x> HeaderWriter for ArcSet<'x> {
+    fn write_header(&self, mut writer: impl io::Write) -> io::Result<()> {
         self.seal.write(&mut writer, true)?;
         self.signature.write(&mut writer, true)?;
         self.results.write(&mut writer, self.seal.i, true)

@@ -9,8 +9,8 @@
  */
 
 use mail_auth::report::{
-    ActionDisposition, Alignment, DKIMAuthResult, DKIMResult, DMARCResult, Disposition,
-    PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope, SPFResult,
+    ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
+    PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope, SpfResult,
 };
 
 fn main() {
@@ -36,8 +36,8 @@ fn main() {
                 .with_source_ip("192.168.1.2".parse().unwrap())
                 .with_count(3)
                 .with_action_disposition(ActionDisposition::Pass)
-                .with_dmarc_dkim_result(DMARCResult::Pass)
-                .with_dmarc_spf_result(DMARCResult::Fail)
+                .with_dmarc_dkim_result(DmarcResult::Pass)
+                .with_dmarc_spf_result(DmarcResult::Fail)
                 .with_policy_override_reason(
                     PolicyOverrideReason::new(PolicyOverride::Forwarded)
                         .with_comment("it was forwarded"),
@@ -53,14 +53,14 @@ fn main() {
                     DKIMAuthResult::new()
                         .with_domain("test.org")
                         .with_selector("my-selector")
-                        .with_result(DKIMResult::PermError)
+                        .with_result(DkimResult::PermError)
                         .with_human_result("failed to parse record"),
                 )
                 .with_spf_auth_result(
                     SPFAuthResult::new()
                         .with_domain("test.org")
                         .with_scope(SPFDomainScope::Helo)
-                        .with_result(SPFResult::SoftFail)
+                        .with_result(SpfResult::SoftFail)
                         .with_human_result("dns timed out"),
                 ),
         )
@@ -69,8 +69,8 @@ fn main() {
                 .with_source_ip("a:b:c::e:f".parse().unwrap())
                 .with_count(99)
                 .with_action_disposition(ActionDisposition::Reject)
-                .with_dmarc_dkim_result(DMARCResult::Fail)
-                .with_dmarc_spf_result(DMARCResult::Pass)
+                .with_dmarc_dkim_result(DmarcResult::Fail)
+                .with_dmarc_spf_result(DmarcResult::Pass)
                 .with_policy_override_reason(
                     PolicyOverrideReason::new(PolicyOverride::LocalPolicy)
                         .with_comment("on the white list"),
@@ -86,14 +86,14 @@ fn main() {
                     DKIMAuthResult::new()
                         .with_domain("test2.org")
                         .with_selector("my-other-selector")
-                        .with_result(DKIMResult::Neutral)
+                        .with_result(DkimResult::Neutral)
                         .with_human_result("something went wrong"),
                 )
                 .with_spf_auth_result(
                     SPFAuthResult::new()
                         .with_domain("test.org")
                         .with_scope(SPFDomainScope::MailFrom)
-                        .with_result(SPFResult::None)
+                        .with_result(SpfResult::None)
                         .with_human_result("no policy found"),
                 ),
         )

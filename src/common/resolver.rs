@@ -24,8 +24,8 @@ use trust_dns_resolver::{
 
 use crate::{
     dkim::{Atps, DomainKey, DomainKeyReport},
-    dmarc::DMARC,
-    spf::{Macro, SPF},
+    dmarc::Dmarc,
+    spf::{Macro, Spf},
     Error, Policy, Resolver, Txt, MX,
 };
 
@@ -356,21 +356,21 @@ impl From<Atps> for Txt {
     }
 }
 
-impl From<SPF> for Txt {
-    fn from(v: SPF) -> Self {
-        Txt::SPF(v.into())
+impl From<Spf> for Txt {
+    fn from(v: Spf) -> Self {
+        Txt::Spf(v.into())
     }
 }
 
 impl From<Macro> for Txt {
     fn from(v: Macro) -> Self {
-        Txt::SPFMacro(v.into())
+        Txt::SpfMacro(v.into())
     }
 }
 
-impl From<DMARC> for Txt {
-    fn from(v: DMARC) -> Self {
-        Txt::DMARC(v.into())
+impl From<Dmarc> for Txt {
+    fn from(v: Dmarc) -> Self {
+        Txt::Dmarc(v.into())
     }
 }
 
@@ -417,10 +417,10 @@ impl UnwrapTxtRecord for Atps {
     }
 }
 
-impl UnwrapTxtRecord for SPF {
+impl UnwrapTxtRecord for Spf {
     fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
         match txt {
-            Txt::SPF(a) => Ok(a),
+            Txt::Spf(a) => Ok(a),
             Txt::Error(err) => Err(err),
             _ => Err(Error::Io("Invalid record type".to_string())),
         }
@@ -430,17 +430,17 @@ impl UnwrapTxtRecord for SPF {
 impl UnwrapTxtRecord for Macro {
     fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
         match txt {
-            Txt::SPFMacro(a) => Ok(a),
+            Txt::SpfMacro(a) => Ok(a),
             Txt::Error(err) => Err(err),
             _ => Err(Error::Io("Invalid record type".to_string())),
         }
     }
 }
 
-impl UnwrapTxtRecord for DMARC {
+impl UnwrapTxtRecord for Dmarc {
     fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
         match txt {
-            Txt::DMARC(a) => Ok(a),
+            Txt::Dmarc(a) => Ok(a),
             Txt::Error(err) => Err(err),
             _ => Err(Error::Io("Invalid record type".to_string())),
         }

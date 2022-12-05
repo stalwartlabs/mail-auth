@@ -18,7 +18,7 @@ use std::borrow::Cow;
 use crate::{
     common::{headers::Header, verify::VerifySignature},
     dkim::{Algorithm, Canonicalization},
-    ARCOutput, AuthenticationResults, DKIMResult,
+    ArcOutput, AuthenticationResults, DkimResult,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -55,7 +55,7 @@ pub struct Results {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ARC<'x> {
+pub struct ArcSet<'x> {
     pub(crate) signature: Signature<'x>,
     pub(crate) seal: Seal<'x>,
     pub(crate) results: &'x AuthenticationResults<'x>,
@@ -117,8 +117,8 @@ impl<'x> VerifySignature for Seal<'x> {
     }
 }
 
-impl<'x> ARCOutput<'x> {
-    pub(crate) fn with_result(mut self, result: DKIMResult) -> Self {
+impl<'x> ArcOutput<'x> {
+    pub(crate) fn with_result(mut self, result: DkimResult) -> Self {
         self.result = result;
         self
     }
@@ -128,10 +128,10 @@ impl<'x> ARCOutput<'x> {
     }
 }
 
-impl<'x> Default for ARCOutput<'x> {
+impl<'x> Default for ArcOutput<'x> {
     fn default() -> Self {
         Self {
-            result: DKIMResult::None,
+            result: DkimResult::None,
             set: Vec::new(),
         }
     }

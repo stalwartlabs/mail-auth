@@ -53,7 +53,7 @@
 //!     let result = resolver.verify_dkim(&authenticated_message).await;
 //!
 //!     // Make sure all signatures passed verification
-//!     assert!(result.iter().all(|s| s.result() == &DKIMResult::Pass));
+//!     assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
 //! ```
 //!
 //! ### DKIM Signing
@@ -103,7 +103,7 @@
 //!     let result = resolver.verify_arc(&authenticated_message).await;
 //!
 //!     // Make sure ARC passed verification
-//!     assert_eq!(result.result(), &DKIMResult::Pass);
+//!     assert_eq!(result.result(), &DkimResult::Pass);
 //! ```
 //!
 //! ### ARC Chain Sealing
@@ -128,7 +128,7 @@
 //!     if arc_result.can_be_sealed() {
 //!         // Seal the e-mail message using RSA-SHA256
 //!         let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-//!         let arc_set = ARC::new(&auth_results)
+//!         let arc_set = ArcSet::new(&auth_results)
 //!             .domain("example.org")
 //!             .selector("default")
 //!             .headers(["From", "To", "Subject", "DKIM-Signature"])
@@ -152,13 +152,13 @@
 //!     let result = resolver
 //!         .verify_spf_helo("127.0.0.1".parse().unwrap(), "gmail.com")
 //!         .await;
-//!     assert_eq!(result.result(), SPFResult::Fail);
+//!     assert_eq!(result.result(), SpfResult::Fail);
 //!
 //!     // Verify MAIL-FROM identity
 //!     let result = resolver
 //!         .verify_spf_sender("::1".parse().unwrap(), "gmail.com", "sender@gmail.com")
 //!         .await;
-//!     assert_eq!(result.result(), SPFResult::Fail);
+//!     assert_eq!(result.result(), SpfResult::Fail);
 //! ```
 //!
 //! ### DMARC Policy Evaluation
@@ -185,8 +185,8 @@
 //!             &spf_result,
 //!         )
 //!         .await;
-//!     assert_eq!(dmarc_result.dkim_result(), &DMARCResult::Pass);
-//!     assert_eq!(dmarc_result.spf_result(), &DMARCResult::Pass);
+//!     assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);
+//!     assert_eq!(dmarc_result.spf_result(), &DmarcResult::Pass);
 //! ```
 //!
 //! More examples available under the [examples](examples) directory.
@@ -202,7 +202,7 @@
 //! To fuzz the library with `cargo-fuzz`:
 //!
 //! ```bash
-//!  $ cargo +nightly fuzz run mail_parser
+//!  $ cargo +nightly fuzz run mail_auth
 //! ```
 //!
 //! ## Conformed RFCs
@@ -255,6 +255,7 @@
 use std::{
     cell::Cell,
     fmt::Display,
+    io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
     time::SystemTime,
@@ -263,9 +264,9 @@ use std::{
 use arc::Set;
 use common::{headers::Header, lru::LruCache};
 use dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport, HashAlgorithm};
-use dmarc::DMARC;
+use dmarc::Dmarc;
 use rsa::RsaPrivateKey;
-use spf::{Macro, SPF};
+use spf::{Macro, Spf};
 use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
 
 pub mod arc;
@@ -294,13 +295,12 @@ pub struct Resolver {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(clippy::upper_case_acronyms)]
 pub(crate) enum Txt {
-    SPF(Arc<SPF>),
-    SPFMacro(Arc<Macro>),
+    Spf(Arc<Spf>),
+    SpfMacro(Arc<Macro>),
     DomainKey(Arc<DomainKey>),
     DomainKeyReport(Arc<DomainKeyReport>),
-    DMARC(Arc<DMARC>),
+    Dmarc(Arc<Dmarc>),
     Atps(Arc<Atps>),
     Error(Error),
 }
@@ -339,12 +339,12 @@ pub struct AuthenticationResults<'x> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 // Received-SPF header
-pub struct ReceivedSPF {
+pub struct ReceivedSpf {
     pub(crate) received_spf: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum DKIMResult {
+pub enum DkimResult {
     Pass,
     Neutral(crate::Error),
     Fail(crate::Error),
@@ -354,21 +354,21 @@ pub enum DKIMResult {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DKIMOutput<'x> {
-    result: DKIMResult,
+pub struct DkimOutput<'x> {
+    result: DkimResult,
     signature: Option<&'x dkim::Signature<'x>>,
     report: Option<String>,
     is_atps: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct ARCOutput<'x> {
-    result: DKIMResult,
+pub struct ArcOutput<'x> {
+    result: DkimResult,
     set: Vec<Set<'x>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum SPFResult {
+pub enum SpfResult {
     Pass,
     Fail,
     SoftFail,
@@ -379,24 +379,24 @@ pub enum SPFResult {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct SPFOutput {
-    result: SPFResult,
+pub struct SpfOutput {
+    result: SpfResult,
     domain: String,
     report: Option<String>,
     explanation: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct DMARCOutput {
-    spf_result: DMARCResult,
-    dkim_result: DMARCResult,
+pub struct DmarcOutput {
+    spf_result: DmarcResult,
+    dkim_result: DmarcResult,
     domain: String,
     policy: dmarc::Policy,
-    record: Option<Arc<DMARC>>,
+    record: Option<Arc<Dmarc>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum DMARCResult {
+pub enum DmarcResult {
     Pass,
     Fail(crate::Error),
     TempError(crate::Error),
@@ -453,42 +453,42 @@ impl Display for Error {
             Error::CryptoError(err) => write!(f, "Cryptography layer error: {}", err),
             Error::Io(e) => write!(f, "I/O error: {}", e),
             Error::Base64 => write!(f, "Base64 encode or decode error."),
-            Error::UnsupportedVersion => write!(f, "Unsupported version in DKIM Signature."),
-            Error::UnsupportedAlgorithm => write!(f, "Unsupported algorithm in DKIM Signature."),
+            Error::UnsupportedVersion => write!(f, "Unsupported version in DKIM Signature"),
+            Error::UnsupportedAlgorithm => write!(f, "Unsupported algorithm in DKIM Signature"),
             Error::UnsupportedCanonicalization => {
-                write!(f, "Unsupported canonicalization method in DKIM Signature.")
+                write!(f, "Unsupported canonicalization method in DKIM Signature")
             }
             Error::UnsupportedKeyType => {
-                write!(f, "Unsupported key type in DKIM DNS record.")
+                write!(f, "Unsupported key type in DKIM DNS record")
             }
             Error::FailedBodyHashMatch => {
-                write!(f, "Calculated body hash does not match signature hash.")
+                write!(f, "Calculated body hash does not match signature hash")
             }
-            Error::RevokedPublicKey => write!(f, "Public key for this signature has been revoked."),
+            Error::RevokedPublicKey => write!(f, "Public key for this signature has been revoked"),
             Error::IncompatibleAlgorithms => write!(
                 f,
-                "Incompatible algorithms used in signature and DKIM DNS record."
+                "Incompatible algorithms used in signature and DKIM DNS record"
             ),
-            Error::FailedVerification => write!(f, "Signature verification failed."),
-            Error::SignatureExpired => write!(f, "Signature expired."),
-            Error::FailedAUIDMatch => write!(f, "AUID does not match domain name."),
+            Error::FailedVerification => write!(f, "Signature verification failed"),
+            Error::SignatureExpired => write!(f, "Signature expired"),
+            Error::FailedAUIDMatch => write!(f, "AUID does not match domain name"),
             Error::ARCInvalidInstance(i) => {
-                write!(f, "Invalid 'i={}' value found in ARC header.", i)
+                write!(f, "Invalid 'i={}' value found in ARC header", i)
             }
-            Error::ARCInvalidCV => write!(f, "Invalid 'cv=' value found in ARC header."),
-            Error::ARCHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal."),
-            Error::ARCBrokenChain => write!(f, "Broken or missing ARC chain."),
-            Error::ARCChainTooLong => write!(f, "Too many ARC headers."),
-            Error::InvalidRecordType => write!(f, "Invalid record."),
-            Error::DNSError => write!(f, "DNS resolution error."),
-            Error::DNSRecordNotFound(code) => write!(f, "DNS record not found: {}.", code),
-            Error::DMARCNotAligned => write!(f, "DMARC policy not aligned."),
+            Error::ARCInvalidCV => write!(f, "Invalid 'cv=' value found in ARC header"),
+            Error::ARCHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal"),
+            Error::ARCBrokenChain => write!(f, "Broken or missing ARC chain"),
+            Error::ARCChainTooLong => write!(f, "Too many ARC headers"),
+            Error::InvalidRecordType => write!(f, "Invalid record"),
+            Error::DNSError => write!(f, "DNS resolution error"),
+            Error::DNSRecordNotFound(code) => write!(f, "DNS record not found: {}", code),
+            Error::DMARCNotAligned => write!(f, "DMARC policy not aligned"),
         }
     }
 }
 
-impl From<std::io::Error> for Error {
-    fn from(err: std::io::Error) -> Self {
+impl From<io::Error> for Error {
+    fn from(err: io::Error) -> Self {
         Error::Io(err.to_string())
     }
 }
@@ -507,6 +507,9 @@ impl From<ed25519_dalek::ed25519::Error> for Error {
 
 thread_local!(static COUNTER: Cell<u64>  = Cell::new(0));
 
+/// Generates a random value between 0 and 100.
+/// Returns true if the generated value is within the requested
+/// sampling percentage specified in a SPF, DKIM or DMARC policy.
 pub(crate) fn is_within_pct(pct: u8) -> bool {
     pct == 100
         || COUNTER.with(|c| {
