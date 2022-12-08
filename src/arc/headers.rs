@@ -11,8 +11,8 @@
 use std::io;
 
 use crate::{
-    common::headers::HeaderWriter,
-    dkim::{Algorithm, Canonicalization},
+    common::{crypto::Algorithm, headers::HeaderWriter},
+    dkim::Canonicalization,
     AuthenticationResults,
 };
 

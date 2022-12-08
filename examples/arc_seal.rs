@@ -9,8 +9,9 @@
  */
 
 use mail_auth::{
-    arc::ArcSet, common::headers::HeaderWriter, AuthenticatedMessage, AuthenticationResults,
-    PrivateKey, Resolver,
+    arc::ArcSet,
+    common::{crypto::PrivateKey, headers::HeaderWriter},
+    AuthenticatedMessage, AuthenticationResults, Resolver,
 };
 
 const TEST_MESSAGE: &str = include_str!("../resources/arc/001.txt");

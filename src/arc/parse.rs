@@ -11,8 +11,8 @@
 use mail_parser::decoders::base64::base64_decode_stream;
 
 use crate::{
-    common::parse::TagParser,
-    dkim::{parse::SignatureParser, Algorithm, Canonicalization},
+    common::{crypto::Algorithm, parse::TagParser},
+    dkim::{parse::SignatureParser, Canonicalization},
     Error,
 };
 

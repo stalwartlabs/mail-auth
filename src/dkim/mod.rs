@@ -13,7 +13,12 @@ use std::borrow::Cow;
 use rsa::RsaPublicKey;
 
 use crate::{
-    arc::Set, common::verify::VerifySignature, ArcOutput, DkimOutput, DkimResult, Error, Version,
+    arc::Set,
+    common::{
+        crypto::{Algorithm, HashAlgorithm},
+        verify::VerifySignature,
+    },
+    ArcOutput, DkimOutput, DkimResult, Error, Version,
 };
 
 pub mod canonicalize;
@@ -26,20 +31,6 @@ pub mod verify;
 pub enum Canonicalization {
     Relaxed,
     Simple,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u64)]
-pub enum HashAlgorithm {
-    Sha1 = R_HASH_SHA1,
-    Sha256 = R_HASH_SHA256,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Algorithm {
-    RsaSha1,
-    RsaSha256,
-    Ed25519Sha256,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -96,8 +87,6 @@ pub struct Atps {
     pub(crate) d: Option<String>,
 }
 
-pub(crate) const R_HASH_SHA1: u64 = 0x01;
-pub(crate) const R_HASH_SHA256: u64 = 0x02;
 pub(crate) const R_SVC_ALL: u64 = 0x04;
 pub(crate) const R_SVC_EMAIL: u64 = 0x08;
 pub(crate) const R_FLAG_TESTING: u64 = 0x10;

@@ -10,6 +10,7 @@
 
 pub mod auth_results;
 pub mod base32;
+pub mod crypto;
 pub mod headers;
 pub mod lru;
 pub mod message;

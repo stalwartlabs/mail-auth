@@ -14,8 +14,12 @@ use sha1::Sha1;
 use sha2::Sha256;
 
 use crate::{
-    common::{headers::Header, verify::VerifySignature},
-    dkim::{verify::Verifier, Algorithm, Canonicalization, DomainKey, HashAlgorithm},
+    common::{
+        crypto::{Algorithm, HashAlgorithm},
+        headers::Header,
+        verify::VerifySignature,
+    },
+    dkim::{verify::Verifier, Canonicalization, DomainKey},
     ArcOutput, AuthenticatedMessage, DkimResult, Error, Resolver,
 };
 

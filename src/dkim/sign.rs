@@ -12,41 +12,13 @@ use std::{borrow::Cow, io, time::SystemTime};
 
 use ed25519_dalek::Signer;
 use mail_builder::encoders::base64::base64_encode;
-use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::AssociatedOid, PaddingScheme, RsaPrivateKey};
+use rsa::{pkcs8::AssociatedOid, PaddingScheme};
 use sha1::Sha1;
 use sha2::{Digest, Sha256};
 
 use crate::{Error, PrivateKey};
 
 use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
-
-impl PrivateKey {
-    /// Creates a new RSA private key from a PKCS1 PEM string.
-    pub fn from_rsa_pkcs1_pem(private_key_pem: &str) -> crate::Result<Self> {
-        Ok(PrivateKey::Rsa(
-            RsaPrivateKey::from_pkcs1_pem(private_key_pem)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-        ))
-    }
-
-    /// Creates a new RSA private key from a PKCS1 binary slice.
-    pub fn from_rsa_pkcs1_der(private_key_bytes: &[u8]) -> crate::Result<Self> {
-        Ok(PrivateKey::Rsa(
-            RsaPrivateKey::from_pkcs1_der(private_key_bytes)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-        ))
-    }
-
-    /// Creates an Ed25519 private key
-    pub fn from_ed25519(public_key_bytes: &[u8], private_key_bytes: &[u8]) -> crate::Result<Self> {
-        Ok(PrivateKey::Ed25519(ed25519_dalek::Keypair {
-            public: ed25519_dalek::PublicKey::from_bytes(public_key_bytes)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-            secret: ed25519_dalek::SecretKey::from_bytes(private_key_bytes)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-        }))
-    }
-}
 
 impl<'x> Signature<'x> {
     /// Creates a new DKIM signature.

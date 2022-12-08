@@ -479,12 +479,14 @@ mod test {
     use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 
     use crate::{
-        common::parse::TxtRecordParser,
+        common::{
+            crypto::{Algorithm, R_HASH_SHA1, R_HASH_SHA256},
+            parse::TxtRecordParser,
+        },
         dkim::{
-            Algorithm, Canonicalization, DomainKey, DomainKeyReport, PublicKey, Signature, Version,
-            RR_DNS, RR_EXPIRATION, RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG,
-            RR_VERIFICATION, R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_HASH_SHA1, R_HASH_SHA256,
-            R_SVC_ALL, R_SVC_EMAIL,
+            Canonicalization, DomainKey, DomainKeyReport, PublicKey, Signature, Version, RR_DNS,
+            RR_EXPIRATION, RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION,
+            R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_SVC_ALL, R_SVC_EMAIL,
         },
     };
 

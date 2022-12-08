@@ -262,10 +262,13 @@ use std::{
 };
 
 use arc::Set;
-use common::{headers::Header, lru::LruCache};
-use dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport, HashAlgorithm};
+use common::{
+    crypto::{HashAlgorithm, PrivateKey},
+    headers::Header,
+    lru::LruCache,
+};
+use dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport};
 use dmarc::Dmarc;
-use rsa::RsaPrivateKey;
 use spf::{Macro, Spf};
 use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
 
@@ -275,12 +278,6 @@ pub mod dkim;
 pub mod dmarc;
 pub mod report;
 pub mod spf;
-
-#[derive(Debug)]
-pub enum PrivateKey {
-    Rsa(RsaPrivateKey),
-    Ed25519(ed25519_dalek::Keypair),
-}
 
 #[derive(Debug)]
 pub struct Resolver {

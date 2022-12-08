@@ -17,8 +17,8 @@ use sha1::Digest;
 use sha2::Sha256;
 
 use crate::{
-    dkim::{Algorithm, Canonicalization},
-    ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error, PrivateKey,
+    common::crypto::Algorithm, dkim::Canonicalization, ArcOutput, AuthenticatedMessage,
+    AuthenticationResults, DkimResult, Error, PrivateKey,
 };
 
 use super::{ArcSet, ChainValidation, Seal, Signature};

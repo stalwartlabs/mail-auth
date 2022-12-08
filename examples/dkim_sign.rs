@@ -8,7 +8,10 @@
  * except according to those terms.
  */
 
-use mail_auth::{common::headers::HeaderWriter, dkim::Signature, PrivateKey};
+use mail_auth::{
+    common::{crypto::PrivateKey, headers::HeaderWriter},
+    dkim::Signature,
+};
 use mail_parser::decoders::base64::base64_decode;
 
 const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
