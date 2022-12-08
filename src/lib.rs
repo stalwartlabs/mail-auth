@@ -280,8 +280,8 @@ pub mod spf;
 pub enum PrivateKey {
     Rsa(RsaPrivateKey),
     Ed25519(ed25519_dalek::Keypair),
-    None,
 }
+
 #[derive(Debug)]
 pub struct Resolver {
     pub(crate) resolver: TokioAsyncResolver,

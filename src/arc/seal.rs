@@ -110,7 +110,6 @@ impl<'x> ArcSet<'x> {
             PrivateKey::Ed25519(key_pair) => {
                 key_pair.sign(&header_hasher.finalize()).to_bytes().to_vec()
             }
-            PrivateKey::None => return Err(Error::MissingParameters),
         };
         self.signature.b = base64_encode(&b)?;
 
@@ -146,7 +145,6 @@ impl<'x> ArcSet<'x> {
             PrivateKey::Ed25519(key_pair) => {
                 key_pair.sign(&header_hasher.finalize()).to_bytes().to_vec()
             }
-            PrivateKey::None => return Err(Error::MissingParameters),
         };
         self.seal.b = base64_encode(&b)?;
 

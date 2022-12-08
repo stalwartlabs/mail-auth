@@ -80,7 +80,6 @@ impl<'x> Signature<'x> {
                     self.a = Algorithm::RsaSha256;
                     self.sign_::<Sha256>(message, with_key, now)
                 }
-                _ => Err(Error::IncompatibleAlgorithms),
             }
         } else {
             Err(Error::MissingParameters)
@@ -125,7 +124,6 @@ impl<'x> Signature<'x> {
             PrivateKey::Ed25519(key_pair) => {
                 key_pair.sign(&header_hasher.finalize()).to_bytes().to_vec()
             }
-            PrivateKey::None => return Err(Error::MissingParameters),
         };
 
         // Encode
