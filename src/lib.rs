@@ -78,7 +78,6 @@
 //!         .headers(["From", "To", "Subject"])
 //!         .domain("example.com")
 //!         .selector("default-ed")
-//!         .algorithm(Algorithm::Ed25519Sha256)
 //!         .sign(RFC5322_MESSAGE.as_bytes(), &pk_ed)
 //!         .unwrap();
 //!
