@@ -13,7 +13,8 @@ use sha1::Sha1;
 use sha2::Sha256;
 
 use crate::{
-    dkim::{Algorithm, DomainKey, PublicKey},
+    common::crypto::Algorithm,
+    dkim::{DomainKey, PublicKey},
     Error,
 };
 

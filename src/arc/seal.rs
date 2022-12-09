@@ -10,15 +10,12 @@
 
 use std::{borrow::Cow, io::Write, time::SystemTime};
 
-use ed25519_dalek::Signer;
 use mail_builder::encoders::base64::base64_encode;
-use rsa::PaddingScheme;
-use sha1::Digest;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 
 use crate::{
-    dkim::{Algorithm, Canonicalization},
-    ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error, PrivateKey,
+    common::crypto::SigningKey, dkim::Canonicalization, ArcOutput, AuthenticatedMessage,
+    AuthenticationResults, DkimResult, Error,
 };
 
 use super::{ArcSet, ChainValidation, Seal, Signature};
@@ -36,20 +33,15 @@ impl<'x> ArcSet<'x> {
         mut self,
         message: &'x AuthenticatedMessage<'x>,
         arc_output: &ArcOutput,
-        with_key: &PrivateKey,
+        with_key: &impl SigningKey<Hasher = Sha256>,
     ) -> crate::Result<Self> {
         if !arc_output.can_be_sealed() {
             return Err(Error::ARCInvalidCV);
         }
 
         // Set a=
-        if let PrivateKey::Ed25519(_) = with_key {
-            self.signature.a = Algorithm::Ed25519Sha256;
-            self.seal.a = Algorithm::Ed25519Sha256;
-        } else {
-            self.signature.a = Algorithm::RsaSha256;
-            self.seal.a = Algorithm::RsaSha256;
-        }
+        self.signature.a = with_key.algorithm();
+        self.seal.a = with_key.algorithm();
 
         // Set i= and cv=
         if arc_output.set.is_empty() {
@@ -67,8 +59,8 @@ impl<'x> ArcSet<'x> {
         }
 
         // Create hashes
-        let mut body_hasher = Sha256::new();
-        let mut header_hasher = Sha256::new();
+        let mut body_hasher = with_key.hasher();
+        let mut header_hasher = with_key.hasher();
 
         // Canonicalize headers and body
         let (body_len, signed_headers) =
@@ -100,18 +92,7 @@ impl<'x> ArcSet<'x> {
         self.signature.write(&mut header_hasher, false)?;
 
         // Sign
-        let b = match with_key {
-            PrivateKey::Rsa(private_key) => private_key
-                .sign(
-                    PaddingScheme::new_pkcs1v15_sign::<Sha256>(),
-                    &header_hasher.finalize(),
-                )
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-            PrivateKey::Ed25519(key_pair) => {
-                key_pair.sign(&header_hasher.finalize()).to_bytes().to_vec()
-            }
-            PrivateKey::None => return Err(Error::MissingParameters),
-        };
+        let b = with_key.sign(&header_hasher.finalize())?;
         self.signature.b = base64_encode(&b)?;
 
         // Hash ARC chain
@@ -136,18 +117,7 @@ impl<'x> ArcSet<'x> {
         self.seal.write(&mut header_hasher, false)?;
 
         // Seal
-        let b = match with_key {
-            PrivateKey::Rsa(private_key) => private_key
-                .sign(
-                    PaddingScheme::new_pkcs1v15_sign::<Sha256>(),
-                    &header_hasher.finalize(),
-                )
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-            PrivateKey::Ed25519(key_pair) => {
-                key_pair.sign(&header_hasher.finalize()).to_bytes().to_vec()
-            }
-            PrivateKey::None => return Err(Error::MissingParameters),
-        };
+        let b = with_key.sign(&header_hasher.finalize())?;
         self.seal.b = base64_encode(&b)?;
 
         Ok(self)
@@ -244,12 +214,17 @@ mod test {
     use std::time::{Duration, Instant};
 
     use mail_parser::decoders::base64::base64_decode;
+    use sha2::Sha256;
 
     use crate::{
         arc::ArcSet,
-        common::{headers::HeaderWriter, parse::TxtRecordParser},
+        common::{
+            crypto::{Ed25519Key, RsaKey, SigningKey},
+            headers::HeaderWriter,
+            parse::TxtRecordParser,
+        },
         dkim::{DomainKey, Signature},
-        AuthenticatedMessage, AuthenticationResults, DkimResult, PrivateKey, Resolver,
+        AuthenticatedMessage, AuthenticationResults, DkimResult, Resolver,
     };
 
     const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -305,8 +280,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
 
         // Create private keys
-        let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        let pk_ed = PrivateKey::from_ed25519(
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_ed = Ed25519Key::from_bytes(
             &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
             &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
         )
@@ -338,7 +313,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         raw_message: &str,
         d: &str,
         s: &str,
-        pk: &PrivateKey,
+        pk: &impl SigningKey<Hasher = Sha256>,
     ) -> String {
         let message = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
         let dkim_result = resolver.verify_dkim(&message).await;

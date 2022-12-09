@@ -60,7 +60,7 @@
 //!
 //! ```rust
 //!     // Sign an e-mail message using RSA-SHA256
-//!     let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+//!     let pk_rsa = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
 //!     let signature_rsa = Signature::new()
 //!         .headers(["From", "To", "Subject"])
 //!         .domain("example.com")
@@ -69,7 +69,7 @@
 //!         .unwrap();
 //!
 //!     // Sign an e-mail message using ED25519-SHA256
-//!     let pk_ed = PrivateKey::from_ed25519(
+//!     let pk_ed = Ed25519Key::from_bytes(
 //!         &base64_decode(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
 //!         &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
 //!     )
@@ -78,6 +78,7 @@
 //!         .headers(["From", "To", "Subject"])
 //!         .domain("example.com")
 //!         .selector("default-ed")
+//!         .algorithm(Algorithm::Ed25519Sha256)
 //!         .sign(RFC5322_MESSAGE.as_bytes(), &pk_ed)
 //!         .unwrap();
 //!
@@ -127,7 +128,7 @@
 //!     // Seal message
 //!     if arc_result.can_be_sealed() {
 //!         // Seal the e-mail message using RSA-SHA256
-//!         let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+//!         let pk_rsa = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
 //!         let arc_set = ArcSet::new(&auth_results)
 //!             .domain("example.org")
 //!             .selector("default")
@@ -262,10 +263,9 @@ use std::{
 };
 
 use arc::Set;
-use common::{headers::Header, lru::LruCache};
-use dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport, HashAlgorithm};
+use common::{crypto::HashAlgorithm, headers::Header, lru::LruCache};
+use dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport};
 use dmarc::Dmarc;
-use rsa::RsaPrivateKey;
 use spf::{Macro, Spf};
 use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
 
@@ -276,12 +276,6 @@ pub mod dmarc;
 pub mod report;
 pub mod spf;
 
-#[derive(Debug)]
-pub enum PrivateKey {
-    Rsa(RsaPrivateKey),
-    Ed25519(ed25519_dalek::Keypair),
-    None,
-}
 #[derive(Debug)]
 pub struct Resolver {
     pub(crate) resolver: TokioAsyncResolver,

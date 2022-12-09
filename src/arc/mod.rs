@@ -16,8 +16,8 @@ pub mod verify;
 use std::borrow::Cow;
 
 use crate::{
-    common::{headers::Header, verify::VerifySignature},
-    dkim::{Algorithm, Canonicalization},
+    common::{crypto::Algorithm, headers::Header, verify::VerifySignature},
+    dkim::Canonicalization,
     ArcOutput, AuthenticationResults, DkimResult,
 };
 

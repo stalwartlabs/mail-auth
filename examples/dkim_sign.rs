@@ -8,8 +8,12 @@
  * except according to those terms.
  */
 
-use mail_auth::{common::headers::HeaderWriter, dkim::Signature, PrivateKey};
+use mail_auth::{
+    common::{crypto::Ed25519Key, crypto::RsaKey, headers::HeaderWriter},
+    dkim::Signature,
+};
 use mail_parser::decoders::base64::base64_decode;
+use sha2::Sha256;
 
 const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
 MIICXwIBAAKBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYtIxN2SnFC
@@ -39,7 +43,7 @@ I'm going to need those TPS reports ASAP. So, if you could do that, that'd be gr
 
 fn main() {
     // Sign an e-mail message using RSA-SHA256
-    let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+    let pk_rsa = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
     let signature_rsa = Signature::new()
         .headers(["From", "To", "Subject"])
         .domain("example.com")
@@ -48,7 +52,7 @@ fn main() {
         .unwrap();
 
     // Sign an e-mail message using ED25519-SHA256
-    let pk_ed = PrivateKey::from_ed25519(
+    let pk_ed = Ed25519Key::from_bytes(
         &base64_decode(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
         &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
     )

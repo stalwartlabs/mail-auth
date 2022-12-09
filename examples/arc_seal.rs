@@ -9,9 +9,11 @@
  */
 
 use mail_auth::{
-    arc::ArcSet, common::headers::HeaderWriter, AuthenticatedMessage, AuthenticationResults,
-    PrivateKey, Resolver,
+    arc::ArcSet,
+    common::{crypto::RsaKey, headers::HeaderWriter},
+    AuthenticatedMessage, AuthenticationResults, Resolver,
 };
+use sha2::Sha256;
 
 const TEST_MESSAGE: &str = include_str!("../resources/arc/001.txt");
 
@@ -51,7 +53,7 @@ async fn main() {
     // Seal message
     if arc_result.can_be_sealed() {
         // Seal the e-mail message using RSA-SHA256
-        let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let arc_set = ArcSet::new(&auth_results)
             .domain("example.org")
             .selector("default")

@@ -8,45 +8,13 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, io, time::SystemTime};
+use std::{borrow::Cow, time::SystemTime};
 
-use ed25519_dalek::Signer;
 use mail_builder::encoders::base64::base64_encode;
-use rsa::{pkcs1::DecodeRsaPrivateKey, pkcs8::AssociatedOid, PaddingScheme, RsaPrivateKey};
-use sha1::Sha1;
-use sha2::{Digest, Sha256};
+use sha1::Digest;
 
-use crate::{Error, PrivateKey};
-
-use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
-
-impl PrivateKey {
-    /// Creates a new RSA private key from a PKCS1 PEM string.
-    pub fn from_rsa_pkcs1_pem(private_key_pem: &str) -> crate::Result<Self> {
-        Ok(PrivateKey::Rsa(
-            RsaPrivateKey::from_pkcs1_pem(private_key_pem)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-        ))
-    }
-
-    /// Creates a new RSA private key from a PKCS1 binary slice.
-    pub fn from_rsa_pkcs1_der(private_key_bytes: &[u8]) -> crate::Result<Self> {
-        Ok(PrivateKey::Rsa(
-            RsaPrivateKey::from_pkcs1_der(private_key_bytes)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-        ))
-    }
-
-    /// Creates an Ed25519 private key
-    pub fn from_ed25519(public_key_bytes: &[u8], private_key_bytes: &[u8]) -> crate::Result<Self> {
-        Ok(PrivateKey::Ed25519(ed25519_dalek::Keypair {
-            public: ed25519_dalek::PublicKey::from_bytes(public_key_bytes)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-            secret: ed25519_dalek::SecretKey::from_bytes(private_key_bytes)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-        }))
-    }
-}
+use super::{Canonicalization, HashAlgorithm, Signature};
+use crate::{common::crypto::SigningKey, Error};
 
 impl<'x> Signature<'x> {
     /// Creates a new DKIM signature.
@@ -59,40 +27,28 @@ impl<'x> Signature<'x> {
 
     /// Signs a message.
     #[inline(always)]
-    pub fn sign(mut self, message: &'x [u8], with_key: &PrivateKey) -> crate::Result<Self> {
+    pub fn sign(mut self, message: &'x [u8], with_key: &impl SigningKey) -> crate::Result<Self> {
         if !self.d.is_empty() && !self.s.is_empty() && !self.h.is_empty() {
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
-            match (self.a, with_key) {
-                (Algorithm::RsaSha256, PrivateKey::Rsa(_)) => {
-                    self.sign_::<Sha256>(message, with_key, now)
-                }
-                (Algorithm::RsaSha1, PrivateKey::Rsa(_)) => {
-                    self.sign_::<Sha1>(message, with_key, now)
-                }
-                (_, PrivateKey::Ed25519(_)) => {
-                    self.a = Algorithm::Ed25519Sha256;
-                    self.sign_::<Sha256>(message, with_key, now)
-                }
-                (_, PrivateKey::Rsa(_)) => {
-                    self.a = Algorithm::RsaSha256;
-                    self.sign_::<Sha256>(message, with_key, now)
-                }
-                _ => Err(Error::IncompatibleAlgorithms),
-            }
+
+            self.a = with_key.algorithm();
+            self.sign_(message, with_key, now)
         } else {
             Err(Error::MissingParameters)
         }
     }
 
-    fn sign_<T>(mut self, message: &'x [u8], with_key: &PrivateKey, now: u64) -> crate::Result<Self>
-    where
-        T: Digest + AssociatedOid + io::Write,
-    {
-        let mut body_hasher = T::new();
-        let mut header_hasher = T::new();
+    fn sign_(
+        mut self,
+        message: &'x [u8],
+        with_key: &impl SigningKey,
+        now: u64,
+    ) -> crate::Result<Self> {
+        let mut body_hasher = with_key.hasher();
+        let mut header_hasher = with_key.hasher();
 
         // Canonicalize headers and body
         let (body_len, signed_headers) =
@@ -115,18 +71,7 @@ impl<'x> Signature<'x> {
         self.write(&mut header_hasher, false)?;
 
         // Sign
-        let b = match with_key {
-            PrivateKey::Rsa(private_key) => private_key
-                .sign(
-                    PaddingScheme::new_pkcs1v15_sign::<T>(),
-                    &header_hasher.finalize(),
-                )
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-            PrivateKey::Ed25519(key_pair) => {
-                key_pair.sign(&header_hasher.finalize()).to_bytes().to_vec()
-            }
-            PrivateKey::None => return Err(Error::MissingParameters),
-        };
+        let b = with_key.sign(&header_hasher.finalize())?;
 
         // Encode
         self.b = base64_encode(&b)?;
@@ -176,12 +121,6 @@ impl<'x> Signature<'x> {
         self
     }
 
-    /// Sets the algorithm to use (must be compatible with the private key provided).
-    pub fn algorithm(mut self, algorithm: Algorithm) -> Self {
-        self.a = algorithm;
-        self
-    }
-
     /// Include the body length in the signature.
     pub fn body_length(mut self, body_length: bool) -> Self {
         self.l = u64::from(body_length);
@@ -216,9 +155,12 @@ mod test {
     use trust_dns_resolver::proto::op::ResponseCode;
 
     use crate::{
-        common::parse::TxtRecordParser,
+        common::{
+            crypto::{Ed25519Key, RsaKey},
+            parse::TxtRecordParser,
+        },
         dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport, HashAlgorithm, Signature},
-        AuthenticatedMessage, DkimOutput, DkimResult, PrivateKey, Resolver,
+        AuthenticatedMessage, DkimOutput, DkimResult, Resolver,
     };
 
     const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -251,12 +193,12 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
     #[test]
     fn dkim_sign() {
-        let pk = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let signature = Signature::new()
             .headers(["From", "To", "Subject"])
             .domain("stalw.art")
             .selector("default")
-            .sign_::<Sha256>(
+            .sign_(
                 concat!(
                     "From: hello@stalw.art\r\n",
                     "To: dkim@stalw.art\r\n",
@@ -307,8 +249,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
 
         // Create private keys
-        let pk_rsa = PrivateKey::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        let pk_ed = PrivateKey::from_ed25519(
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_ed = Ed25519Key::from_bytes(
             &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
             &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
         )
@@ -423,7 +365,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .selector("default")
                 .expiration(12345)
                 .reporting(true)
-                .sign_::<Sha256>(message.as_bytes(), &pk_rsa, 12345)
+                .sign_(message.as_bytes(), &pk_rsa, 12345)
                 .unwrap(),
             message,
             Err(super::Error::SignatureExpired),
@@ -443,7 +385,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .selector("default")
                 .atps("example.com")
                 .atpsh(HashAlgorithm::Sha256)
-                .sign_::<Sha256>(message.as_bytes(), &pk_rsa, 12345)
+                .sign_(message.as_bytes(), &pk_rsa, 12345)
                 .unwrap(),
             message,
             Err(super::Error::DNSRecordNotFound(ResponseCode::NXDomain)),
@@ -464,7 +406,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .selector("default")
                 .atps("example.com")
                 .atpsh(HashAlgorithm::Sha256)
-                .sign_::<Sha256>(message.as_bytes(), &pk_rsa, 12345)
+                .sign_(message.as_bytes(), &pk_rsa, 12345)
                 .unwrap(),
             message,
             Ok(()),
@@ -484,7 +426,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .domain("example.com")
                 .selector("default")
                 .atps("example.com")
-                .sign_::<Sha256>(message.as_bytes(), &pk_rsa, 12345)
+                .sign_(message.as_bytes(), &pk_rsa, 12345)
                 .unwrap(),
             message,
             Ok(()),
