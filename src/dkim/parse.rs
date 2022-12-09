@@ -11,17 +11,16 @@
 use std::slice::Iter;
 
 use mail_parser::decoders::base64::base64_decode_stream;
-use rsa::RsaPublicKey;
 
 use crate::{
-    common::parse::*,
+    common::{crypto::VerifyingKeyType, parse::*},
     dkim::{RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION},
     Error,
 };
 
 use super::{
-    Algorithm, Atps, Canonicalization, DomainKey, DomainKeyReport, Flag, HashAlgorithm, PublicKey,
-    Service, Signature, Version, RR_DNS, RR_OTHER, RR_POLICY,
+    Algorithm, Atps, Canonicalization, DomainKey, DomainKeyReport, Flag, HashAlgorithm, Service,
+    Signature, Version, RR_DNS, RR_OTHER, RR_POLICY,
 };
 
 const ATPSH: u64 = (b'a' as u64)
@@ -241,24 +240,14 @@ impl SignatureParser for Iter<'_, u8> {
     }
 }
 
-enum KeyType {
-    Rsa,
-    Ed25519,
-    None,
-}
-
 impl TxtRecordParser for DomainKey {
     #[allow(clippy::while_let_on_iterator)]
     fn parse(header: &[u8]) -> crate::Result<Self> {
         let header_len = header.len();
         let mut header = header.iter();
-        let mut record = DomainKey {
-            v: Version::V1,
-            p: PublicKey::Revoked,
-            f: 0,
-        };
-        let mut k = KeyType::None;
-        let mut public_key = Vec::new();
+        let mut flags = 0;
+        let mut key_type = VerifyingKeyType::Rsa;
+        let mut public_key = None;
 
         while let Some(key) = header.key() {
             match key {
@@ -267,26 +256,27 @@ impl TxtRecordParser for DomainKey {
                         return Err(Error::InvalidRecordType);
                     }
                 }
-                H => record.f |= header.flags::<HashAlgorithm>(),
+                H => flags |= header.flags::<HashAlgorithm>(),
                 P => {
-                    public_key =
-                        base64_decode_stream(&mut header, header_len, b';').unwrap_or_default()
+                    if let Some(bytes) = base64_decode_stream(&mut header, header_len, b';') {
+                        public_key = Some(bytes);
+                    }
                 }
-                S => record.f |= header.flags::<Service>(),
-                T => record.f |= header.flags::<Flag>(),
+                S => flags |= header.flags::<Service>(),
+                T => flags |= header.flags::<Flag>(),
                 K => {
                     if let Some(ch) = header.next_skip_whitespaces() {
                         match ch {
                             b'r' | b'R' => {
                                 if header.match_bytes(b"sa") && header.seek_tag_end() {
-                                    k = KeyType::Rsa;
+                                    key_type = VerifyingKeyType::Rsa;
                                 } else {
                                     return Err(Error::UnsupportedKeyType);
                                 }
                             }
                             b'e' | b'E' => {
                                 if header.match_bytes(b"d25519") && header.seek_tag_end() {
-                                    k = KeyType::Ed25519;
+                                    key_type = VerifyingKeyType::Ed25519;
                                 } else {
                                     return Err(Error::UnsupportedKeyType);
                                 }
@@ -304,21 +294,13 @@ impl TxtRecordParser for DomainKey {
             }
         }
 
-        if !public_key.is_empty() {
-            record.p = match k {
-                KeyType::Rsa | KeyType::None => PublicKey::Rsa(
-                    <RsaPublicKey as rsa::pkcs8::DecodePublicKey>::from_public_key_der(&public_key)
-                        .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(&public_key))
-                        .map_err(|err| Error::CryptoError(err.to_string()))?,
-                ),
-                KeyType::Ed25519 => PublicKey::Ed25519(
-                    ed25519_dalek::PublicKey::from_bytes(&public_key)
-                        .map_err(|err| Error::CryptoError(err.to_string()))?,
-                ),
-            }
+        match public_key {
+            Some(public_key) => Ok(DomainKey {
+                p: key_type.new(&public_key)?,
+                f: flags,
+            }),
+            _ => Err(Error::InvalidRecordType),
         }
-
-        Ok(record)
     }
 }
 
@@ -476,7 +458,6 @@ impl ItemParser for Service {
 #[cfg(test)]
 mod test {
     use mail_parser::decoders::base64::base64_decode;
-    use rsa::{pkcs8::DecodePublicKey, RsaPublicKey};
 
     use crate::{
         common::{
@@ -484,8 +465,8 @@ mod test {
             parse::TxtRecordParser,
         },
         dkim::{
-            Canonicalization, DomainKey, DomainKeyReport, PublicKey, Signature, Version, RR_DNS,
-            RR_EXPIRATION, RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION,
+            Canonicalization, DomainKey, DomainKeyReport, Signature, RR_DNS, RR_EXPIRATION,
+            RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION,
             R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_SVC_ALL, R_SVC_EMAIL,
         },
     };
@@ -651,26 +632,7 @@ mod test {
                     "/RtdC2UzJ1lWT947qR+Rcac2gbto/NMqJ0fzfVjH4OuKhi",
                     "tdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB",
                 ),
-                DomainKey {
-                    v: Version::V1,
-                    p: PublicKey::Rsa(
-                        RsaPublicKey::from_public_key_der(
-                            &base64_decode(
-                                concat!(
-                                    "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQ",
-                                    "KBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYt",
-                                    "IxN2SnFCjxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v",
-                                    "/RtdC2UzJ1lWT947qR+Rcac2gbto/NMqJ0fzfVjH4OuKhi",
-                                    "tdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB",
-                                )
-                                .as_bytes(),
-                            )
-                            .unwrap(),
-                        )
-                        .unwrap(),
-                    ),
-                    f: 0,
-                },
+                0,
             ),
             (
                 concat!(
@@ -685,35 +647,12 @@ mod test {
                     "p5wMedWasaPS74TZ1b7tI39ncp6QIDAQAB ; t= y : s :yy:x;",
                     "s=*:email;; h= sha1:sha 256:other;; n=ignore these notes "
                 ),
-                DomainKey {
-                    v: Version::V1,
-                    p: PublicKey::Rsa(
-                        RsaPublicKey::from_public_key_der(
-                            &base64_decode(
-                                concat!(
-                                    "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvz",
-                                    "wKQIIWzQXv0nihasFTT3+JO23hXCge+ESWNxCJdVLxKL5e",
-                                    "dxrumEU3DnrPeGD6q6E/vjoXwBabpm8F5o96MEPm7v12O5",
-                                    "IIK7wx7gIJiQWvexwh+GJvW4aFFa0g13Ai75UdZjGFNKHA",
-                                    "EGeLmkQYybK/EHW5ymRlSg3g8zydJGEcI/melLCiBoShHjf",
-                                    "ZFJEThxLmPHNSi+KOUMypxqYHd7hzg6W7qnq6t9puZYXMWj",
-                                    "6tEaf6ORWgb7DOXZSTJJjAJPBWa2+UrxXX6Ro7L7Xy1zzeY",
-                                    "FCk8W5vmn0wMgGpjkWw0ljJWNwIpxZAj9p5wMedWasaPS74",
-                                    "TZ1b7tI39ncp6QIDAQAB",
-                                )
-                                .as_bytes(),
-                            )
-                            .unwrap(),
-                        )
-                        .unwrap(),
-                    ),
-                    f: R_HASH_SHA1
-                        | R_HASH_SHA256
-                        | R_SVC_ALL
-                        | R_SVC_EMAIL
-                        | R_FLAG_MATCH_DOMAIN
-                        | R_FLAG_TESTING,
-                },
+                R_HASH_SHA1
+                    | R_HASH_SHA256
+                    | R_SVC_ALL
+                    | R_SVC_EMAIL
+                    | R_FLAG_MATCH_DOMAIN
+                    | R_FLAG_TESTING,
             ),
             (
                 concat!(
@@ -722,29 +661,11 @@ mod test {
                     "hpV673NdAtaCVGNyx/fTYtvyyFe9DH2tmm/ijLlygDRboSkIJ4NHZjK++48hk",
                     "NP8/htqWHS+CvwWT4Qgs0NtB7Re9bQIDAQAB"
                 ),
-                DomainKey {
-                    v: Version::V1,
-                    p: PublicKey::Rsa(
-                        RsaPublicKey::from_public_key_der(
-                            &base64_decode(
-                                concat!(
-                                    "MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQCYtb/9Sh8nGKV7exhUFS",
-                                    "+cBNXlHgO1CxD9zIfQd5ztlq1LO7g38dfmFpQafh9lKgqPBTolFhZxhF1yUNT",
-                                    "hpV673NdAtaCVGNyx/fTYtvyyFe9DH2tmm/ijLlygDRboSkIJ4NHZjK++48hk",
-                                    "NP8/htqWHS+CvwWT4Qgs0NtB7Re9bQIDAQAB"
-                                )
-                                .as_bytes(),
-                            )
-                            .unwrap(),
-                        )
-                        .unwrap(),
-                    ),
-                    f: 0,
-                },
+                0,
             ),
         ] {
             assert_eq!(
-                DomainKey::parse(record.as_bytes()).unwrap(),
+                DomainKey::parse(record.as_bytes()).unwrap().f,
                 expected_result
             );
         }

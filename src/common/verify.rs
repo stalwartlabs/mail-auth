@@ -8,15 +8,7 @@
  * except according to those terms.
  */
 
-use rsa::PaddingScheme;
-use sha1::Sha1;
-use sha2::Sha256;
-
-use crate::{
-    common::crypto::Algorithm,
-    dkim::{DomainKey, PublicKey},
-    Error,
-};
+use crate::{common::crypto::Algorithm, dkim::DomainKey};
 
 pub(crate) trait VerifySignature {
     fn s(&self) -> &str;
@@ -39,34 +31,6 @@ pub(crate) trait VerifySignature {
     }
 
     fn verify(&self, record: &DomainKey, hh: &[u8]) -> crate::Result<()> {
-        match (&self.a(), &record.p) {
-            (Algorithm::RsaSha256, PublicKey::Rsa(public_key)) => rsa::PublicKey::verify(
-                public_key,
-                PaddingScheme::new_pkcs1v15_sign::<Sha256>(),
-                hh,
-                self.b(),
-            )
-            .map_err(|_| Error::FailedVerification),
-
-            (Algorithm::RsaSha1, PublicKey::Rsa(public_key)) => rsa::PublicKey::verify(
-                public_key,
-                PaddingScheme::new_pkcs1v15_sign::<Sha1>(),
-                hh,
-                self.b(),
-            )
-            .map_err(|_| Error::FailedVerification),
-
-            (Algorithm::Ed25519Sha256, PublicKey::Ed25519(public_key)) => public_key
-                .verify_strict(
-                    hh,
-                    &ed25519_dalek::Signature::from_bytes(self.b())
-                        .map_err(|err| Error::CryptoError(err.to_string()))?,
-                )
-                .map_err(|_| Error::FailedVerification),
-
-            (_, PublicKey::Revoked) => Err(Error::RevokedPublicKey),
-
-            (_, _) => Err(Error::IncompatibleAlgorithms),
-        }
+        record.p.verify(hh, self.b(), self.a())
     }
 }

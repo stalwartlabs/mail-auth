@@ -275,7 +275,6 @@ pub mod dmarc;
 pub mod report;
 pub mod spf;
 
-#[derive(Debug)]
 pub struct Resolver {
     pub(crate) resolver: TokioAsyncResolver,
     pub(crate) cache_txt: LruCache<String, Txt>,
@@ -287,7 +286,7 @@ pub struct Resolver {
     pub(crate) verify_policy: Policy,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub(crate) enum Txt {
     Spf(Arc<Spf>),
     SpfMacro(Arc<Macro>),
