@@ -80,7 +80,7 @@ impl Canonicalization {
 
     pub fn canonicalize_headers<'x>(
         &self,
-        headers: impl Iterator<Item = (&'x [u8], &'x [u8])>,
+        headers: &mut dyn Iterator<Item = (&'x [u8], &'x [u8])>,
         mut hasher: impl io::Write,
     ) -> io::Result<()> {
         match self {
@@ -123,7 +123,7 @@ impl Canonicalization {
 
     pub fn hash_headers<'x, T>(
         &self,
-        headers: impl Iterator<Item = (&'x [u8], &'x [u8])>,
+        headers: &mut dyn Iterator<Item = (&'x [u8], &'x [u8])>,
     ) -> io::Result<Vec<u8>>
     where
         T: Digest + io::Write,
@@ -188,7 +188,7 @@ impl<'x> Signature<'x> {
             .unwrap_or_default();
         let body_len = body.len();
         self.ch
-            .canonicalize_headers(headers.into_iter().rev(), header_hasher)?;
+            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher)?;
         self.cb.canonicalize_body(body, body_hasher)?;
 
         // Add any missing headers
@@ -272,7 +272,7 @@ mod test {
                 let mut body = Vec::new();
 
                 canonicalization
-                    .canonicalize_headers(parsed_headers.clone().into_iter(), &mut headers)
+                    .canonicalize_headers(&mut parsed_headers.clone().into_iter(), &mut headers)
                     .unwrap();
                 canonicalization
                     .canonicalize_body(raw_body, &mut body)

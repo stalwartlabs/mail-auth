@@ -8,11 +8,29 @@
  * except according to those terms.
  */
 
+use crate::dkim::Canonicalization;
+
 use super::crypto::{Algorithm, VerifyingKey};
 
 pub struct DomainKey {
     pub(crate) p: Box<dyn VerifyingKey>,
     pub(crate) f: u64,
+}
+
+impl DomainKey {
+    pub(crate) fn verify<'a>(
+        &self,
+        headers: &mut dyn Iterator<Item = (&'a [u8], &'a [u8])>,
+        input: &impl VerifySignature,
+        canonicalization: Canonicalization,
+    ) -> crate::Result<()> {
+        self.p.verify(
+            headers,
+            input.signature(),
+            canonicalization,
+            input.algorithm(),
+        )
+    }
 }
 
 pub(crate) trait VerifySignature {
@@ -33,9 +51,5 @@ pub(crate) trait VerifySignature {
         key.push_str(d);
         key.push('.');
         key
-    }
-
-    fn verify(&self, record: &DomainKey, hh: &[u8]) -> crate::Result<()> {
-        record.p.verify(hh, self.signature(), self.algorithm())
     }
 }

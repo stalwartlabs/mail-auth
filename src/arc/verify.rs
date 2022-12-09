@@ -10,12 +10,9 @@
 
 use std::time::SystemTime;
 
-use sha1::Sha1;
-use sha2::Sha256;
-
 use crate::{
     common::{
-        crypto::{Algorithm, HashAlgorithm},
+        crypto::HashAlgorithm,
         headers::Header,
         verify::{DomainKey, VerifySignature},
     },
@@ -120,14 +117,7 @@ impl Resolver {
 
         // Hash headers
         let dkim_hdr_value = header.value.strip_signature();
-        let headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
-        let hh = match signature.a {
-            Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => {
-                signature.ch.hash_headers::<Sha256>(headers)
-            }
-            Algorithm::RsaSha1 => signature.ch.hash_headers::<Sha1>(headers),
-        }
-        .unwrap_or_default();
+        let mut headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
         // Obtain record
         let record = match self.txt_lookup::<DomainKey>(signature.domain_key()).await {
@@ -138,7 +128,7 @@ impl Resolver {
         };
 
         // Verify signature
-        if let Err(err) = signature.verify(record.as_ref(), &hh) {
+        if let Err(err) = record.verify(&mut headers, *signature, signature.ch) {
             return output.with_result(DkimResult::Fail(err));
         }
 
@@ -156,7 +146,7 @@ impl Resolver {
 
             // Build Seal headers
             let seal_signature = header.value.strip_signature();
-            let headers = output
+            let mut headers = output
                 .set
                 .iter()
                 .take(pos)
@@ -173,16 +163,8 @@ impl Resolver {
                     (set.seal.name, &seal_signature),
                 ]);
 
-            let hh = match seal.a {
-                Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => {
-                    Canonicalization::Relaxed.hash_headers::<Sha256>(headers)
-                }
-                Algorithm::RsaSha1 => Canonicalization::Relaxed.hash_headers::<Sha1>(headers),
-            }
-            .unwrap_or_default();
-
             // Verify ARC Seal
-            if let Err(err) = seal.verify(record.as_ref(), &hh) {
+            if let Err(err) = record.verify(&mut headers, *seal, Canonicalization::Relaxed) {
                 return output.with_result(DkimResult::Fail(err));
             }
         }

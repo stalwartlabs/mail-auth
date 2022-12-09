@@ -22,8 +22,8 @@ use crate::{
 };
 
 use super::{
-    Algorithm, Atps, DomainKeyReport, Flag, HashAlgorithm, Signature, RR_DNS, RR_EXPIRATION,
-    RR_OTHER, RR_SIGNATURE, RR_VERIFICATION,
+    Atps, DomainKeyReport, Flag, HashAlgorithm, Signature, RR_DNS, RR_EXPIRATION, RR_OTHER,
+    RR_SIGNATURE, RR_VERIFICATION,
 };
 
 impl Resolver {
@@ -108,17 +108,10 @@ impl Resolver {
 
             // Hash headers
             let dkim_hdr_value = header.value.strip_signature();
-            let headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
-            let hh = match signature.a {
-                Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => {
-                    signature.ch.hash_headers::<Sha256>(headers)
-                }
-                Algorithm::RsaSha1 => signature.ch.hash_headers::<Sha1>(headers),
-            }
-            .unwrap_or_default();
+            let mut headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
             // Verify signature
-            if let Err(err) = signature.verify(record.as_ref(), &hh) {
+            if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
                 output.push(DkimOutput::fail(err).with_signature(signature));
                 continue;
             }

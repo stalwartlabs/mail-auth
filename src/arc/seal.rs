@@ -99,7 +99,7 @@ impl<'x> ArcSet<'x> {
         let mut header_hasher = Sha256::new();
         if !arc_output.set.is_empty() {
             Canonicalization::Relaxed.canonicalize_headers(
-                arc_output.set.iter().flat_map(|set| {
+                &mut arc_output.set.iter().flat_map(|set| {
                     [
                         (set.results.name, set.results.value),
                         (set.signature.name, set.signature.value),
@@ -194,7 +194,7 @@ impl<'x> Signature<'x> {
 
         let body_len = message.body.len();
         self.ch
-            .canonicalize_headers(headers.into_iter().rev(), header_hasher)?;
+            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher)?;
         self.cb.canonicalize_body(message.body, body_hasher)?;
 
         // Add any missing headers

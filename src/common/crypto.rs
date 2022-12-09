@@ -9,7 +9,7 @@ use rsa::{
 use sha1::{digest::Output, Sha1};
 use sha2::{digest::Digest, Sha256};
 
-use crate::{Error, Result};
+use crate::{dkim::Canonicalization, Error, Result};
 
 pub trait SigningKey {
     type Hasher: Digest + AssociatedOid + io::Write;
@@ -112,7 +112,13 @@ impl SigningKey for Ed25519Key {
 }
 
 pub trait VerifyingKey {
-    fn verify(&self, hash: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()>;
+    fn verify<'a>(
+        &self,
+        headers: &mut dyn Iterator<Item = (&'a [u8], &'a [u8])>,
+        signature: &[u8],
+        canonicalication: Canonicalization,
+        algorithm: Algorithm,
+    ) -> Result<()>;
 }
 
 pub(crate) enum VerifyingKeyType {
@@ -144,21 +150,35 @@ pub(crate) struct RsaPublicKey {
 }
 
 impl VerifyingKey for RsaPublicKey {
-    fn verify(&self, hash: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+    fn verify<'a>(
+        &self,
+        headers: &mut dyn Iterator<Item = (&'a [u8], &'a [u8])>,
+        signature: &[u8],
+        canonicalization: Canonicalization,
+        algorithm: Algorithm,
+    ) -> Result<()> {
         match algorithm {
-            Algorithm::RsaSha1 => self
-                .inner
-                .verify(PaddingScheme::new_pkcs1v15_sign::<Sha1>(), hash, signature)
-                .map_err(|_| Error::FailedVerification),
-            Algorithm::RsaSha256 => self
-                .inner
-                .verify(
-                    PaddingScheme::new_pkcs1v15_sign::<Sha256>(),
-                    hash,
-                    signature,
-                )
-                .map_err(|_| Error::FailedVerification),
-            _ => Err(Error::IncompatibleAlgorithms),
+            Algorithm::RsaSha256 => {
+                let hash = canonicalization
+                    .hash_headers::<Sha256>(headers)
+                    .unwrap_or_default();
+                self.inner
+                    .verify(
+                        PaddingScheme::new_pkcs1v15_sign::<Sha256>(),
+                        &hash,
+                        signature,
+                    )
+                    .map_err(|_| Error::FailedVerification)
+            }
+            Algorithm::RsaSha1 => {
+                let hash = canonicalization
+                    .hash_headers::<Sha1>(headers)
+                    .unwrap_or_default();
+                self.inner
+                    .verify(PaddingScheme::new_pkcs1v15_sign::<Sha1>(), &hash, signature)
+                    .map_err(|_| Error::FailedVerification)
+            }
+            Algorithm::Ed25519Sha256 => Err(Error::IncompatibleAlgorithms),
         }
     }
 }
@@ -168,14 +188,23 @@ pub(crate) struct Ed25519PublicKey {
 }
 
 impl VerifyingKey for Ed25519PublicKey {
-    fn verify(&self, hash: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+    fn verify<'a>(
+        &self,
+        headers: &mut dyn Iterator<Item = (&'a [u8], &'a [u8])>,
+        signature: &[u8],
+        canonicalization: Canonicalization,
+        algorithm: Algorithm,
+    ) -> Result<()> {
         if !matches!(algorithm, Algorithm::Ed25519Sha256) {
             return Err(Error::IncompatibleAlgorithms);
         }
 
+        let hash = canonicalization
+            .hash_headers::<Sha256>(headers)
+            .unwrap_or_default();
         self.inner
             .verify_strict(
-                hash,
+                &hash,
                 &ed25519_dalek::Signature::from_bytes(signature)
                     .map_err(|err| Error::CryptoError(err.to_string()))?,
             )
