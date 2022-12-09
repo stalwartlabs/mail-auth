@@ -10,12 +10,10 @@
 
 use std::borrow::Cow;
 
-use rsa::RsaPublicKey;
-
 use crate::{
     arc::Set,
     common::{
-        crypto::{Algorithm, HashAlgorithm},
+        crypto::{Algorithm, HashAlgorithm, VerifyingKey},
         verify::VerifySignature,
     },
     ArcOutput, DkimOutput, DkimResult, Error, Version,
@@ -66,10 +64,8 @@ impl Default for Canonicalization {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DomainKey {
-    pub(crate) v: Version,
-    pub(crate) p: PublicKey,
+    pub(crate) p: Box<dyn VerifyingKey>,
     pub(crate) f: u64,
 }
 
@@ -132,13 +128,6 @@ impl From<Service> for u64 {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum PublicKey {
-    Rsa(RsaPublicKey),
-    Ed25519(ed25519_dalek::PublicKey),
-    Revoked,
-}
-
 impl From<Algorithm> for HashAlgorithm {
     fn from(a: Algorithm) -> Self {
         match a {
@@ -149,19 +138,19 @@ impl From<Algorithm> for HashAlgorithm {
 }
 
 impl<'x> VerifySignature for Signature<'x> {
-    fn b(&self) -> &[u8] {
+    fn signature(&self) -> &[u8] {
         &self.b
     }
 
-    fn a(&self) -> Algorithm {
+    fn algorithm(&self) -> Algorithm {
         self.a
     }
 
-    fn s(&self) -> &str {
+    fn selector(&self) -> &str {
         &self.s
     }
 
-    fn d(&self) -> &str {
+    fn domain(&self) -> &str {
         &self.d
     }
 }

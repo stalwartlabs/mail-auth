@@ -4,7 +4,7 @@ use ed25519_dalek::Signer;
 use rsa::{
     pkcs1::DecodeRsaPrivateKey,
     pkcs8::{AssociatedOid, ObjectIdentifier},
-    PaddingScheme, RsaPrivateKey,
+    PaddingScheme, PublicKey as _, RsaPrivateKey,
 };
 use sha1::{digest::Output, Sha1};
 use sha2::{digest::Digest, Sha256};
@@ -108,6 +108,78 @@ impl SigningKey for Ed25519Key {
 
     fn algorithm(&self) -> Algorithm {
         Algorithm::Ed25519Sha256
+    }
+}
+
+pub trait VerifyingKey {
+    fn verify(&self, hash: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()>;
+}
+
+pub(crate) enum VerifyingKeyType {
+    Rsa,
+    Ed25519,
+}
+
+impl VerifyingKeyType {
+    pub(crate) fn new(&self, bytes: &[u8]) -> Result<Box<dyn VerifyingKey>> {
+        Ok(match self {
+            Self::Rsa => {
+                let inner =
+                    <rsa::RsaPublicKey as rsa::pkcs8::DecodePublicKey>::from_public_key_der(bytes)
+                        .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(bytes))
+                        .map_err(|err| Error::CryptoError(err.to_string()))?;
+
+                Box::new(RsaPublicKey { inner }) as Box<dyn VerifyingKey>
+            }
+            Self::Ed25519 => Box::new(Ed25519PublicKey {
+                inner: ed25519_dalek::PublicKey::from_bytes(bytes)
+                    .map_err(|err| Error::CryptoError(err.to_string()))?,
+            }),
+        })
+    }
+}
+
+pub(crate) struct RsaPublicKey {
+    inner: rsa::RsaPublicKey,
+}
+
+impl VerifyingKey for RsaPublicKey {
+    fn verify(&self, hash: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+        match algorithm {
+            Algorithm::RsaSha1 => self
+                .inner
+                .verify(PaddingScheme::new_pkcs1v15_sign::<Sha1>(), hash, signature)
+                .map_err(|_| Error::FailedVerification),
+            Algorithm::RsaSha256 => self
+                .inner
+                .verify(
+                    PaddingScheme::new_pkcs1v15_sign::<Sha256>(),
+                    hash,
+                    signature,
+                )
+                .map_err(|_| Error::FailedVerification),
+            _ => Err(Error::IncompatibleAlgorithms),
+        }
+    }
+}
+
+pub(crate) struct Ed25519PublicKey {
+    inner: ed25519_dalek::PublicKey,
+}
+
+impl VerifyingKey for Ed25519PublicKey {
+    fn verify(&self, hash: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+        if !matches!(algorithm, Algorithm::Ed25519Sha256) {
+            return Err(Error::IncompatibleAlgorithms);
+        }
+
+        self.inner
+            .verify_strict(
+                hash,
+                &ed25519_dalek::Signature::from_bytes(signature)
+                    .map_err(|err| Error::CryptoError(err.to_string()))?,
+            )
+            .map_err(|_| Error::FailedVerification)
     }
 }
 
