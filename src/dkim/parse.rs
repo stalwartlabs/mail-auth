@@ -296,7 +296,7 @@ impl TxtRecordParser for DomainKey {
 
         match public_key {
             Some(public_key) => Ok(DomainKey {
-                p: key_type.new(&public_key)?,
+                p: key_type.verifying_key(&public_key)?,
                 f: flags,
             }),
             _ => Err(Error::InvalidRecordType),

@@ -127,7 +127,7 @@ pub(crate) enum VerifyingKeyType {
 }
 
 impl VerifyingKeyType {
-    pub(crate) fn new(&self, bytes: &[u8]) -> Result<Box<dyn VerifyingKey>> {
+    pub(crate) fn verifying_key(&self, bytes: &[u8]) -> Result<Box<dyn VerifyingKey>> {
         Ok(match self {
             Self::Rsa => {
                 let inner =
