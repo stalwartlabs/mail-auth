@@ -14,13 +14,16 @@ use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
 use crate::{
-    common::{base32::Base32Writer, verify::VerifySignature},
+    common::{
+        base32::Base32Writer,
+        verify::{DomainKey, VerifySignature},
+    },
     is_within_pct, AuthenticatedMessage, DkimOutput, DkimResult, Error, Resolver,
 };
 
 use super::{
-    Algorithm, Atps, DomainKey, DomainKeyReport, Flag, HashAlgorithm, Signature, RR_DNS,
-    RR_EXPIRATION, RR_OTHER, RR_SIGNATURE, RR_VERIFICATION,
+    Atps, DomainKeyReport, Flag, HashAlgorithm, Signature, RR_DNS, RR_EXPIRATION, RR_OTHER,
+    RR_SIGNATURE, RR_VERIFICATION,
 };
 
 impl Resolver {
@@ -105,17 +108,10 @@ impl Resolver {
 
             // Hash headers
             let dkim_hdr_value = header.value.strip_signature();
-            let headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
-            let hh = match signature.a {
-                Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => {
-                    signature.ch.hash_headers::<Sha256>(headers)
-                }
-                Algorithm::RsaSha1 => signature.ch.hash_headers::<Sha1>(headers),
-            }
-            .unwrap_or_default();
+            let mut headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
             // Verify signature
-            if let Err(err) = signature.verify(record.as_ref(), &hh) {
+            if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
                 output.push(DkimOutput::fail(err).with_signature(signature));
                 continue;
             }
@@ -375,8 +371,8 @@ mod test {
     };
 
     use crate::{
-        common::parse::TxtRecordParser,
-        dkim::{verify::Verifier, DomainKey},
+        common::{parse::TxtRecordParser, verify::DomainKey},
+        dkim::verify::Verifier,
         AuthenticatedMessage, DkimResult, Resolver,
     };
 

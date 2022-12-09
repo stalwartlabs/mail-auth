@@ -262,8 +262,8 @@ use std::{
 };
 
 use arc::Set;
-use common::{crypto::HashAlgorithm, headers::Header, lru::LruCache};
-use dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport};
+use common::{crypto::HashAlgorithm, headers::Header, lru::LruCache, verify::DomainKey};
+use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
 use spf::{Macro, Spf};
 use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
