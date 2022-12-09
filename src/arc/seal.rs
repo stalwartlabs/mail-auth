@@ -222,8 +222,9 @@ mod test {
             crypto::{Ed25519Key, RsaKey, SigningKey},
             headers::HeaderWriter,
             parse::TxtRecordParser,
+            verify::DomainKey,
         },
-        dkim::{DomainKey, Signature},
+        dkim::Signature,
         AuthenticatedMessage, AuthenticationResults, DkimResult, Resolver,
     };
 

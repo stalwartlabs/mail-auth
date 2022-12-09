@@ -158,8 +158,9 @@ mod test {
         common::{
             crypto::{Ed25519Key, RsaKey},
             parse::TxtRecordParser,
+            verify::DomainKey,
         },
-        dkim::{Atps, Canonicalization, DomainKey, DomainKeyReport, HashAlgorithm, Signature},
+        dkim::{Atps, Canonicalization, DomainKeyReport, HashAlgorithm, Signature},
         AuthenticatedMessage, DkimOutput, DkimResult, Resolver,
     };
 

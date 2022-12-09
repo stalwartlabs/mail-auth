@@ -23,7 +23,7 @@ use trust_dns_resolver::{
 };
 
 use crate::{
-    dkim::{Atps, DomainKey, DomainKeyReport},
+    dkim::{Atps, DomainKeyReport},
     dmarc::Dmarc,
     spf::{Macro, Spf},
     Error, Policy, Resolver, Txt, MX,
@@ -32,6 +32,7 @@ use crate::{
 use super::{
     lru::{DnsCache, LruCache},
     parse::TxtRecordParser,
+    verify::DomainKey,
 };
 
 impl Resolver {

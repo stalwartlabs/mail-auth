@@ -14,13 +14,16 @@ use sha1::{Digest, Sha1};
 use sha2::Sha256;
 
 use crate::{
-    common::{base32::Base32Writer, verify::VerifySignature},
+    common::{
+        base32::Base32Writer,
+        verify::{DomainKey, VerifySignature},
+    },
     is_within_pct, AuthenticatedMessage, DkimOutput, DkimResult, Error, Resolver,
 };
 
 use super::{
-    Algorithm, Atps, DomainKey, DomainKeyReport, Flag, HashAlgorithm, Signature, RR_DNS,
-    RR_EXPIRATION, RR_OTHER, RR_SIGNATURE, RR_VERIFICATION,
+    Algorithm, Atps, DomainKeyReport, Flag, HashAlgorithm, Signature, RR_DNS, RR_EXPIRATION,
+    RR_OTHER, RR_SIGNATURE, RR_VERIFICATION,
 };
 
 impl Resolver {
@@ -375,8 +378,8 @@ mod test {
     };
 
     use crate::{
-        common::parse::TxtRecordParser,
-        dkim::{verify::Verifier, DomainKey},
+        common::{parse::TxtRecordParser, verify::DomainKey},
+        dkim::verify::Verifier,
         AuthenticatedMessage, DkimResult, Resolver,
     };
 

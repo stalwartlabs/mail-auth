@@ -8,7 +8,12 @@
  * except according to those terms.
  */
 
-use crate::{common::crypto::Algorithm, dkim::DomainKey};
+use super::crypto::{Algorithm, VerifyingKey};
+
+pub struct DomainKey {
+    pub(crate) p: Box<dyn VerifyingKey>,
+    pub(crate) f: u64,
+}
 
 pub(crate) trait VerifySignature {
     fn selector(&self) -> &str;

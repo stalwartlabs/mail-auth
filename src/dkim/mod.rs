@@ -13,7 +13,7 @@ use std::borrow::Cow;
 use crate::{
     arc::Set,
     common::{
-        crypto::{Algorithm, HashAlgorithm, VerifyingKey},
+        crypto::{Algorithm, HashAlgorithm},
         verify::VerifySignature,
     },
     ArcOutput, DkimOutput, DkimResult, Error, Version,
@@ -62,11 +62,6 @@ impl Default for Canonicalization {
     fn default() -> Self {
         Canonicalization::Relaxed
     }
-}
-
-pub struct DomainKey {
-    pub(crate) p: Box<dyn VerifyingKey>,
-    pub(crate) f: u64,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

@@ -17,9 +17,9 @@ use crate::{
     common::{
         crypto::{Algorithm, HashAlgorithm},
         headers::Header,
-        verify::VerifySignature,
+        verify::{DomainKey, VerifySignature},
     },
-    dkim::{verify::Verifier, Canonicalization, DomainKey},
+    dkim::{verify::Verifier, Canonicalization},
     ArcOutput, AuthenticatedMessage, DkimResult, Error, Resolver,
 };
 
@@ -201,7 +201,8 @@ mod test {
     };
 
     use crate::{
-        common::parse::TxtRecordParser, dkim::DomainKey, AuthenticatedMessage, DkimResult, Resolver,
+        common::{parse::TxtRecordParser, verify::DomainKey},
+        AuthenticatedMessage, DkimResult, Resolver,
     };
 
     #[tokio::test]

@@ -13,14 +13,14 @@ use std::slice::Iter;
 use mail_parser::decoders::base64::base64_decode_stream;
 
 use crate::{
-    common::{crypto::VerifyingKeyType, parse::*},
+    common::{crypto::VerifyingKeyType, parse::*, verify::DomainKey},
     dkim::{RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION},
     Error,
 };
 
 use super::{
-    Algorithm, Atps, Canonicalization, DomainKey, DomainKeyReport, Flag, HashAlgorithm, Service,
-    Signature, Version, RR_DNS, RR_OTHER, RR_POLICY,
+    Algorithm, Atps, Canonicalization, DomainKeyReport, Flag, HashAlgorithm, Service, Signature,
+    Version, RR_DNS, RR_OTHER, RR_POLICY,
 };
 
 const ATPSH: u64 = (b'a' as u64)
@@ -463,11 +463,12 @@ mod test {
         common::{
             crypto::{Algorithm, R_HASH_SHA1, R_HASH_SHA256},
             parse::TxtRecordParser,
+            verify::DomainKey,
         },
         dkim::{
-            Canonicalization, DomainKey, DomainKeyReport, Signature, RR_DNS, RR_EXPIRATION,
-            RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION,
-            R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_SVC_ALL, R_SVC_EMAIL,
+            Canonicalization, DomainKeyReport, Signature, RR_DNS, RR_EXPIRATION, RR_OTHER,
+            RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION, R_FLAG_MATCH_DOMAIN,
+            R_FLAG_TESTING, R_SVC_ALL, R_SVC_EMAIL,
         },
     };
 
