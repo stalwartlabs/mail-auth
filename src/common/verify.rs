@@ -11,17 +11,17 @@
 use crate::{common::crypto::Algorithm, dkim::DomainKey};
 
 pub(crate) trait VerifySignature {
-    fn s(&self) -> &str;
+    fn selector(&self) -> &str;
 
-    fn d(&self) -> &str;
+    fn domain(&self) -> &str;
 
-    fn b(&self) -> &[u8];
+    fn signature(&self) -> &[u8];
 
-    fn a(&self) -> Algorithm;
+    fn algorithm(&self) -> Algorithm;
 
     fn domain_key(&self) -> String {
-        let s = self.s();
-        let d = self.d();
+        let s = self.selector();
+        let d = self.domain();
         let mut key = String::with_capacity(s.len() + d.len() + 13);
         key.push_str(s);
         key.push_str("._domainkey.");
@@ -31,6 +31,6 @@ pub(crate) trait VerifySignature {
     }
 
     fn verify(&self, record: &DomainKey, hh: &[u8]) -> crate::Result<()> {
-        record.p.verify(hh, self.b(), self.a())
+        record.p.verify(hh, self.signature(), self.algorithm())
     }
 }

@@ -138,19 +138,19 @@ impl From<Algorithm> for HashAlgorithm {
 }
 
 impl<'x> VerifySignature for Signature<'x> {
-    fn b(&self) -> &[u8] {
+    fn signature(&self) -> &[u8] {
         &self.b
     }
 
-    fn a(&self) -> Algorithm {
+    fn algorithm(&self) -> Algorithm {
         self.a
     }
 
-    fn s(&self) -> &str {
+    fn selector(&self) -> &str {
         &self.s
     }
 
-    fn d(&self) -> &str {
+    fn domain(&self) -> &str {
         &self.d
     }
 }
