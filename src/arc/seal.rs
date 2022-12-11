@@ -281,7 +281,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
 
         // Create private keys
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let pk_ed = Ed25519Key::from_bytes(
             &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
             &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),

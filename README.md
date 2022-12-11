@@ -50,7 +50,7 @@ Features:
 
 ```rust
     // Sign an e-mail message using RSA-SHA256
-    let pk_rsa =  RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+    let pk_rsa =  RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
     let signature_rsa = Signature::new()
         .headers(["From", "To", "Subject"])
         .domain("example.com")
@@ -117,7 +117,7 @@ Features:
     // Seal message
     if arc_result.can_be_sealed() {
         // Seal the e-mail message using RSA-SHA256
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let arc_set = ArcSet::new(&auth_results)
             .domain("example.org")
             .selector("default")

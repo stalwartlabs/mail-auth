@@ -31,7 +31,7 @@ pub struct RsaKey<T> {
 
 impl<T: Digest + AssociatedOid + io::Write> RsaKey<T> {
     /// Creates a new RSA private key from a PKCS1 PEM string.
-    pub fn from_rsa_pkcs1_pem(private_key_pem: &str) -> Result<Self> {
+    pub fn from_pkcs1_pem(private_key_pem: &str) -> Result<Self> {
         let inner = RsaPrivateKey::from_pkcs1_pem(private_key_pem)
             .map_err(|err| Error::CryptoError(err.to_string()))?;
 
@@ -42,7 +42,7 @@ impl<T: Digest + AssociatedOid + io::Write> RsaKey<T> {
     }
 
     /// Creates a new RSA private key from a PKCS1 binary slice.
-    pub fn from_rsa_pkcs1_der(private_key_bytes: &[u8]) -> Result<Self> {
+    pub fn from_pkcs1_der(private_key_bytes: &[u8]) -> Result<Self> {
         let inner = RsaPrivateKey::from_pkcs1_der(private_key_bytes)
             .map_err(|err| Error::CryptoError(err.to_string()))?;
 
