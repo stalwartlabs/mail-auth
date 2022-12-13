@@ -394,14 +394,14 @@ impl IpMask for IpAddr {
         u32::from_be_bytes(match &self {
             IpAddr::V4(ip) => ip.octets(),
             IpAddr::V6(ip) => {
-                if let Some(ip) = ip.to_ipv4() {
+                if let Some(ip) = ip.to_ipv4_mapped() {
                     ip.octets()
                 } else {
                     return false;
                 }
             }
         }) & mask
-            == u32::from_be_bytes(addr.octets())
+            == u32::from_be_bytes(addr.octets()) & mask
     }
 
     fn matches_ipv6_mask(&self, addr: &Ipv6Addr, mask: u128) -> bool {
