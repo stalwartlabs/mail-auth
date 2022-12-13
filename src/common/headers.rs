@@ -9,7 +9,6 @@
  */
 
 use std::{
-    io,
     iter::{Enumerate, Peekable},
     slice::Iter,
 };
@@ -266,11 +265,26 @@ impl<'x> Iterator for HeaderParser<'x> {
 }
 
 pub trait HeaderWriter: Sized {
-    fn write_header(&self, writer: impl io::Write) -> io::Result<()>;
+    fn write_header(&self, writer: &mut impl Writer);
     fn to_header(&self) -> String {
         let mut buf = Vec::new();
-        self.write_header(&mut buf).unwrap();
+        self.write_header(&mut buf);
         String::from_utf8(buf).unwrap()
+    }
+}
+
+pub trait Writer {
+    fn write(&mut self, buf: &[u8]);
+
+    fn write_len(&mut self, buf: &[u8], len: &mut usize) {
+        self.write(buf);
+        *len += buf.len();
+    }
+}
+
+impl Writer for Vec<u8> {
+    fn write(&mut self, buf: &[u8]) {
+        self.extend(buf);
     }
 }
 

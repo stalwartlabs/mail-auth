@@ -149,8 +149,7 @@ impl<'x> AuthenticatedMessage<'x> {
             *bh = match ha {
                 HashAlgorithm::Sha256 => cb.hash_body::<Sha256>(message.body, *l),
                 HashAlgorithm::Sha1 => cb.hash_body::<Sha1>(message.body, *l),
-            }
-            .unwrap_or_default();
+            };
         }
 
         // Sort ARC headers

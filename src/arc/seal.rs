@@ -14,8 +14,9 @@ use mail_builder::encoders::base64::base64_encode;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    common::crypto::SigningKey, dkim::Canonicalization, ArcOutput, AuthenticatedMessage,
-    AuthenticationResults, DkimResult, Error,
+    common::{crypto::SigningKey, headers::Writer},
+    dkim::Canonicalization,
+    ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
 };
 
 use super::{ArcSet, ChainValidation, Seal, Signature};
@@ -89,7 +90,7 @@ impl<'x> ArcSet<'x> {
         }
 
         // Add signature to hash
-        self.signature.write(&mut header_hasher, false)?;
+        self.signature.write(&mut header_hasher, false);
 
         // Sign
         let b = with_key.sign(&header_hasher.finalize())?;
@@ -107,14 +108,14 @@ impl<'x> ArcSet<'x> {
                     ]
                 }),
                 &mut header_hasher,
-            )?;
+            );
         }
 
         // Hash ARC headers for the current instance
-        self.results.write(&mut header_hasher, self.seal.i, false)?;
-        self.signature.write(&mut header_hasher, false)?;
+        self.results.write(&mut header_hasher, self.seal.i, false);
+        self.signature.write(&mut header_hasher, false);
         header_hasher.write_all(b"\r\n")?;
-        self.seal.write(&mut header_hasher, false)?;
+        self.seal.write(&mut header_hasher, false);
 
         // Seal
         let b = with_key.sign(&header_hasher.finalize())?;
@@ -173,8 +174,8 @@ impl<'x> Signature<'x> {
     pub(crate) fn canonicalize(
         &self,
         message: &'x AuthenticatedMessage<'x>,
-        header_hasher: impl Write,
-        body_hasher: impl Write,
+        header_hasher: &mut impl Writer,
+        body_hasher: &mut impl Writer,
     ) -> crate::Result<(usize, Vec<Cow<'x, str>>)> {
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
@@ -194,8 +195,8 @@ impl<'x> Signature<'x> {
 
         let body_len = message.body.len();
         self.ch
-            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher)?;
-        self.cb.canonicalize_body(message.body, body_hasher)?;
+            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher);
+        self.cb.canonicalize_body(message.body, body_hasher);
 
         // Add any missing headers
         signed_headers.reverse();
