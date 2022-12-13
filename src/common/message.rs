@@ -147,10 +147,9 @@ impl<'x> AuthenticatedMessage<'x> {
         // Calculate body hashes
         for (cb, ha, l, bh) in &mut message.body_hashes {
             *bh = match ha {
-                HashAlgorithm::Sha256 => cb.hash_body::<Sha256>(message.body, *l),
-                HashAlgorithm::Sha1 => cb.hash_body::<Sha1>(message.body, *l),
-            }
-            .unwrap_or_default();
+                HashAlgorithm::Sha256 => cb.hash_body::<Sha256>(message.body, *l).as_ref().to_vec(),
+                HashAlgorithm::Sha1 => cb.hash_body::<Sha1>(message.body, *l).as_ref().to_vec(),
+            };
         }
 
         // Sort ARC headers

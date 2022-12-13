@@ -52,7 +52,7 @@ impl<'x> Signature<'x> {
 
         // Canonicalize headers and body
         let (body_len, signed_headers) =
-            self.canonicalize(message, &mut header_hasher, &mut body_hasher)?;
+            self.canonicalize(message, &mut header_hasher, &mut body_hasher);
 
         if signed_headers.is_empty() {
             return Err(Error::NoHeadersFound);
@@ -68,7 +68,7 @@ impl<'x> Signature<'x> {
         }
 
         // Add signature to hash
-        self.write(&mut header_hasher, false)?;
+        self.write(&mut header_hasher, false);
 
         // Sign
         let b = with_key.sign(&header_hasher.finalize())?;
@@ -442,7 +442,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         expect: Result<(), super::Error>,
     ) -> Vec<DkimOutput<'x>> {
         let mut message = Vec::with_capacity(message_.len() + 100);
-        signature.write(&mut message, true).unwrap();
+        signature.write(&mut message, true);
         message.extend_from_slice(message_.as_bytes());
 
         let message = AuthenticatedMessage::parse(&message).unwrap();

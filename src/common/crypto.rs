@@ -11,8 +11,10 @@ use sha2::{digest::Digest, Sha256};
 
 use crate::{dkim::Canonicalization, Error, Result};
 
+use super::headers::Writer;
+
 pub trait SigningKey {
-    type Hasher: Digest + AssociatedOid + io::Write;
+    type Hasher: Digest + Writer;
 
     fn sign(&self, data: &Output<Self::Hasher>) -> Result<Vec<u8>>;
 
@@ -159,23 +161,23 @@ impl VerifyingKey for RsaPublicKey {
     ) -> Result<()> {
         match algorithm {
             Algorithm::RsaSha256 => {
-                let hash = canonicalization
-                    .hash_headers::<Sha256>(headers)
-                    .unwrap_or_default();
+                let hash = canonicalization.hash_headers::<Sha256>(headers);
                 self.inner
                     .verify(
                         PaddingScheme::new_pkcs1v15_sign::<Sha256>(),
-                        &hash,
+                        hash.as_ref(),
                         signature,
                     )
                     .map_err(|_| Error::FailedVerification)
             }
             Algorithm::RsaSha1 => {
-                let hash = canonicalization
-                    .hash_headers::<Sha1>(headers)
-                    .unwrap_or_default();
+                let hash = canonicalization.hash_headers::<Sha1>(headers);
                 self.inner
-                    .verify(PaddingScheme::new_pkcs1v15_sign::<Sha1>(), &hash, signature)
+                    .verify(
+                        PaddingScheme::new_pkcs1v15_sign::<Sha1>(),
+                        hash.as_ref(),
+                        signature,
+                    )
                     .map_err(|_| Error::FailedVerification)
             }
             Algorithm::Ed25519Sha256 => Err(Error::IncompatibleAlgorithms),
@@ -199,16 +201,26 @@ impl VerifyingKey for Ed25519PublicKey {
             return Err(Error::IncompatibleAlgorithms);
         }
 
-        let hash = canonicalization
-            .hash_headers::<Sha256>(headers)
-            .unwrap_or_default();
+        let hash = canonicalization.hash_headers::<Sha256>(headers);
         self.inner
             .verify_strict(
-                &hash,
+                hash.as_ref(),
                 &ed25519_dalek::Signature::from_bytes(signature)
                     .map_err(|err| Error::CryptoError(err.to_string()))?,
             )
             .map_err(|_| Error::FailedVerification)
+    }
+}
+
+impl Writer for Sha1 {
+    fn write(&mut self, buf: &[u8]) {
+        self.update(buf);
+    }
+}
+
+impl Writer for Sha256 {
+    fn write(&mut self, buf: &[u8]) {
+        self.update(buf);
     }
 }
 

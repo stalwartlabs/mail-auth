@@ -8,10 +8,11 @@
  * except according to those terms.
  */
 
-use std::io;
-
 use crate::{
-    common::{crypto::Algorithm, headers::HeaderWriter},
+    common::{
+        crypto::Algorithm,
+        headers::{HeaderWriter, Writer},
+    },
     dkim::Canonicalization,
     AuthenticationResults,
 };
@@ -19,44 +20,44 @@ use crate::{
 use super::{ArcSet, ChainValidation, Seal, Signature};
 
 impl<'x> Signature<'x> {
-    pub(crate) fn write(&self, mut writer: impl io::Write, as_header: bool) -> io::Result<()> {
+    pub(crate) fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"arc-message-signature:"[..], &b" "[..]),
             _ => (&b"ARC-Message-Signature: "[..], &b"\r\n\t"[..]),
         };
-        writer.write_all(header)?;
-        writer.write_all(b"i=")?;
-        writer.write_all(self.i.to_string().as_bytes())?;
-        writer.write_all(b"; a=")?;
-        writer.write_all(match self.a {
+        writer.write(header);
+        writer.write(b"i=");
+        writer.write(self.i.to_string().as_bytes());
+        writer.write(b"; a=");
+        writer.write(match self.a {
             Algorithm::RsaSha256 => b"rsa-sha256",
             Algorithm::RsaSha1 => b"rsa-sha1",
             Algorithm::Ed25519Sha256 => b"ed25519-sha256",
-        })?;
+        });
         for (tag, value) in [(&b"; s="[..], &self.s), (&b"; d="[..], &self.d)] {
-            writer.write_all(tag)?;
-            writer.write_all(value.as_bytes())?;
+            writer.write(tag);
+            writer.write(value.as_bytes());
         }
-        writer.write_all(b"; c=")?;
-        self.ch.serialize_name(&mut writer)?;
-        writer.write_all(b"/")?;
-        self.cb.serialize_name(&mut writer)?;
+        writer.write(b"; c=");
+        self.ch.serialize_name(writer);
+        writer.write(b"/");
+        self.cb.serialize_name(writer);
 
-        writer.write_all(b";")?;
-        writer.write_all(new_line)?;
+        writer.write(b";");
+        writer.write(new_line);
 
         let mut bw = 1;
         for (num, h) in self.h.iter().enumerate() {
             if bw + h.len() + 1 >= 76 {
-                writer.write_all(new_line)?;
+                writer.write(new_line);
                 bw = 1;
             }
             if num > 0 {
-                bw += writer.write(b":")?;
+                writer.write_len(b":", &mut bw);
             } else {
-                bw += writer.write(b"h=")?;
+                writer.write_len(b"h=", &mut bw);
             }
-            bw += writer.write(h.as_bytes())?;
+            writer.write_len(h.as_bytes(), &mut bw);
         }
 
         for (tag, value) in [
@@ -66,133 +67,126 @@ impl<'x> Signature<'x> {
         ] {
             if value > 0 {
                 let value = value.to_string();
-                bw += writer.write(b";")?;
+                writer.write_len(b";", &mut bw);
                 if bw + tag.len() + value.len() >= 76 {
-                    writer.write_all(new_line)?;
+                    writer.write(new_line);
                     bw = 1;
                 } else {
-                    bw += writer.write(b" ")?;
+                    writer.write_len(b" ", &mut bw);
                 }
 
-                bw += writer.write(tag)?;
-                bw += writer.write(value.as_bytes())?;
+                writer.write_len(tag, &mut bw);
+                writer.write_len(value.as_bytes(), &mut bw);
             }
         }
 
         for (tag, value) in [(&b"; bh="[..], &self.bh), (&b"; b="[..], &self.b)] {
-            bw += writer.write(tag)?;
+            writer.write_len(tag, &mut bw);
             for &byte in value {
-                bw += writer.write(&[byte])?;
+                writer.write_len(&[byte], &mut bw);
                 if bw >= 76 {
-                    writer.write_all(new_line)?;
+                    writer.write(new_line);
                     bw = 1;
                 }
             }
         }
 
-        writer.write_all(b";")?;
+        writer.write(b";");
         if as_header {
-            writer.write_all(b"\r\n")?;
+            writer.write(b"\r\n");
         }
-        Ok(())
     }
 }
 
 impl<'x> Seal<'x> {
-    pub(crate) fn write(&self, mut writer: impl io::Write, as_header: bool) -> io::Result<()> {
+    pub(crate) fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = if !as_header {
             (&b"arc-seal:"[..], &b" "[..])
         } else {
             (&b"ARC-Seal: "[..], &b"\r\n\t"[..])
         };
 
-        writer.write_all(header)?;
-        writer.write_all(b"i=")?;
-        writer.write_all(self.i.to_string().as_bytes())?;
-        writer.write_all(b"; a=")?;
-        writer.write_all(match self.a {
+        writer.write(header);
+        writer.write(b"i=");
+        writer.write(self.i.to_string().as_bytes());
+        writer.write(b"; a=");
+        writer.write(match self.a {
             Algorithm::RsaSha256 => b"rsa-sha256",
             Algorithm::RsaSha1 => b"rsa-sha1",
             Algorithm::Ed25519Sha256 => b"ed25519-sha256",
-        })?;
+        });
         for (tag, value) in [(&b"; s="[..], &self.s), (&b"; d="[..], &self.d)] {
-            writer.write_all(tag)?;
-            writer.write_all(value.as_bytes())?;
+            writer.write(tag);
+            writer.write(value.as_bytes());
         }
-        writer.write_all(b"; cv=")?;
-        writer.write_all(match self.cv {
+        writer.write(b"; cv=");
+        writer.write(match self.cv {
             ChainValidation::None => b"none",
             ChainValidation::Fail => b"fail",
             ChainValidation::Pass => b"pass",
-        })?;
+        });
 
-        writer.write_all(b";")?;
-        writer.write_all(new_line)?;
+        writer.write(b";");
+        writer.write(new_line);
 
         let mut bw = 1;
         if self.t > 0 {
-            bw += writer.write(b"t=")?;
-            bw += writer.write(self.t.to_string().as_bytes())?;
-            bw += writer.write(b"; ")?;
+            writer.write_len(b"t=", &mut bw);
+            writer.write_len(self.t.to_string().as_bytes(), &mut bw);
+            writer.write_len(b"; ", &mut bw);
         }
 
-        bw += writer.write(b"b=")?;
+        writer.write_len(b"b=", &mut bw);
         for &byte in &self.b {
-            bw += writer.write(&[byte])?;
+            writer.write_len(&[byte], &mut bw);
             if bw >= 76 {
-                writer.write_all(new_line)?;
+                writer.write(new_line);
                 bw = 1;
             }
         }
 
-        writer.write_all(b";")?;
+        writer.write(b";");
         if as_header {
-            writer.write_all(b"\r\n")?;
+            writer.write(b"\r\n");
         }
-        Ok(())
     }
 }
 
 impl<'x> AuthenticationResults<'x> {
-    pub(crate) fn write(
-        &self,
-        mut writer: impl io::Write,
-        i: u32,
-        as_header: bool,
-    ) -> io::Result<()> {
-        writer.write_all(if !as_header {
+    pub(crate) fn write(&self, writer: &mut impl Writer, i: u32, as_header: bool) {
+        writer.write(if !as_header {
             b"arc-authentication-results:"
         } else {
             b"ARC-Authentication-Results: "
-        })?;
-        writer.write_all(b"i=")?;
-        writer.write_all(i.to_string().as_bytes())?;
-        writer.write_all(b"; ")?;
-        writer.write_all(self.hostname.as_bytes())?;
+        });
+        writer.write(b"i=");
+        writer.write(i.to_string().as_bytes());
+        writer.write(b"; ");
+        writer.write(self.hostname.as_bytes());
         if !as_header {
             let mut last_is_space = false;
             for &ch in self.auth_results.as_bytes() {
                 if !ch.is_ascii_whitespace() {
                     if last_is_space {
-                        writer.write_all(&[b' '])?;
+                        writer.write(&[b' ']);
                         last_is_space = false;
                     }
-                    writer.write_all(&[ch])?;
+                    writer.write(&[ch]);
                 } else {
                     last_is_space = true;
                 }
             }
         } else {
-            writer.write_all(self.auth_results.as_bytes())?;
+            writer.write(self.auth_results.as_bytes());
         }
-        writer.write_all(b"\r\n")
+        writer.write(b"\r\n");
     }
 }
 
 impl<'x> HeaderWriter for ArcSet<'x> {
-    fn write_header(&self, mut writer: impl io::Write) -> io::Result<()> {
-        self.seal.write(&mut writer, true)?;
-        self.signature.write(&mut writer, true)?;
-        self.results.write(&mut writer, self.seal.i, true)
+    fn write_header(&self, writer: &mut impl Writer) {
+        self.seal.write(writer, true);
+        self.signature.write(writer, true);
+        self.results.write(writer, self.seal.i, true);
     }
 }

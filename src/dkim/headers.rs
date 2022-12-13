@@ -8,89 +8,86 @@
  * except according to those terms.
  */
 
-use std::{
-    fmt::{Display, Formatter},
-    io,
-};
+use std::fmt::{Display, Formatter};
 
-use crate::common::headers::HeaderWriter;
+use crate::common::headers::{HeaderWriter, Writer};
 
 use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
 
 impl<'x> Signature<'x> {
-    pub(crate) fn write(&self, mut writer: impl io::Write, as_header: bool) -> io::Result<()> {
+    pub(crate) fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"dkim-signature:"[..], &b" "[..]),
             _ => (&b"DKIM-Signature: "[..], &b"\r\n\t"[..]),
         };
-        writer.write_all(header)?;
-        writer.write_all(b"v=1; a=")?;
-        writer.write_all(match self.a {
+        writer.write(header);
+        writer.write(b"v=1; a=");
+        writer.write(match self.a {
             Algorithm::RsaSha256 => b"rsa-sha256",
             Algorithm::RsaSha1 => b"rsa-sha1",
             Algorithm::Ed25519Sha256 => b"ed25519-sha256",
-        })?;
+        });
         for (tag, value) in [(&b"; s="[..], &self.s), (&b"; d="[..], &self.d)] {
-            writer.write_all(tag)?;
-            writer.write_all(value.as_bytes())?;
+            writer.write(tag);
+            writer.write(value.as_bytes());
         }
-        writer.write_all(b"; c=")?;
-        self.ch.serialize_name(&mut writer)?;
-        writer.write_all(b"/")?;
-        self.cb.serialize_name(&mut writer)?;
+        writer.write(b"; c=");
+        self.ch.serialize_name(writer);
+        writer.write(b"/");
+        self.cb.serialize_name(writer);
 
         if let Some(atps) = &self.atps {
-            writer.write_all(b"; atps=")?;
-            writer.write_all(atps.as_bytes())?;
-            writer.write_all(b"; atpsh=")?;
-            writer.write_all(match self.atpsh {
+            writer.write(b"; atps=");
+            writer.write(atps.as_bytes());
+            writer.write(b"; atpsh=");
+            writer.write(match self.atpsh {
                 Some(HashAlgorithm::Sha256) => b"sha256",
                 Some(HashAlgorithm::Sha1) => b"sha1",
                 _ => b"none",
-            })?;
+            });
         }
         if self.r {
-            writer.write_all(b"; r=y")?;
+            writer.write(b"; r=y");
         }
 
-        writer.write_all(b";")?;
-        writer.write_all(new_line)?;
+        writer.write(b";");
+        writer.write(new_line);
 
         let mut bw = 1;
         for (num, h) in self.h.iter().enumerate() {
             if bw + h.len() + 1 >= 76 {
-                writer.write_all(new_line)?;
+                writer.write(new_line);
                 bw = 1;
             }
             if num > 0 {
-                bw += writer.write(b":")?;
+                writer.write_len(b":", &mut bw);
             } else {
-                bw += writer.write(b"h=")?;
+                writer.write_len(b"h=", &mut bw);
             }
-            bw += writer.write(h.as_bytes())?;
+            writer.write_len(h.as_bytes(), &mut bw);
         }
 
         if !self.i.is_empty() {
             if bw + self.i.len() + 3 >= 76 {
-                writer.write_all(b";")?;
-                writer.write_all(new_line)?;
+                writer.write(b";");
+                writer.write(new_line);
                 bw = 1;
             } else {
-                bw += writer.write(b"; ")?;
+                writer.write_len(b"; ", &mut bw);
             }
-            bw += writer.write(b"i=")?;
+            writer.write_len(b"i=", &mut bw);
 
             for &ch in self.i.as_bytes().iter() {
                 match ch {
                     0..=0x20 | b';' | 0x7f..=u8::MAX => {
-                        bw += writer.write(format!("={:02X}", ch).as_bytes())?;
+                        writer.write_len(format!("={:02X}", ch).as_bytes(), &mut bw);
                     }
                     _ => {
-                        bw += writer.write(&[ch])?;
+                        writer.write_len(&[ch], &mut bw);
                     }
                 }
                 if bw >= 76 {
-                    writer.write_all(new_line)?;
+                    writer.write(new_line);
                     bw = 1;
                 }
             }
@@ -103,48 +100,47 @@ impl<'x> Signature<'x> {
         ] {
             if value > 0 {
                 let value = value.to_string();
-                bw += writer.write(b";")?;
+                writer.write_len(b";", &mut bw);
                 if bw + tag.len() + value.len() >= 76 {
-                    writer.write_all(new_line)?;
+                    writer.write(new_line);
                     bw = 1;
                 } else {
-                    bw += writer.write(b" ")?;
+                    writer.write_len(b" ", &mut bw);
                 }
 
-                bw += writer.write(tag)?;
-                bw += writer.write(value.as_bytes())?;
+                writer.write_len(tag, &mut bw);
+                writer.write_len(value.as_bytes(), &mut bw);
             }
         }
 
         for (tag, value) in [(&b"; bh="[..], &self.bh), (&b"; b="[..], &self.b)] {
-            bw += writer.write(tag)?;
+            writer.write_len(tag, &mut bw);
             for &byte in value {
-                bw += writer.write(&[byte])?;
+                writer.write_len(&[byte], &mut bw);
                 if bw >= 76 {
-                    writer.write_all(new_line)?;
+                    writer.write(new_line);
                     bw = 1;
                 }
             }
         }
 
-        writer.write_all(b";")?;
+        writer.write(b";");
         if as_header {
-            writer.write_all(b"\r\n")?;
+            writer.write(b"\r\n");
         }
-        Ok(())
     }
 }
 
 impl<'x> HeaderWriter for Signature<'x> {
-    fn write_header(&self, writer: impl io::Write) -> io::Result<()> {
-        self.write(writer, true)
+    fn write_header(&self, writer: &mut impl Writer) {
+        self.write(writer, true);
     }
 }
 
 impl<'x> Display for Signature<'x> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::new();
-        self.write(&mut buf, false).map_err(|_| std::fmt::Error)?;
+        self.write(&mut buf, false);
         f.write_str(&String::from_utf8(buf).map_err(|_| std::fmt::Error)?)
     }
 }

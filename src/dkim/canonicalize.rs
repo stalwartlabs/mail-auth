@@ -8,19 +8,16 @@
  * except according to those terms.
  */
 
-use std::{
-    borrow::Cow,
-    io::{self},
-};
+use std::borrow::Cow;
 
 use sha1::Digest;
 
-use crate::common::headers::HeaderIterator;
+use crate::common::headers::{HeaderIterator, Writer};
 
 use super::{Canonicalization, Signature};
 
 impl Canonicalization {
-    pub fn canonicalize_body(&self, body: &[u8], mut hasher: impl io::Write) -> io::Result<()> {
+    pub fn canonicalize_body(&self, body: &[u8], hasher: &mut impl Writer) {
         let mut crlf_seq = 0;
 
         match self {
@@ -31,7 +28,7 @@ impl Canonicalization {
                     match ch {
                         b' ' | b'\t' => {
                             while crlf_seq > 0 {
-                                let _ = hasher.write(b"\r\n")?;
+                                hasher.write(b"\r\n");
                                 crlf_seq -= 1;
                             }
                         }
@@ -41,15 +38,15 @@ impl Canonicalization {
                         b'\r' => {}
                         _ => {
                             while crlf_seq > 0 {
-                                let _ = hasher.write(b"\r\n")?;
+                                hasher.write(b"\r\n");
                                 crlf_seq -= 1;
                             }
 
                             if last_ch == b' ' || last_ch == b'\t' {
-                                let _ = hasher.write(b" ")?;
+                                hasher.write(b" ");
                             }
 
-                            let _ = hasher.write(&[ch])?;
+                            hasher.write(&[ch]);
                         }
                     }
 
@@ -65,78 +62,70 @@ impl Canonicalization {
                         b'\r' => {}
                         _ => {
                             while crlf_seq > 0 {
-                                let _ = hasher.write(b"\r\n")?;
+                                hasher.write(b"\r\n");
                                 crlf_seq -= 1;
                             }
-                            let _ = hasher.write(&[ch])?;
+                            hasher.write(&[ch]);
                         }
                     }
                 }
             }
         }
 
-        hasher.write_all(b"\r\n")
+        hasher.write(b"\r\n");
     }
 
     pub fn canonicalize_headers<'x>(
         &self,
         headers: &mut dyn Iterator<Item = (&'x [u8], &'x [u8])>,
-        mut hasher: impl io::Write,
-    ) -> io::Result<()> {
+        hasher: &mut impl Writer,
+    ) {
         match self {
             Canonicalization::Relaxed => {
                 for (name, value) in headers {
                     for &ch in name {
                         if !ch.is_ascii_whitespace() {
-                            let _ = hasher.write(&[ch.to_ascii_lowercase()])?;
+                            hasher.write(&[ch.to_ascii_lowercase()]);
                         }
                     }
-                    let _ = hasher.write(b":")?;
-                    let mut bytes_written = 0;
+                    hasher.write(b":");
+                    let mut bw = 0;
                     let mut last_ch = 0;
 
                     for &ch in value {
                         if !ch.is_ascii_whitespace() {
-                            if [b' ', b'\t'].contains(&last_ch) && bytes_written > 0 {
-                                bytes_written += hasher.write(b" ")?;
+                            if [b' ', b'\t'].contains(&last_ch) && bw > 0 {
+                                hasher.write_len(b" ", &mut bw);
                             }
-                            bytes_written += hasher.write(&[ch])?;
+                            hasher.write_len(&[ch], &mut bw);
                         }
                         last_ch = ch;
                     }
                     if last_ch == b'\n' {
-                        let _ = hasher.write(b"\r\n");
+                        hasher.write(b"\r\n");
                     }
                 }
             }
             Canonicalization::Simple => {
                 for (name, value) in headers {
-                    let _ = hasher.write(name)?;
-                    let _ = hasher.write(b":")?;
-                    let _ = hasher.write(value)?;
+                    hasher.write(name);
+                    hasher.write(b":");
+                    hasher.write(value);
                 }
             }
         }
-
-        Ok(())
     }
 
-    pub fn hash_headers<'x, T>(
+    pub fn hash_headers<'x, T: Digest + Writer>(
         &self,
         headers: &mut dyn Iterator<Item = (&'x [u8], &'x [u8])>,
-    ) -> io::Result<Vec<u8>>
-    where
-        T: Digest + io::Write,
-    {
+    ) -> impl AsRef<[u8]> {
         let mut hasher = T::new();
-        self.canonicalize_headers(headers, &mut hasher)?;
-        Ok(hasher.finalize().to_vec())
+        self.canonicalize_headers(headers, &mut hasher);
+        hasher.finalize()
     }
 
-    pub fn hash_body<T>(&self, body: &[u8], l: u64) -> io::Result<Vec<u8>>
-    where
-        T: Digest + io::Write,
-    {
+    pub fn hash_body<T: Digest + Writer>(&self, body: &[u8], l: u64) -> impl AsRef<[u8]> {
         let mut hasher = T::new();
         self.canonicalize_body(
             if l == 0 || body.is_empty() {
@@ -145,15 +134,15 @@ impl Canonicalization {
                 &body[..std::cmp::min(l as usize, body.len())]
             },
             &mut hasher,
-        )?;
-        Ok(hasher.finalize().to_vec())
+        );
+        hasher.finalize()
     }
 
-    pub fn serialize_name(&self, mut writer: impl io::Write) -> io::Result<()> {
-        writer.write_all(match self {
+    pub fn serialize_name(&self, writer: &mut impl Writer) {
+        writer.write(match self {
             Canonicalization::Relaxed => b"relaxed",
             Canonicalization::Simple => b"simple",
-        })
+        });
     }
 }
 
@@ -162,9 +151,9 @@ impl<'x> Signature<'x> {
     pub(crate) fn canonicalize(
         &self,
         message: &'x [u8],
-        header_hasher: impl io::Write,
-        body_hasher: impl io::Write,
-    ) -> crate::Result<(usize, Vec<Cow<'x, str>>)> {
+        header_hasher: &mut impl Writer,
+        body_hasher: &mut impl Writer,
+    ) -> (usize, Vec<Cow<'x, str>>) {
         let mut headers_it = HeaderIterator::new(message);
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
@@ -188,8 +177,8 @@ impl<'x> Signature<'x> {
             .unwrap_or_default();
         let body_len = body.len();
         self.ch
-            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher)?;
-        self.cb.canonicalize_body(body, body_hasher)?;
+            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher);
+        self.cb.canonicalize_body(body, body_hasher);
 
         // Add any missing headers
         signed_headers.reverse();
@@ -199,7 +188,7 @@ impl<'x> Signature<'x> {
             }
         }
 
-        Ok((body_len, signed_headers))
+        (body_len, signed_headers)
     }
 }
 
@@ -272,11 +261,8 @@ mod test {
                 let mut body = Vec::new();
 
                 canonicalization
-                    .canonicalize_headers(&mut parsed_headers.clone().into_iter(), &mut headers)
-                    .unwrap();
-                canonicalization
-                    .canonicalize_body(raw_body, &mut body)
-                    .unwrap();
+                    .canonicalize_headers(&mut parsed_headers.clone().into_iter(), &mut headers);
+                canonicalization.canonicalize_body(raw_body, &mut body);
 
                 assert_eq!(expected_headers, String::from_utf8(headers).unwrap());
                 assert_eq!(expected_body, String::from_utf8(body).unwrap());

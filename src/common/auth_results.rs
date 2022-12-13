@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, fmt::Write, io, net::IpAddr};
+use std::{borrow::Cow, fmt::Write, net::IpAddr};
 
 use mail_builder::encoders::base64::base64_encode;
 
@@ -17,7 +17,7 @@ use crate::{
     ReceivedSpf, SpfOutput, SpfResult,
 };
 
-use super::headers::HeaderWriter;
+use super::headers::{HeaderWriter, Writer};
 
 impl<'x> AuthenticationResults<'x> {
     pub fn new(hostname: &'x str) -> Self {
@@ -118,23 +118,23 @@ impl<'x> AuthenticationResults<'x> {
 }
 
 impl<'x> HeaderWriter for AuthenticationResults<'x> {
-    fn write_header(&self, mut writer: impl io::Write) -> io::Result<()> {
-        writer.write_all(b"Authentication-Results: ")?;
-        writer.write_all(self.hostname.as_bytes())?;
+    fn write_header(&self, writer: &mut impl Writer) {
+        writer.write(b"Authentication-Results: ");
+        writer.write(self.hostname.as_bytes());
         if !self.auth_results.is_empty() {
-            writer.write_all(self.auth_results.as_bytes())?;
+            writer.write(self.auth_results.as_bytes());
         } else {
-            writer.write_all(b"; none")?;
+            writer.write(b"; none");
         }
-        writer.write_all(b"\r\n")
+        writer.write(b"\r\n");
     }
 }
 
 impl HeaderWriter for ReceivedSpf {
-    fn write_header(&self, mut writer: impl io::Write) -> io::Result<()> {
-        writer.write_all(b"Received-SPF: ")?;
-        writer.write_all(self.received_spf.as_bytes())?;
-        writer.write_all(b"\r\n")
+    fn write_header(&self, writer: &mut impl Writer) {
+        writer.write(b"Received-SPF: ");
+        writer.write(self.received_spf.as_bytes());
+        writer.write(b"\r\n");
     }
 }
 
