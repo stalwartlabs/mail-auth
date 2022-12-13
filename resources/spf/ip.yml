@@ -20,7 +20,7 @@ tests:
     expect: pass
   - domain: test.org
     sender: sender@test.org
-    ip: ::10.1.2.3
+    ip: ::ffff:10.1.2.3
     expect: pass
   - domain: test.org
     sender: sender@test.org
