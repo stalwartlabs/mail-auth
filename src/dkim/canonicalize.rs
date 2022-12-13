@@ -119,13 +119,13 @@ impl Canonicalization {
     pub fn hash_headers<'x, T: Digest + Writer>(
         &self,
         headers: &mut dyn Iterator<Item = (&'x [u8], &'x [u8])>,
-    ) -> Vec<u8> {
+    ) -> impl AsRef<[u8]> {
         let mut hasher = T::new();
         self.canonicalize_headers(headers, &mut hasher);
-        hasher.finalize().to_vec()
+        hasher.finalize()
     }
 
-    pub fn hash_body<T: Digest + Writer>(&self, body: &[u8], l: u64) -> Vec<u8> {
+    pub fn hash_body<T: Digest + Writer>(&self, body: &[u8], l: u64) -> impl AsRef<[u8]> {
         let mut hasher = T::new();
         self.canonicalize_body(
             if l == 0 || body.is_empty() {
@@ -135,7 +135,7 @@ impl Canonicalization {
             },
             &mut hasher,
         );
-        hasher.finalize().to_vec()
+        hasher.finalize()
     }
 
     pub fn serialize_name(&self, writer: &mut impl Writer) {
