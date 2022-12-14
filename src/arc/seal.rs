@@ -74,7 +74,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        set.signature.bh = base64_encode(body_hasher.finish().as_ref())?;
+        set.signature.bh = base64_encode(body_hasher.complete().as_ref())?;
         set.signature.t = now;
         set.signature.x = if set.signature.x > 0 {
             now + set.signature.x
@@ -90,7 +90,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         set.signature.write(&mut header_hasher, false);
 
         // Sign
-        let b = self.key.sign(header_hasher.finish())?;
+        let b = self.key.sign(header_hasher.complete())?;
         set.signature.b = base64_encode(&b)?;
 
         // Hash ARC chain
@@ -115,7 +115,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         set.seal.write(&mut header_hasher, false);
 
         // Seal
-        let b = self.key.sign(header_hasher.finish())?;
+        let b = self.key.sign(header_hasher.complete())?;
         set.seal.b = base64_encode(&b)?;
 
         Ok(set)

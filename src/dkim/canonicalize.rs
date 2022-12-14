@@ -121,7 +121,7 @@ impl Canonicalization {
     ) -> impl AsRef<[u8]> {
         let mut hasher = T::hasher();
         self.canonicalize_headers(headers, &mut hasher);
-        hasher.finish()
+        hasher.complete()
     }
 
     pub fn hash_body<T: HashImpl>(&self, body: &[u8], l: u64) -> impl AsRef<[u8]> {
@@ -134,7 +134,7 @@ impl Canonicalization {
             },
             &mut hasher,
         );
-        hasher.finish()
+        hasher.complete()
     }
 
     pub fn serialize_name(&self, writer: &mut impl Writer) {

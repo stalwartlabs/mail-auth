@@ -48,7 +48,7 @@ impl VerifyingKeyType {
 }
 
 pub trait HashContext: Writer + Sized {
-    fn finish(self) -> HashOutput;
+    fn complete(self) -> HashOutput;
 }
 
 pub trait HashImpl {

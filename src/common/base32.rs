@@ -93,7 +93,7 @@ mod tests {
             let mut writer = Base32Writer::with_capacity(10);
             let mut hash = Sha1::hasher();
             hash.write(test.as_bytes());
-            writer.write(hash.finish().as_ref());
+            writer.write(hash.complete().as_ref());
             assert_eq!(writer.finalize(), expected_result);
         }
     }

@@ -219,13 +219,13 @@ impl HashImpl for Sha256 {
 }
 
 impl HashContext for sha1::Sha1 {
-    fn finish(self) -> HashOutput {
+    fn complete(self) -> HashOutput {
         HashOutput::Sha1(self.finalize())
     }
 }
 
 impl HashContext for sha2::Sha256 {
-    fn finish(self) -> HashOutput {
+    fn complete(self) -> HashOutput {
         HashOutput::Sha256(self.finalize())
     }
 }
