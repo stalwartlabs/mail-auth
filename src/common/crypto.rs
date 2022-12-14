@@ -134,26 +134,26 @@ impl VerifyingKeyType {
     pub(crate) fn verifying_key(
         &self,
         bytes: &[u8],
-    ) -> Result<Box<dyn VerifyingKey + Sync + Send>> {
-        Ok(match self {
-            Self::Rsa => {
-                let inner =
-                    <rsa::RsaPublicKey as rsa::pkcs8::DecodePublicKey>::from_public_key_der(bytes)
-                        .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(bytes))
-                        .map_err(|err| Error::CryptoError(err.to_string()))?;
-
-                Box::new(RsaPublicKey { inner }) as Box<dyn VerifyingKey + Sync + Send>
-            }
-            Self::Ed25519 => Box::new(Ed25519PublicKey {
-                inner: ed25519_dalek::PublicKey::from_bytes(bytes)
-                    .map_err(|err| Error::CryptoError(err.to_string()))?,
-            }),
-        })
+    ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
+        match self {
+            Self::Rsa => RsaPublicKey::verifying_key_from_bytes(bytes),
+            Self::Ed25519 => Ed25519PublicKey::verifying_key_from_bytes(bytes),
+        }
     }
 }
 
 pub(crate) struct RsaPublicKey {
     inner: rsa::RsaPublicKey,
+}
+
+impl RsaPublicKey {
+    fn verifying_key_from_bytes(bytes: &[u8]) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
+        Ok(Box::new(RsaPublicKey {
+            inner: <rsa::RsaPublicKey as rsa::pkcs8::DecodePublicKey>::from_public_key_der(bytes)
+                .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(bytes))
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+        }))
+    }
 }
 
 impl VerifyingKey for RsaPublicKey {
@@ -192,6 +192,15 @@ impl VerifyingKey for RsaPublicKey {
 
 pub(crate) struct Ed25519PublicKey {
     inner: ed25519_dalek::PublicKey,
+}
+
+impl Ed25519PublicKey {
+    fn verifying_key_from_bytes(bytes: &[u8]) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
+        Ok(Box::new(Ed25519PublicKey {
+            inner: ed25519_dalek::PublicKey::from_bytes(bytes)
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+        }))
+    }
 }
 
 impl VerifyingKey for Ed25519PublicKey {
