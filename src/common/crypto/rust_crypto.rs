@@ -236,12 +236,12 @@ impl HashImpl for Sha256 {
 
 impl HashContext for sha1::Sha1 {
     fn complete(self) -> HashOutput {
-        HashOutput::Sha1(self.finalize())
+        HashOutput::RustCryptoSha1(self.finalize())
     }
 }
 
 impl HashContext for sha2::Sha256 {
     fn complete(self) -> HashOutput {
-        HashOutput::Sha256(self.finalize())
+        HashOutput::RustCryptoSha256(self.finalize())
     }
 }
