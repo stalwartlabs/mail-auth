@@ -8,9 +8,10 @@
  * except according to those terms.
  */
 
-use sha1::Digest;
-
-use crate::common::headers::{HeaderIterator, Writer};
+use crate::common::{
+    crypto::{HashContext, HashImpl},
+    headers::{HeaderIterator, Writer},
+};
 
 use super::{Canonicalization, Signature};
 
@@ -114,17 +115,17 @@ impl Canonicalization {
         }
     }
 
-    pub fn hash_headers<'x, T: Digest + Writer>(
+    pub fn hash_headers<'x, T: HashImpl>(
         &self,
         headers: &mut dyn Iterator<Item = (&'x [u8], &'x [u8])>,
     ) -> impl AsRef<[u8]> {
-        let mut hasher = T::new();
+        let mut hasher = T::hasher();
         self.canonicalize_headers(headers, &mut hasher);
-        hasher.finalize()
+        hasher.finish()
     }
 
-    pub fn hash_body<T: Digest + Writer>(&self, body: &[u8], l: u64) -> impl AsRef<[u8]> {
-        let mut hasher = T::new();
+    pub fn hash_body<T: HashImpl>(&self, body: &[u8], l: u64) -> impl AsRef<[u8]> {
+        let mut hasher = T::hasher();
         self.canonicalize_body(
             if l == 0 || body.is_empty() {
                 body
@@ -133,7 +134,7 @@ impl Canonicalization {
             },
             &mut hasher,
         );
-        hasher.finalize()
+        hasher.finish()
     }
 
     pub fn serialize_name(&self, writer: &mut impl Writer) {

@@ -78,9 +78,11 @@ impl Writer for Base32Writer {
 
 #[cfg(test)]
 mod tests {
-    use sha1::{Digest, Sha1};
-
-    use crate::common::{base32::Base32Writer, headers::Writer};
+    use crate::common::{
+        base32::Base32Writer,
+        crypto::{HashContext, HashImpl, Sha1},
+        headers::Writer,
+    };
 
     #[test]
     fn base32_hash() {
@@ -89,9 +91,9 @@ mod tests {
             ("two.example.net", "ZTZGRRV3F45A4U6HLDKBF3ZCOW4V2AJX"),
         ] {
             let mut writer = Base32Writer::with_capacity(10);
-            let mut hash = Sha1::new();
-            hash.update(test.as_bytes());
-            writer.write(&hash.finalize()[..]);
+            let mut hash = Sha1::hasher();
+            hash.write(test.as_bytes());
+            writer.write(hash.finish().as_ref());
             assert_eq!(writer.finalize(), expected_result);
         }
     }

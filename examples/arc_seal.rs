@@ -10,10 +10,12 @@
 
 use mail_auth::{
     arc::ArcSealer,
-    common::{crypto::RsaKey, headers::HeaderWriter},
+    common::{
+        crypto::{RsaKey, Sha256},
+        headers::HeaderWriter,
+    },
     AuthenticatedMessage, AuthenticationResults, Resolver,
 };
-use sha2::Sha256;
 
 const TEST_MESSAGE: &str = include_str!("../resources/arc/001.txt");
 

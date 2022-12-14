@@ -76,12 +76,11 @@ mod test {
     use std::time::{Duration, Instant};
 
     use mail_parser::decoders::base64::base64_decode;
-    use sha2::Sha256;
     use trust_dns_resolver::proto::op::ResponseCode;
 
     use crate::{
         common::{
-            crypto::{Ed25519Key, RsaKey},
+            crypto::{Ed25519Key, RsaKey, Sha256},
             parse::TxtRecordParser,
             verify::DomainKey,
         },

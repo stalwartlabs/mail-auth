@@ -1,4 +1,4 @@
-use std::{io, marker::PhantomData};
+use std::marker::PhantomData;
 
 use ed25519_dalek::Signer;
 use rsa::{
@@ -6,20 +6,20 @@ use rsa::{
     pkcs8::{AssociatedOid, ObjectIdentifier},
     PaddingScheme, PublicKey as _, RsaPrivateKey,
 };
-use sha1::{digest::Output, Sha1};
-use sha2::{digest::Digest, Sha256};
+use sha1::digest::Output;
+use sha2::digest::Digest;
 
 use crate::{dkim::Canonicalization, Error, Result};
 
 use super::headers::Writer;
 
 pub trait SigningKey {
-    type Hasher: HashContext;
+    type Hasher: HashImpl;
 
     fn sign(&self, data: HashOutput) -> Result<Vec<u8>>;
 
-    fn hasher(&self) -> Self::Hasher {
-        Self::Hasher::new()
+    fn hasher(&self) -> <Self::Hasher as HashImpl>::Context {
+        <Self::Hasher as HashImpl>::hasher()
     }
 
     fn algorithm(&self) -> Algorithm;
@@ -31,7 +31,7 @@ pub struct RsaKey<T> {
     padding: PhantomData<T>,
 }
 
-impl<T: Digest + AssociatedOid + io::Write> RsaKey<T> {
+impl<T: HashImpl> RsaKey<T> {
     /// Creates a new RSA private key from a PKCS1 PEM string.
     pub fn from_pkcs1_pem(private_key_pem: &str) -> Result<Self> {
         let inner = RsaPrivateKey::from_pkcs1_pem(private_key_pem)
@@ -61,7 +61,7 @@ impl SigningKey for RsaKey<Sha1> {
     fn sign(&self, data: HashOutput) -> Result<Vec<u8>> {
         self.inner
             .sign(
-                PaddingScheme::new_pkcs1v15_sign::<Self::Hasher>(),
+                PaddingScheme::new_pkcs1v15_sign::<<Self::Hasher as HashImpl>::Context>(),
                 data.as_ref(),
             )
             .map_err(|err| Error::CryptoError(err.to_string()))
@@ -78,7 +78,7 @@ impl SigningKey for RsaKey<Sha256> {
     fn sign(&self, data: HashOutput) -> Result<Vec<u8>> {
         self.inner
             .sign(
-                PaddingScheme::new_pkcs1v15_sign::<Self::Hasher>(),
+                PaddingScheme::new_pkcs1v15_sign::<<Self::Hasher as HashImpl>::Context>(),
                 data.as_ref(),
             )
             .map_err(|err| Error::CryptoError(err.to_string()))
@@ -173,7 +173,7 @@ impl VerifyingKey for RsaPublicKey {
                 let hash = canonicalization.hash_headers::<Sha256>(headers);
                 self.inner
                     .verify(
-                        PaddingScheme::new_pkcs1v15_sign::<Sha256>(),
+                        PaddingScheme::new_pkcs1v15_sign::<sha2::Sha256>(),
                         hash.as_ref(),
                         signature,
                     )
@@ -183,7 +183,7 @@ impl VerifyingKey for RsaPublicKey {
                 let hash = canonicalization.hash_headers::<Sha1>(headers);
                 self.inner
                     .verify(
-                        PaddingScheme::new_pkcs1v15_sign::<Sha1>(),
+                        PaddingScheme::new_pkcs1v15_sign::<sha1::Sha1>(),
                         hash.as_ref(),
                         signature,
                     )
@@ -221,40 +221,59 @@ impl VerifyingKey for Ed25519PublicKey {
     }
 }
 
-impl Writer for Sha1 {
+impl Writer for sha1::Sha1 {
     fn write(&mut self, buf: &[u8]) {
         self.update(buf);
     }
 }
 
-impl Writer for Sha256 {
+impl Writer for sha2::Sha256 {
     fn write(&mut self, buf: &[u8]) {
         self.update(buf);
     }
 }
 
 pub trait HashContext: Writer + Sized {
-    fn new() -> Self;
     fn finish(self) -> HashOutput;
 }
 
-impl HashContext for Sha1 {
-    fn new() -> Self {
-        <Self as Digest>::new()
-    }
-
+impl HashContext for sha1::Sha1 {
     fn finish(self) -> HashOutput {
         HashOutput::Sha1(self.finalize())
     }
 }
 
-impl HashContext for Sha256 {
-    fn new() -> Self {
-        <Self as Digest>::new()
-    }
-
+impl HashContext for sha2::Sha256 {
     fn finish(self) -> HashOutput {
         HashOutput::Sha256(self.finalize())
+    }
+}
+
+pub trait HashImpl {
+    type Context: HashContext;
+
+    fn hasher() -> Self::Context;
+}
+
+#[derive(Clone, Copy)]
+pub struct Sha1;
+
+impl HashImpl for Sha1 {
+    type Context = sha1::Sha1;
+
+    fn hasher() -> Self::Context {
+        <Self::Context as Digest>::new()
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Sha256;
+
+impl HashImpl for Sha256 {
+    type Context = sha2::Sha256;
+
+    fn hasher() -> Self::Context {
+        <Self::Context as Digest>::new()
     }
 }
 
@@ -268,15 +287,15 @@ pub enum HashAlgorithm {
 impl HashAlgorithm {
     pub fn hash(&self, data: &[u8]) -> HashOutput {
         match self {
-            Self::Sha1 => HashOutput::Sha1(Sha1::digest(data)),
-            Self::Sha256 => HashOutput::Sha256(Sha256::digest(data)),
+            Self::Sha1 => HashOutput::Sha1(sha1::Sha1::digest(data)),
+            Self::Sha256 => HashOutput::Sha256(sha2::Sha256::digest(data)),
         }
     }
 }
 
 pub enum HashOutput {
-    Sha1(Output<Sha1>),
-    Sha256(Output<Sha256>),
+    Sha1(Output<sha1::Sha1>),
+    Sha256(Output<sha2::Sha256>),
 }
 
 impl AsRef<[u8]> for HashOutput {
@@ -293,8 +312,8 @@ impl TryFrom<&ObjectIdentifier> for HashAlgorithm {
 
     fn try_from(oid: &ObjectIdentifier) -> Result<Self> {
         match oid {
-            oid if oid == &Sha256::OID => Ok(HashAlgorithm::Sha256),
-            oid if oid == &Sha1::OID => Ok(HashAlgorithm::Sha1),
+            oid if oid == &sha2::Sha256::OID => Ok(HashAlgorithm::Sha256),
+            oid if oid == &sha1::Sha1::OID => Ok(HashAlgorithm::Sha1),
             _ => Err(Error::CryptoError("Unsupported hash algorithm".to_string())),
         }
     }

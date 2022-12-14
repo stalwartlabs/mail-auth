@@ -8,10 +8,8 @@
  * except according to those terms.
  */
 
-use sha2::Sha256;
-
 use crate::{
-    common::crypto::SigningKey,
+    common::crypto::{Sha256, SigningKey},
     dkim::{Canonicalization, Done, NeedDomain, NeedHeaders, NeedSelector},
 };
 

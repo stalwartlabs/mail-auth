@@ -11,11 +11,10 @@
 use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
-use sha2::Sha256;
 
 use crate::{
     common::{
-        crypto::{HashContext, SigningKey},
+        crypto::{HashContext, Sha256, SigningKey},
         headers::Writer,
     },
     dkim::{Canonicalization, Done},
@@ -169,12 +168,11 @@ mod test {
     use std::time::{Duration, Instant};
 
     use mail_parser::decoders::base64::base64_decode;
-    use sha2::Sha256;
 
     use crate::{
         arc::ArcSealer,
         common::{
-            crypto::{Ed25519Key, RsaKey, SigningKey},
+            crypto::{Ed25519Key, RsaKey, Sha256, SigningKey},
             headers::HeaderWriter,
             parse::TxtRecordParser,
             verify::DomainKey,
