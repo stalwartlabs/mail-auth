@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use std::{io::Write, time::SystemTime};
+use std::time::SystemTime;
 
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
@@ -16,6 +16,7 @@ use sha2::Sha256;
 use crate::{
     common::{
         base32::Base32Writer,
+        headers::Writer,
         verify::{DomainKey, VerifySignature},
     },
     is_within_pct, AuthenticatedMessage, DkimOutput, DkimResult, Error, Resolver,
@@ -135,14 +136,14 @@ impl Resolver {
                             let mut writer = Base32Writer::with_capacity(40);
                             let mut hash = Sha256::new();
                             hash.update(signature.d.as_bytes());
-                            writer.write_all(&hash.finalize()[..]).ok();
+                            writer.write(hash.finalize().as_ref());
                             writer.finalize()
                         }
                         Some(HashAlgorithm::Sha1) => {
                             let mut writer = Base32Writer::with_capacity(40);
                             let mut hash = Sha1::new();
                             hash.update(signature.d.as_bytes());
-                            writer.write_all(&hash.finalize()[..]).ok();
+                            writer.write(hash.finalize().as_ref());
                             writer.finalize()
                         }
                         None => signature.d.to_string(),
