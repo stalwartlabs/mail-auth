@@ -11,10 +11,12 @@
 use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
-use sha1::Digest;
 
 use super::{DkimSigner, Done, Signature};
-use crate::{common::crypto::SigningKey, Error};
+use crate::{
+    common::crypto::{HashContext, SigningKey},
+    Error,
+};
 
 impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a message.
@@ -44,7 +46,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
 
         // Create Signature
         let mut signature = self.template.clone();
-        signature.bh = base64_encode(&body_hasher.finalize())?;
+        signature.bh = base64_encode(&body_hasher.finish().as_ref())?;
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
@@ -60,7 +62,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         signature.write(&mut header_hasher, false);
 
         // Sign
-        let b = self.key.sign(&header_hasher.finalize())?;
+        let b = self.key.sign(header_hasher.finish())?;
 
         // Encode
         signature.b = base64_encode(&b)?;

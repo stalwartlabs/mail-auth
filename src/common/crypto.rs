@@ -14,9 +14,9 @@ use crate::{dkim::Canonicalization, Error, Result};
 use super::headers::Writer;
 
 pub trait SigningKey {
-    type Hasher: Digest + Writer;
+    type Hasher: HashContext;
 
-    fn sign(&self, data: &Output<Self::Hasher>) -> Result<Vec<u8>>;
+    fn sign(&self, data: HashOutput) -> Result<Vec<u8>>;
 
     fn hasher(&self) -> Self::Hasher {
         Self::Hasher::new()
@@ -58,9 +58,12 @@ impl<T: Digest + AssociatedOid + io::Write> RsaKey<T> {
 impl SigningKey for RsaKey<Sha1> {
     type Hasher = Sha1;
 
-    fn sign(&self, data: &Output<Self::Hasher>) -> Result<Vec<u8>> {
+    fn sign(&self, data: HashOutput) -> Result<Vec<u8>> {
         self.inner
-            .sign(PaddingScheme::new_pkcs1v15_sign::<Self::Hasher>(), data)
+            .sign(
+                PaddingScheme::new_pkcs1v15_sign::<Self::Hasher>(),
+                data.as_ref(),
+            )
             .map_err(|err| Error::CryptoError(err.to_string()))
     }
 
@@ -72,9 +75,12 @@ impl SigningKey for RsaKey<Sha1> {
 impl SigningKey for RsaKey<Sha256> {
     type Hasher = Sha256;
 
-    fn sign(&self, data: &Output<Self::Hasher>) -> Result<Vec<u8>> {
+    fn sign(&self, data: HashOutput) -> Result<Vec<u8>> {
         self.inner
-            .sign(PaddingScheme::new_pkcs1v15_sign::<Self::Hasher>(), data)
+            .sign(
+                PaddingScheme::new_pkcs1v15_sign::<Self::Hasher>(),
+                data.as_ref(),
+            )
             .map_err(|err| Error::CryptoError(err.to_string()))
     }
 
@@ -104,7 +110,7 @@ impl Ed25519Key {
 impl SigningKey for Ed25519Key {
     type Hasher = Sha256;
 
-    fn sign(&self, data: &Output<Self::Hasher>) -> Result<Vec<u8>> {
+    fn sign(&self, data: HashOutput) -> Result<Vec<u8>> {
         Ok(self.inner.sign(data.as_ref()).to_bytes().to_vec())
     }
 
@@ -224,6 +230,31 @@ impl Writer for Sha1 {
 impl Writer for Sha256 {
     fn write(&mut self, buf: &[u8]) {
         self.update(buf);
+    }
+}
+
+pub trait HashContext: Writer + Sized {
+    fn new() -> Self;
+    fn finish(self) -> HashOutput;
+}
+
+impl HashContext for Sha1 {
+    fn new() -> Self {
+        <Self as Digest>::new()
+    }
+
+    fn finish(self) -> HashOutput {
+        HashOutput::Sha1(self.finalize())
+    }
+}
+
+impl HashContext for Sha256 {
+    fn new() -> Self {
+        <Self as Digest>::new()
+    }
+
+    fn finish(self) -> HashOutput {
+        HashOutput::Sha256(self.finalize())
     }
 }
 

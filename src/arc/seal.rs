@@ -8,13 +8,16 @@
  * except according to those terms.
  */
 
-use std::{io::Write, time::SystemTime};
+use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
-use sha2::{Digest, Sha256};
+use sha2::Sha256;
 
 use crate::{
-    common::{crypto::SigningKey, headers::Writer},
+    common::{
+        crypto::{HashContext, SigningKey},
+        headers::Writer,
+    },
     dkim::{Canonicalization, Done},
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
 };
@@ -72,7 +75,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        set.signature.bh = base64_encode(&body_hasher.finalize())?;
+        set.signature.bh = base64_encode(body_hasher.finish().as_ref())?;
         set.signature.t = now;
         set.signature.x = if set.signature.x > 0 {
             now + set.signature.x
@@ -88,11 +91,11 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         set.signature.write(&mut header_hasher, false);
 
         // Sign
-        let b = self.key.sign(&header_hasher.finalize())?;
+        let b = self.key.sign(header_hasher.finish())?;
         set.signature.b = base64_encode(&b)?;
 
         // Hash ARC chain
-        let mut header_hasher = Sha256::new();
+        let mut header_hasher = self.key.hasher();
         if !arc_output.set.is_empty() {
             Canonicalization::Relaxed.canonicalize_headers(
                 &mut arc_output.set.iter().flat_map(|set| {
@@ -109,11 +112,11 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         // Hash ARC headers for the current instance
         set.results.write(&mut header_hasher, set.seal.i, false);
         set.signature.write(&mut header_hasher, false);
-        header_hasher.write_all(b"\r\n")?;
+        header_hasher.write(b"\r\n");
         set.seal.write(&mut header_hasher, false);
 
         // Seal
-        let b = self.key.sign(&header_hasher.finalize())?;
+        let b = self.key.sign(header_hasher.finish())?;
         set.seal.b = base64_encode(&b)?;
 
         Ok(set)
