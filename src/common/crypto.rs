@@ -1,11 +1,7 @@
 use std::marker::PhantomData;
 
 use ed25519_dalek::Signer;
-use rsa::{
-    pkcs1::DecodeRsaPrivateKey,
-    pkcs8::{AssociatedOid, ObjectIdentifier},
-    PaddingScheme, PublicKey as _, RsaPrivateKey,
-};
+use rsa::{pkcs1::DecodeRsaPrivateKey, PaddingScheme, PublicKey as _, RsaPrivateKey};
 use sha1::digest::Output;
 use sha2::digest::Digest;
 
@@ -303,18 +299,6 @@ impl AsRef<[u8]> for HashOutput {
         match self {
             Self::Sha1(output) => output.as_ref(),
             Self::Sha256(output) => output.as_ref(),
-        }
-    }
-}
-
-impl TryFrom<&ObjectIdentifier> for HashAlgorithm {
-    type Error = Error;
-
-    fn try_from(oid: &ObjectIdentifier) -> Result<Self> {
-        match oid {
-            oid if oid == &sha2::Sha256::OID => Ok(HashAlgorithm::Sha256),
-            oid if oid == &sha1::Sha1::OID => Ok(HashAlgorithm::Sha1),
-            _ => Err(Error::CryptoError("Unsupported hash algorithm".to_string())),
         }
     }
 }
