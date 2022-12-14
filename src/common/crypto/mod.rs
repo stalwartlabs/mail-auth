@@ -12,6 +12,13 @@ pub use rust_crypto::{Ed25519Key, RsaKey};
 #[cfg(feature = "rust-crypto")]
 pub(crate) use rust_crypto::{Ed25519PublicKey, RsaPublicKey};
 
+#[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+mod ring_impls;
+#[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+pub use ring_impls::{Ed25519Key, RsaKey};
+#[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+pub(crate) use ring_impls::{Ed25519PublicKey, RsaPublicKey};
+
 pub trait SigningKey {
     type Hasher: HashImpl;
 
@@ -50,6 +57,10 @@ impl VerifyingKeyType {
             #[cfg(feature = "rust-crypto")]
             Self::Rsa => RsaPublicKey::verifying_key_from_bytes(bytes),
             #[cfg(feature = "rust-crypto")]
+            Self::Ed25519 => Ed25519PublicKey::verifying_key_from_bytes(bytes),
+            #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+            Self::Rsa => RsaPublicKey::verifying_key_from_bytes(bytes),
+            #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
             Self::Ed25519 => Ed25519PublicKey::verifying_key_from_bytes(bytes),
         }
     }
@@ -93,12 +104,27 @@ impl HashAlgorithm {
                 data.write(&mut hasher);
                 HashOutput::RustCryptoSha256(hasher.finalize())
             }
+            #[cfg(all(feature = "ring", not(feature = "sha1")))]
+            Self::Sha1 => {
+                let mut hasher =
+                    ring::digest::Context::new(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY);
+                data.write(&mut hasher);
+                HashOutput::Ring(hasher.finish())
+            }
+            #[cfg(all(feature = "ring", not(feature = "sha2")))]
+            Self::Sha256 => {
+                let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
+                data.write(&mut hasher);
+                HashOutput::Ring(hasher.finish())
+            }
         }
     }
 }
 
 #[non_exhaustive]
 pub enum HashOutput {
+    #[cfg(feature = "ring")]
+    Ring(ring::digest::Digest),
     #[cfg(feature = "sha1")]
     RustCryptoSha1(Output<sha1::Sha1>),
     #[cfg(feature = "sha2")]
@@ -108,6 +134,8 @@ pub enum HashOutput {
 impl AsRef<[u8]> for HashOutput {
     fn as_ref(&self) -> &[u8] {
         match self {
+            #[cfg(feature = "ring")]
+            Self::Ring(output) => output.as_ref(),
             #[cfg(feature = "sha1")]
             Self::RustCryptoSha1(output) => output.as_ref(),
             #[cfg(feature = "sha2")]

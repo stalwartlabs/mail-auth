@@ -140,8 +140,15 @@ mod test {
     const ED25519_PUBLIC_KEY: &str =
         "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 
+    #[cfg(any(
+        feature = "rust-crypto",
+        all(feature = "ring", feature = "rustls-pemfile")
+    ))]
     #[test]
     fn dkim_sign() {
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(feature = "rust-crypto")]
         let pk = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let signature = DkimSigner::from_key(pk)
             .domain("stalw.art")
@@ -160,6 +167,7 @@ mod test {
                 311923920,
             )
             .unwrap();
+
         assert_eq!(
             concat!(
                 "dkim-signature:v=1; a=rsa-sha256; s=default; d=stalw.art; ",
@@ -177,6 +185,10 @@ mod test {
         );
     }
 
+    #[cfg(any(
+        feature = "rust-crypto",
+        all(feature = "ring", feature = "rustls-pemfile")
+    ))]
     #[tokio::test]
     async fn dkim_sign_verify() {
         let message = concat!(
@@ -202,9 +214,16 @@ mod test {
         );
 
         // Create private keys
+        #[cfg(feature = "rust-crypto")]
         let pk_ed = Ed25519Key::from_bytes(
             &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
             &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
+        )
+        .unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_ed = Ed25519Key::from_seed_and_public_key(
+            &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
+            &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
         )
         .unwrap();
 
@@ -230,7 +249,10 @@ mod test {
         }
 
         // Test RSA-SHA256 relaxed/relaxed
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -260,7 +282,10 @@ mod test {
         .await;
 
         // Test RSA-SHA256 simple/simple with duplicated headers
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -283,7 +308,10 @@ mod test {
         .await;
 
         // Test RSA-SHA256 simple/relaxed with fixed body length
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -300,7 +328,10 @@ mod test {
         .await;
 
         // Test AUID not matching domain
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -316,7 +347,10 @@ mod test {
         .await;
 
         // Test expired signature and reporting
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         let r = verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -337,7 +371,10 @@ mod test {
         assert_eq!(r.as_deref(), Some("dkim-failures@example.com"));
 
         // Verify ATPS (failure)
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -354,7 +391,10 @@ mod test {
         .await;
 
         // Verify ATPS (success)
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(any(test, feature = "test"))]
         resolver.txt_add(
             "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.".to_string(),
@@ -377,7 +417,10 @@ mod test {
         .await;
 
         // Verify ATPS (success - no hash)
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(any(test, feature = "test"))]
         resolver.txt_add(
             "example.com._atps.example.com.".to_string(),

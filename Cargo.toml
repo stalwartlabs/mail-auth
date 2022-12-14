@@ -29,7 +29,9 @@ mail-parser = { version = "0.8", git = "https://github.com/stalwartlabs/mail-par
 mail-builder = { version = "0.2.5", git = "https://github.com/stalwartlabs/mail-builder", features = ["ludicrous_mode"] }
 parking_lot = "0.12.0"
 quick-xml = "0.27.1"
+ring = { version = "0.16.20", optional = true }
 rsa = { version = "0.7.0", optional = true }
+rustls-pemfile = { version = "1", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha1 = { version = "0.10", features = ["oid"], optional = true }
@@ -39,3 +41,4 @@ zip = "0.6.3"
 
 [dev-dependencies]
 tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
+rustls-pemfile = "1"
