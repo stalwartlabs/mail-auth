@@ -150,13 +150,13 @@
 //!
 //!     // Verify HELO identity
 //!     let result = resolver
-//!         .verify_spf_helo("127.0.0.1".parse().unwrap(), "gmail.com")
+//!         .verify_spf_helo("127.0.0.1".parse().unwrap(), "gmail.com", "my-local-domain.org")
 //!         .await;
 //!     assert_eq!(result.result(), SpfResult::Fail);
 //!
 //!     // Verify MAIL-FROM identity
 //!     let result = resolver
-//!         .verify_spf_sender("::1".parse().unwrap(), "gmail.com", "sender@gmail.com")
+//!         .verify_spf_sender("::1".parse().unwrap(), "gmail.com", "my-local-domain.org", "sender@gmail.com")
 //!         .await;
 //!     assert_eq!(result.result(), SpfResult::Fail);
 //! ```
@@ -173,7 +173,7 @@
 //!
 //!     // Verify SPF MAIL-FROM identity
 //!     let spf_result = resolver
-//!         .verify_spf_sender("::1".parse().unwrap(), "example.org", "sender@example.org")
+//!         .verify_spf_sender("::1".parse().unwrap(), "example.org", "my-local-domain.org", "sender@example.org")
 //!         .await;
 //!
 //!     // Verify DMARC
@@ -275,6 +275,8 @@ pub mod dmarc;
 pub mod report;
 pub mod spf;
 
+pub use trust_dns_resolver;
+
 pub struct Resolver {
     pub(crate) resolver: TokioAsyncResolver,
     pub(crate) cache_txt: LruCache<String, Txt>,
@@ -282,8 +284,6 @@ pub struct Resolver {
     pub(crate) cache_ipv4: LruCache<String, Arc<Vec<Ipv4Addr>>>,
     pub(crate) cache_ipv6: LruCache<String, Arc<Vec<Ipv6Addr>>>,
     pub(crate) cache_ptr: LruCache<IpAddr, Arc<Vec<String>>>,
-    pub(crate) host_domain: String,
-    pub(crate) verify_policy: Policy,
 }
 
 #[derive(Clone)]
@@ -301,13 +301,6 @@ pub(crate) enum Txt {
 pub struct MX {
     exchange: String,
     preference: u16,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Policy {
-    Relaxed,
-    Strict,
-    VeryStrict,
 }
 
 #[derive(Debug, Clone)]

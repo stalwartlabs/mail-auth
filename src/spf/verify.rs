@@ -13,18 +13,24 @@ use std::{
     time::Instant,
 };
 
-use crate::{Error, Policy, Resolver, SpfOutput, SpfResult};
+use crate::{Error, Resolver, SpfOutput, SpfResult};
 
 use super::{Macro, Mechanism, Qualifier, Spf, Variables};
 
 impl Resolver {
     /// Verifies the SPF EHLO identity
-    pub async fn verify_spf_helo(&self, ip: IpAddr, helo_domain: &str) -> SpfOutput {
+    pub async fn verify_spf_helo(
+        &self,
+        ip: IpAddr,
+        helo_domain: &str,
+        host_domain: &str,
+    ) -> SpfOutput {
         if helo_domain.has_labels() {
             self.check_host(
                 ip,
                 helo_domain,
                 helo_domain,
+                host_domain,
                 &format!("postmaster@{}", helo_domain),
             )
             .await
@@ -38,29 +44,36 @@ impl Resolver {
         &self,
         ip: IpAddr,
         helo_domain: &str,
+        host_domain: &str,
         sender: &str,
     ) -> SpfOutput {
         self.check_host(
             ip,
             sender.rsplit_once('@').map_or(helo_domain, |(_, d)| d),
             helo_domain,
+            host_domain,
             sender,
         )
         .await
     }
 
     /// Verifies both the SPF EHLO and MAIL FROM identities
-    pub async fn verify_spf(&self, ip: IpAddr, helo_domain: &str, mail_from: &str) -> SpfOutput {
+    pub async fn verify_spf(
+        &self,
+        ip: IpAddr,
+        helo_domain: &str,
+        host_domain: &str,
+        mail_from: &str,
+    ) -> SpfOutput {
         // Verify HELO identity
-        let output = self.verify_spf_helo(ip, helo_domain).await;
-        match output.result() {
-            SpfResult::TempError | SpfResult::Pass => (),
-            SpfResult::None | SpfResult::PermError if self.verify_policy != Policy::VeryStrict => {}
-            _ => return output,
+        let output = self.verify_spf_helo(ip, helo_domain, host_domain).await;
+        if matches!(output.result(), SpfResult::Pass) {
+            // Verify MAIL FROM identity
+            self.verify_spf_sender(ip, helo_domain, host_domain, mail_from)
+                .await
+        } else {
+            output
         }
-
-        // Verify MAIL FROM identity
-        self.verify_spf_sender(ip, helo_domain, mail_from).await
     }
 
     #[allow(clippy::while_let_on_iterator)]
@@ -69,6 +82,7 @@ impl Resolver {
         ip: IpAddr,
         domain: &str,
         helo_domain: &str,
+        host_domain: &str,
         sender: &str,
     ) -> SpfOutput {
         let output = SpfOutput::new(domain.to_string());
@@ -84,7 +98,7 @@ impl Resolver {
             vars.set_sender(format!("postmaster@{}", domain).into_bytes());
         }
         vars.set_domain(domain.as_bytes());
-        vars.set_host_domain(self.host_domain.as_bytes());
+        vars.set_host_domain(host_domain.as_bytes());
         vars.set_helo_domain(helo_domain.as_bytes());
 
         let mut lookup_limit = LookupLimit::new();
@@ -625,7 +639,9 @@ mod test {
                             } else {
                                 (value.try_into().unwrap(), "")
                             };
-                        let output = resolver.verify_spf(client_ip, helo, mail_from).await;
+                        let output = resolver
+                            .verify_spf(client_ip, helo, "localdomain.org", mail_from)
+                            .await;
                         assert_eq!(
                             output.result(),
                             result,

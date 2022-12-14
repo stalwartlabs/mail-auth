@@ -48,7 +48,12 @@ async fn main() {
 
     // Verify SPF MAIL-FROM identity
     let spf_result = resolver
-        .verify_spf_sender("::1".parse().unwrap(), "example.org", "sender@example.org")
+        .verify_spf_sender(
+            "::1".parse().unwrap(),
+            "example.org",
+            "my-host-domain.org",
+            "sender@example.org",
+        )
         .await;
 
     // Verify DMARC

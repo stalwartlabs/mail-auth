@@ -26,7 +26,7 @@ use crate::{
     dkim::{Atps, DomainKeyReport},
     dmarc::Dmarc,
     spf::{Macro, Spf},
-    Error, Policy, Resolver, Txt, MX,
+    Error, Resolver, Txt, MX,
 };
 
 use super::{
@@ -37,7 +37,7 @@ use super::{
 
 impl Resolver {
     pub fn new_cloudflare_tls() -> Result<Self, ResolveError> {
-        Self::new(
+        Self::with_capacity(
             ResolverConfig::cloudflare_tls(),
             ResolverOpts::default(),
             128,
@@ -45,27 +45,27 @@ impl Resolver {
     }
 
     pub fn new_cloudflare() -> Result<Self, ResolveError> {
-        Self::new(ResolverConfig::cloudflare(), ResolverOpts::default(), 128)
+        Self::with_capacity(ResolverConfig::cloudflare(), ResolverOpts::default(), 128)
     }
 
     pub fn new_google() -> Result<Self, ResolveError> {
-        Self::new(ResolverConfig::google(), ResolverOpts::default(), 128)
+        Self::with_capacity(ResolverConfig::google(), ResolverOpts::default(), 128)
     }
 
     pub fn new_quad9() -> Result<Self, ResolveError> {
-        Self::new(ResolverConfig::quad9(), ResolverOpts::default(), 128)
+        Self::with_capacity(ResolverConfig::quad9(), ResolverOpts::default(), 128)
     }
 
     pub fn new_quad9_tls() -> Result<Self, ResolveError> {
-        Self::new(ResolverConfig::quad9_tls(), ResolverOpts::default(), 128)
+        Self::with_capacity(ResolverConfig::quad9_tls(), ResolverOpts::default(), 128)
     }
 
     pub fn new_system_conf() -> Result<Self, ResolveError> {
         let (config, options) = read_system_conf()?;
-        Self::new(config, options, 128)
+        Self::with_capacity(config, options, 128)
     }
 
-    pub fn new(
+    pub fn with_capacity(
         config: ResolverConfig,
         options: ResolverOpts,
         capacity: usize,
@@ -77,19 +77,26 @@ impl Resolver {
             cache_ipv4: LruCache::with_capacity(capacity),
             cache_ipv6: LruCache::with_capacity(capacity),
             cache_ptr: LruCache::with_capacity(capacity),
-            host_domain: String::new(),
-            verify_policy: Policy::VeryStrict,
         })
     }
 
-    pub fn with_host_domain(mut self, hostname: &str) -> Self {
-        self.host_domain = hostname.to_lowercase();
-        self
-    }
-
-    pub fn with_policy(mut self, policy: Policy) -> Self {
-        self.verify_policy = policy;
-        self
+    pub fn with_capacities(
+        config: ResolverConfig,
+        options: ResolverOpts,
+        txt_capacity: usize,
+        mx_capacity: usize,
+        ipv4_capacity: usize,
+        ipv6_capacity: usize,
+        ptr_capacity: usize,
+    ) -> Result<Self, ResolveError> {
+        Ok(Self {
+            resolver: AsyncResolver::tokio(config, options)?,
+            cache_txt: LruCache::with_capacity(txt_capacity),
+            cache_mx: LruCache::with_capacity(mx_capacity),
+            cache_ipv4: LruCache::with_capacity(ipv4_capacity),
+            cache_ipv6: LruCache::with_capacity(ipv6_capacity),
+            cache_ptr: LruCache::with_capacity(ptr_capacity),
+        })
     }
 
     pub(crate) async fn txt_lookup<'x, T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(

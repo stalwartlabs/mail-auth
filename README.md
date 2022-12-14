@@ -140,13 +140,13 @@ Features:
 
     // Verify HELO identity
     let result = resolver
-        .verify_spf_helo("127.0.0.1".parse().unwrap(), "gmail.com")
+        .verify_spf_helo("127.0.0.1".parse().unwrap(), "gmail.com", "my-local-domain.org")
         .await;
     assert_eq!(result.result(), SpfResult::Fail);
 
     // Verify MAIL-FROM identity
     let result = resolver
-        .verify_spf_sender("::1".parse().unwrap(), "gmail.com", "sender@gmail.com")
+        .verify_spf_sender("::1".parse().unwrap(), "gmail.com", "my-local-domain.org", "sender@gmail.com")
         .await;
     assert_eq!(result.result(), SpfResult::Fail);
 ```
@@ -163,7 +163,7 @@ Features:
 
     // Verify SPF MAIL-FROM identity
     let spf_result = resolver
-        .verify_spf_sender("::1".parse().unwrap(), "example.org", "sender@example.org")
+        .verify_spf_sender("::1".parse().unwrap(), "example.org", "my-local-domain.org", "sender@example.org")
         .await;
 
     // Verify DMARC
