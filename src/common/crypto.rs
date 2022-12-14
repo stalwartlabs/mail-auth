@@ -234,6 +234,29 @@ pub enum HashAlgorithm {
     Sha256 = R_HASH_SHA256,
 }
 
+impl HashAlgorithm {
+    pub fn hash(&self, data: &[u8]) -> HashOutput {
+        match self {
+            Self::Sha1 => HashOutput::Sha1(Sha1::digest(data)),
+            Self::Sha256 => HashOutput::Sha256(Sha256::digest(data)),
+        }
+    }
+}
+
+pub enum HashOutput {
+    Sha1(Output<Sha1>),
+    Sha256(Output<Sha256>),
+}
+
+impl AsRef<[u8]> for HashOutput {
+    fn as_ref(&self) -> &[u8] {
+        match self {
+            Self::Sha1(output) => output.as_ref(),
+            Self::Sha256(output) => output.as_ref(),
+        }
+    }
+}
+
 impl TryFrom<&ObjectIdentifier> for HashAlgorithm {
     type Error = Error;
 
