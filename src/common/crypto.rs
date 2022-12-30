@@ -129,7 +129,10 @@ pub(crate) enum VerifyingKeyType {
 }
 
 impl VerifyingKeyType {
-    pub(crate) fn verifying_key(&self, bytes: &[u8]) -> Result<Box<dyn VerifyingKey>> {
+    pub(crate) fn verifying_key(
+        &self,
+        bytes: &[u8],
+    ) -> Result<Box<dyn VerifyingKey + Sync + Send>> {
         Ok(match self {
             Self::Rsa => {
                 let inner =
@@ -137,7 +140,7 @@ impl VerifyingKeyType {
                         .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(bytes))
                         .map_err(|err| Error::CryptoError(err.to_string()))?;
 
-                Box::new(RsaPublicKey { inner }) as Box<dyn VerifyingKey>
+                Box::new(RsaPublicKey { inner }) as Box<dyn VerifyingKey + Sync + Send>
             }
             Self::Ed25519 => Box::new(Ed25519PublicKey {
                 inner: ed25519_dalek::PublicKey::from_bytes(bytes)

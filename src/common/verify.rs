@@ -13,7 +13,7 @@ use crate::dkim::Canonicalization;
 use super::crypto::{Algorithm, VerifyingKey};
 
 pub struct DomainKey {
-    pub(crate) p: Box<dyn VerifyingKey>,
+    pub(crate) p: Box<dyn VerifyingKey + Send + Sync>,
     pub(crate) f: u64,
 }
 

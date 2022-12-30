@@ -275,6 +275,8 @@ pub mod dmarc;
 pub mod report;
 pub mod spf;
 
+pub use sha1;
+pub use sha2;
 pub use trust_dns_resolver;
 
 pub struct Resolver {
