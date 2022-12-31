@@ -197,7 +197,7 @@ impl<'x> DkimOutput<'x> {
     }
 
     pub(crate) fn dns_error(err: Error) -> Self {
-        if matches!(&err, Error::DNSError) {
+        if matches!(&err, Error::DNSError(_)) {
             DkimOutput::temp_err(err)
         } else {
             DkimOutput::perm_err(err)
@@ -239,7 +239,7 @@ impl<'x> ArcOutput<'x> {
 
 impl From<Error> for DkimResult {
     fn from(err: Error) -> Self {
-        if matches!(&err, Error::DNSError) {
+        if matches!(&err, Error::DNSError(_)) {
             DkimResult::TempError(err)
         } else {
             DkimResult::PermError(err)

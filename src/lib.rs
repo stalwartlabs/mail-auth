@@ -301,8 +301,8 @@ pub(crate) enum Txt {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MX {
-    exchange: String,
-    preference: u16,
+    pub exchanges: Vec<String>,
+    pub preference: u16,
 }
 
 #[derive(Debug, Clone)]
@@ -415,7 +415,7 @@ pub enum Error {
     IncompatibleAlgorithms,
     SignatureExpired,
 
-    DNSError,
+    DNSError(String),
     DNSRecordNotFound(ResponseCode),
 
     ARCChainTooLong,
@@ -467,7 +467,7 @@ impl Display for Error {
             Error::ARCBrokenChain => write!(f, "Broken or missing ARC chain"),
             Error::ARCChainTooLong => write!(f, "Too many ARC headers"),
             Error::InvalidRecordType => write!(f, "Invalid record"),
-            Error::DNSError => write!(f, "DNS resolution error"),
+            Error::DNSError(err) => write!(f, "DNS resolution error: {}", err),
             Error::DNSRecordNotFound(code) => write!(f, "DNS record not found: {}", code),
             Error::DMARCNotAligned => write!(f, "DMARC policy not aligned"),
         }

@@ -181,16 +181,14 @@ impl Resolver {
                             .await
                         {
                             Ok(records) => {
-                                for record in records.iter() {
+                                for exchange in records.iter().flat_map(|mx| mx.exchanges.iter()) {
                                     if !lookup_limit.can_lookup() {
                                         return output
                                             .with_result(SpfResult::PermError)
                                             .with_report(&spf_record);
                                     }
 
-                                    match self
-                                        .ip_matches(&record.exchange, ip, *ip4_mask, *ip6_mask)
-                                        .await
+                                    match self.ip_matches(exchange, ip, *ip4_mask, *ip6_mask).await
                                     {
                                         Ok(true) => {
                                             matches = true;
@@ -385,12 +383,12 @@ impl Resolver {
     ) -> crate::Result<bool> {
         Ok(match ip {
             IpAddr::V4(ip) => self
-                .ipv4_lookup(target_name.as_ref())
+                .ipv4_lookup(target_name)
                 .await?
                 .iter()
                 .any(|addr| ip.matches_ipv4_mask(addr, ip4_mask)),
             IpAddr::V6(ip) => self
-                .ipv6_lookup(target_name.as_ref())
+                .ipv6_lookup(target_name)
                 .await?
                 .iter()
                 .any(|addr| ip.matches_ipv6_mask(addr, ip6_mask)),
@@ -620,7 +618,7 @@ mod test {
                                 }
                             }
                             mxs.push(MX {
-                                exchange: mx_name,
+                                exchanges: vec![mx_name],
                                 preference: (pos + 1) as u16,
                             });
                         }

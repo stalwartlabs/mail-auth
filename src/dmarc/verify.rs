@@ -137,7 +137,7 @@ impl Resolver {
                     .await
                 {
                     Ok(_) => true,
-                    Err(Error::DNSError) => return None,
+                    Err(Error::DNSError(_)) => return None,
                     _ => false,
                 }
             {

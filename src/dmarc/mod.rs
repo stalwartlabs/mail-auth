@@ -94,7 +94,7 @@ impl URI {
 
 impl From<Error> for DmarcResult {
     fn from(err: Error) -> Self {
-        if matches!(&err, Error::DNSError) {
+        if matches!(&err, Error::DNSError(_)) {
             DmarcResult::TempError(err)
         } else {
             DmarcResult::PermError(err)

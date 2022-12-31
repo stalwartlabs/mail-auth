@@ -219,7 +219,7 @@ impl Resolver {
                             | Error::UnsupportedKeyType
                             | Error::IncompatibleAlgorithms => (record.rr & RR_SIGNATURE) != 0,
                             Error::SignatureExpired => (record.rr & RR_EXPIRATION) != 0,
-                            Error::DNSError
+                            Error::DNSError(_)
                             | Error::DNSRecordNotFound(_)
                             | Error::InvalidRecordType
                             | Error::ParseError

@@ -155,18 +155,24 @@ impl Resolver {
         }
 
         let mx_lookup = self.resolver.mx_lookup(key.as_ref()).await?;
-        let mut records = mx_lookup
-            .as_lookup()
-            .record_iter()
-            .filter_map(|r| {
-                let mx = r.data()?.as_mx()?;
-                MX {
-                    exchange: mx.exchange().to_lowercase().to_string(),
-                    preference: mx.preference(),
+        let mx_records = mx_lookup.as_lookup().records();
+        let mut records: Vec<MX> = Vec::with_capacity(mx_records.len());
+        for mx_record in mx_records {
+            if let Some(mx) = mx_record.data().and_then(|r| r.as_mx()) {
+                let preference = mx.preference();
+                let exchange = mx.exchange().to_lowercase().to_string();
+
+                if let Some(record) = records.iter_mut().find(|r| r.preference == preference) {
+                    record.exchanges.push(exchange);
+                } else {
+                    records.push(MX {
+                        exchanges: vec![exchange],
+                        preference,
+                    });
                 }
-                .into()
-            })
-            .collect::<Vec<_>>();
+            }
+        }
+
         records.sort_unstable_by(|a, b| a.preference.cmp(&b.preference));
 
         Ok(self
@@ -226,6 +232,17 @@ impl Resolver {
             .insert(key.into_owned(), Arc::new(ips), ipv6_lookup.valid_until()))
     }
 
+    pub async fn ip_lookup(
+        &self,
+        key: impl IntoFqdn<'_>,
+    ) -> crate::Result<impl Iterator<Item = IpAddr>> {
+        self.resolver
+            .lookup_ip(key.into_fqdn().as_ref())
+            .await
+            .map(|lookup| lookup.into_iter())
+            .map_err(Error::from)
+    }
+
     pub async fn ptr_lookup<'x>(&self, addr: IpAddr) -> crate::Result<Arc<Vec<String>>> {
         if let Some(value) = self.cache_ptr.get(&addr) {
             return Ok(value);
@@ -274,7 +291,7 @@ impl Resolver {
                 if matches!(err.kind(), ResolveErrorKind::NoRecordsFound { .. }) {
                     Ok(false)
                 } else {
-                    Err(Error::DNSError)
+                    Err(err.into())
                 }
             }
         }
@@ -341,7 +358,7 @@ impl From<ResolveError> for Error {
             ResolveErrorKind::NoRecordsFound { response_code, .. } => {
                 Error::DNSRecordNotFound(*response_code)
             }
-            _ => Error::DNSError,
+            _ => Error::DNSError(err.to_string()),
         }
     }
 }
@@ -479,6 +496,16 @@ impl<'x> IntoFqdn<'x> for &'x str {
     }
 }
 
+impl<'x> IntoFqdn<'x> for &String {
+    fn into_fqdn(self) -> Cow<'x, str> {
+        if self.ends_with('.') {
+            self.to_lowercase().into()
+        } else {
+            format!("{}.", self.to_lowercase()).into()
+        }
+    }
+}
+
 #[cfg(test)]
 fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     Err(if domain.contains("_parse_error.") {
@@ -486,7 +513,7 @@ fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     } else if domain.contains("_invalid_record.") {
         Error::InvalidRecordType
     } else if domain.contains("_dns_error.") {
-        Error::DNSError
+        Error::DNSError("".to_string())
     } else {
         Error::DNSRecordNotFound(trust_dns_resolver::proto::op::ResponseCode::NXDomain)
     })
