@@ -12,15 +12,15 @@ use std::{borrow::Borrow, hash::Hash, time::Instant};
 
 use parking_lot::Mutex;
 
-pub(crate) type LruCache<K, V> = Mutex<lru_cache::LruCache<K, LruItem<V>, ahash::RandomState>>;
+pub type LruCache<K, V> = Mutex<lru_cache::LruCache<K, LruItem<V>, ahash::RandomState>>;
 
 #[derive(Debug, Clone)]
-pub(crate) struct LruItem<V> {
+pub struct LruItem<V> {
     item: V,
     valid_until: Instant,
 }
 
-pub(crate) trait DnsCache<K, V>: Sized {
+pub trait DnsCache<K, V>: Sized {
     fn with_capacity(capacity: usize) -> Self;
     fn get<Q: ?Sized>(&self, name: &Q) -> Option<V>
     where

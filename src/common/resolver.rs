@@ -232,12 +232,9 @@ impl Resolver {
             .insert(key.into_owned(), Arc::new(ips), ipv6_lookup.valid_until()))
     }
 
-    pub async fn ip_lookup(
-        &self,
-        key: impl IntoFqdn<'_>,
-    ) -> crate::Result<impl Iterator<Item = IpAddr>> {
+    pub async fn ip_lookup(&self, key: &str) -> crate::Result<impl Iterator<Item = IpAddr>> {
         self.resolver
-            .lookup_ip(key.into_fqdn().as_ref())
+            .lookup_ip(key)
             .await
             .map(|lookup| lookup.into_iter())
             .map_err(Error::from)
