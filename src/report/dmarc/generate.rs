@@ -33,7 +33,7 @@ impl Report {
         writer: impl io::Write,
     ) -> io::Result<()> {
         // Compress XML report
-        let xml = self.as_xnl();
+        let xml = self.to_xml();
         let mut e = GzEncoder::new(Vec::with_capacity(xml.len()), Compression::default());
         io::Write::write_all(&mut e, xml.as_bytes())?;
         let compressed_bytes = e.finish()?;
@@ -74,7 +74,7 @@ impl Report {
             .write_to(writer)
     }
 
-    pub fn as_rfc5322<'x>(
+    pub fn to_rfc5322<'x>(
         &self,
         receiver_domain: &'x str,
         submitter: &'x str,
@@ -86,17 +86,17 @@ impl Report {
         String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
-    pub fn as_xnl(&self) -> String {
+    pub fn to_xml(&self) -> String {
         let mut xml = String::with_capacity(128);
         writeln!(&mut xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>").ok();
         writeln!(&mut xml, "<feedback>").ok();
         if self.version != 0.0 {
             writeln!(&mut xml, "\t<version>{}</version>", self.version).ok();
         }
-        self.report_metadata.as_xml(&mut xml);
-        self.policy_published.as_xml(&mut xml);
+        self.report_metadata.to_xml(&mut xml);
+        self.policy_published.to_xml(&mut xml);
         for record in &self.record {
-            record.as_xml(&mut xml);
+            record.to_xml(&mut xml);
         }
         writeln!(&mut xml, "</feedback>").ok();
         xml
@@ -104,7 +104,7 @@ impl Report {
 }
 
 impl ReportMetadata {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t<report_metadata>").ok();
         writeln!(
             xml,
@@ -127,7 +127,7 @@ impl ReportMetadata {
             escape_xml(&self.report_id)
         )
         .ok();
-        self.date_range.as_xml(xml);
+        self.date_range.to_xml(xml);
         for error in &self.error {
             writeln!(xml, "\t\t<error>{}</error>", escape_xml(error)).ok();
         }
@@ -136,7 +136,7 @@ impl ReportMetadata {
 }
 
 impl PolicyPublished {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t<policy_published>").ok();
         writeln!(xml, "\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
         if let Some(vp) = &self.version_published {
@@ -157,7 +157,7 @@ impl PolicyPublished {
 }
 
 impl DateRange {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t<date_range>").ok();
         writeln!(xml, "\t\t\t<begin>{}</begin>", self.begin).ok();
         writeln!(xml, "\t\t\t<end>{}</end>", self.end).ok();
@@ -166,27 +166,27 @@ impl DateRange {
 }
 
 impl Record {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t<record>").ok();
-        self.row.as_xml(xml);
-        self.identifiers.as_xml(xml);
-        self.auth_results.as_xml(xml);
+        self.row.to_xml(xml);
+        self.identifiers.to_xml(xml);
+        self.auth_results.to_xml(xml);
         writeln!(xml, "\t</record>").ok();
     }
 }
 
 impl Row {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t<row>").ok();
         writeln!(xml, "\t\t\t<source_ip>{}</source_ip>", self.source_ip).ok();
         writeln!(xml, "\t\t\t<count>{}</count>", self.count).ok();
-        self.policy_evaluated.as_xml(xml);
+        self.policy_evaluated.to_xml(xml);
         writeln!(xml, "\t\t</row>").ok();
     }
 }
 
 impl PolicyEvaluated {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t\t<policy_evaluated>").ok();
         writeln!(
             xml,
@@ -197,14 +197,14 @@ impl PolicyEvaluated {
         writeln!(xml, "\t\t\t\t<dkim>{}</dkim>", self.dkim).ok();
         writeln!(xml, "\t\t\t\t<spf>{}</spf>", self.spf).ok();
         for reason in &self.reason {
-            reason.as_xml(xml);
+            reason.to_xml(xml);
         }
         writeln!(xml, "\t\t\t</policy_evaluated>").ok();
     }
 }
 
 impl PolicyOverrideReason {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t\t\t<reason>").ok();
         writeln!(xml, "\t\t\t\t\t<type>{}</type>", self.type_).ok();
         if let Some(comment) = &self.comment {
@@ -215,7 +215,7 @@ impl PolicyOverrideReason {
 }
 
 impl Identifier {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t<identifiers>").ok();
         if let Some(envelope_to) = &self.envelope_to {
             writeln!(
@@ -242,20 +242,20 @@ impl Identifier {
 }
 
 impl AuthResult {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t<auth_results>").ok();
         for dkim in &self.dkim {
-            dkim.as_xml(xml);
+            dkim.to_xml(xml);
         }
         for spf in &self.spf {
-            spf.as_xml(xml);
+            spf.to_xml(xml);
         }
         writeln!(xml, "\t\t</auth_results>").ok();
     }
 }
 
 impl DKIMAuthResult {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t\t<dkim>").ok();
         writeln!(xml, "\t\t\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
         writeln!(
@@ -278,7 +278,7 @@ impl DKIMAuthResult {
 }
 
 impl SPFAuthResult {
-    pub(crate) fn as_xml(&self, xml: &mut String) {
+    pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t\t<spf>").ok();
         writeln!(xml, "\t\t\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
         writeln!(xml, "\t\t\t\t<scope>{}</scope>", self.scope).ok();
@@ -512,7 +512,7 @@ mod test {
             );
 
         let message = report
-            .as_rfc5322(
+            .to_rfc5322(
                 "initech.net",
                 "Initech Industries",
                 "noreply-dmarc@initech.net",

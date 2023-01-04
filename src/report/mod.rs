@@ -10,6 +10,7 @@
 
 pub mod arf;
 pub mod dmarc;
+pub mod tlsrpt;
 
 use std::{
     borrow::Cow,

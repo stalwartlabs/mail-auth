@@ -1,0 +1,36 @@
+{
+    "report-id": "2020-01-01T00:00:00Z_example.com",
+    "date-range": {
+        "start-datetime": "2020-01-01T00:00:00Z",
+        "end-datetime": "2020-01-07T23:59:59Z"
+    },
+    "organization-name": "Google Inc.",
+    "contact-info": "smtp-tls-reporting@google.com",
+    "policies": [
+        {
+            "policy": {
+                "policy-type": "sts",
+                "policy-string": [
+                    "version: STSv1",
+                    "mode: enforce",
+                    "mx: demo.example.com",
+                    "max_age: 604800"
+                ],
+                "policy-domain": "example.com"
+            },
+            "summary": {
+                "total-successful-session-count": 23,
+                "total-failure-session-count": 1
+            },
+            "failure-details": [
+                {
+                    "result-type": "certificate-host-mismatch",
+                    "sending-mta-ip": "123.123.123.123",
+                    "receiving-ip": "234.234.234.234",
+                    "receiving-mx-hostname": "demo.example.com",
+                    "failed-session-count": 1
+                }
+            ]
+        }
+    ]
+}

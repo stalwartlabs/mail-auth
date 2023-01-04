@@ -39,7 +39,7 @@ fn main() {
         .with_spf_dns("v=spf1")
         .with_identity_alignment(IdentityAlignment::DkimSpf)
         .with_message(&b"From: hello@world.org\r\nTo: ciao@mundo.org\r\n\r\n"[..])
-        .as_rfc5322(
+        .to_rfc5322(
             "no-reply@example.org",
             "ruf@otherdomain.com",
             "DMARC Authentication Failure Report",

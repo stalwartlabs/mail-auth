@@ -42,7 +42,7 @@ pub(crate) trait TagParser: Sized {
     fn key(&mut self) -> Option<u64>;
     fn value(&mut self) -> u64;
     fn text(&mut self, to_lower: bool) -> String;
-    fn text_qp(&mut self, to_lower: bool) -> String;
+    fn text_qp(&mut self, base: Vec<u8>, to_lower: bool, stop_comma: bool) -> String;
     fn headers_qp<T: ItemParser>(&mut self) -> Vec<T>;
     fn number(&mut self) -> Option<u64>;
     fn items<T: ItemParser>(&mut self) -> Vec<T>;
@@ -187,10 +187,9 @@ impl TagParser for Iter<'_, u8> {
 
     #[inline(always)]
     #[allow(clippy::while_let_on_iterator)]
-    fn text_qp(&mut self, to_lower: bool) -> String {
-        let mut tag = Vec::with_capacity(20);
+    fn text_qp(&mut self, mut tag: Vec<u8>, to_lower: bool, stop_comma: bool) -> String {
         'outer: while let Some(&ch) = self.next() {
-            if ch == b';' {
+            if ch == b';' || (stop_comma && ch == b',') {
                 break;
             } else if ch == b'=' {
                 let mut hex1 = 0;

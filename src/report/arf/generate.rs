@@ -29,7 +29,7 @@ impl<'x> Feedback<'x> {
     ) -> io::Result<()> {
         // Generate ARF
 
-        let arf = self.as_arf();
+        let arf = self.to_arf();
 
         // Generate text/plain body
         let mut text_body = String::with_capacity(128);
@@ -101,13 +101,13 @@ impl<'x> Feedback<'x> {
             .write_to(writer)
     }
 
-    pub fn as_rfc5322(&self, from: &str, to: &str, subject: &str) -> io::Result<String> {
+    pub fn to_rfc5322(&self, from: &str, to: &str, subject: &str) -> io::Result<String> {
         let mut buf = Vec::new();
         self.write_rfc5322(from, to, subject, &mut buf)?;
         String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
-    pub fn as_arf(&self) -> String {
+    pub fn to_arf(&self) -> String {
         let mut arf = String::with_capacity(128);
 
         write!(&mut arf, "Version: {}\r\n", self.version).ok();
@@ -275,7 +275,7 @@ mod test {
             .with_message(&b"From: hello@world.org\r\nTo: ciao@mundo.org\r\n\r\n"[..]);
 
         let message = feedback
-            .as_rfc5322(
+            .to_rfc5322(
                 "no-reply@example.org",
                 "ruf@otherdomain.com",
                 "DMARC Authentication Failure Report",

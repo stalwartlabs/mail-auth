@@ -25,6 +25,7 @@ use trust_dns_resolver::{
 use crate::{
     dkim::{Atps, DomainKeyReport},
     dmarc::Dmarc,
+    mta_sts::{MtaSts, TlsRpt},
     spf::{Macro, Spf},
     Error, Resolver, Txt, MX,
 };
@@ -99,7 +100,7 @@ impl Resolver {
         })
     }
 
-    pub(crate) async fn txt_lookup<'x, T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
+    pub async fn txt_lookup<'x, T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
         &self,
         key: impl IntoFqdn<'x>,
     ) -> crate::Result<Arc<T>> {
@@ -396,6 +397,18 @@ impl From<Dmarc> for Txt {
     }
 }
 
+impl From<MtaSts> for Txt {
+    fn from(v: MtaSts) -> Self {
+        Txt::MtaSts(v.into())
+    }
+}
+
+impl From<TlsRpt> for Txt {
+    fn from(v: TlsRpt) -> Self {
+        Txt::TlsRpt(v.into())
+    }
+}
+
 impl<T: Into<Txt>> From<crate::Result<T>> for Txt {
     fn from(v: crate::Result<T>) -> Self {
         match v {
@@ -405,7 +418,7 @@ impl<T: Into<Txt>> From<crate::Result<T>> for Txt {
     }
 }
 
-pub(crate) trait UnwrapTxtRecord: Sized {
+pub trait UnwrapTxtRecord: Sized {
     fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>>;
 }
 
@@ -463,6 +476,26 @@ impl UnwrapTxtRecord for Dmarc {
     fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
         match txt {
             Txt::Dmarc(a) => Ok(a),
+            Txt::Error(err) => Err(err),
+            _ => Err(Error::Io("Invalid record type".to_string())),
+        }
+    }
+}
+
+impl UnwrapTxtRecord for MtaSts {
+    fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
+        match txt {
+            Txt::MtaSts(a) => Ok(a),
+            Txt::Error(err) => Err(err),
+            _ => Err(Error::Io("Invalid record type".to_string())),
+        }
+    }
+}
+
+impl UnwrapTxtRecord for TlsRpt {
+    fn unwrap_txt(txt: Txt) -> crate::Result<Arc<Self>> {
+        match txt {
+            Txt::TlsRpt(a) => Ok(a),
             Txt::Error(err) => Err(err),
             _ => Err(Error::Io("Invalid record type".to_string())),
         }

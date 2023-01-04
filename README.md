@@ -26,7 +26,8 @@ Features:
 - **Abuse Reporting Format (ARF)**:
   - Abuse and Authentication failure reporting.
   - Feedback report parsing and generation.
-
+- **SMTP TLS Reporting**:
+  - Report parsing and generation.
 
 ## Usage examples
 
@@ -227,6 +228,9 @@ To fuzz the library with `cargo-fuzz`:
 - [RFC 6590 - Redaction of Potentially Sensitive Data from Mail Abuse Reports](https://datatracker.ietf.org/doc/html/rfc6590)
 - [RFC 6591 - Authentication Failure Reporting Using the Abuse Reporting Format](https://datatracker.ietf.org/doc/html/rfc6591)
 - [RFC 6650 - Creation and Use of Email Feedback Reports: An Applicability Statement for the Abuse Reporting Format (ARF)](https://datatracker.ietf.org/doc/html/rfc6650)
+
+### SMTP TLS Reporting
+- [RFC 8460 - SMTP TLS Reporting](https://datatracker.ietf.org/doc/html/rfc8460)
 
 ## License
 

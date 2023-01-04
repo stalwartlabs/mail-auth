@@ -97,7 +97,7 @@ fn main() {
                         .with_human_result("no policy found"),
                 ),
         )
-        .as_rfc5322(
+        .to_rfc5322(
             "initech.net",
             "Initech Industries",
             "noreply-dmarc@initech.net",

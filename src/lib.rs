@@ -36,7 +36,8 @@
 //! - **Abuse Reporting Format (ARF)**:
 //!   - Abuse and Authentication failure reporting.
 //!   - Feedback report parsing and generation.
-//!
+//! - **SMTP TLS Reporting**:
+//!   - Report parsing and generation.
 //!
 //! ## Usage examples
 //!
@@ -238,6 +239,9 @@
 //! - [RFC 6591 - Authentication Failure Reporting Using the Abuse Reporting Format](https://datatracker.ietf.org/doc/html/rfc6591)
 //! - [RFC 6650 - Creation and Use of Email Feedback Reports: An Applicability Statement for the Abuse Reporting Format (ARF)](https://datatracker.ietf.org/doc/html/rfc6650)
 //!
+//! ### SMTP TLS Reporting
+//! - [RFC 8460 - SMTP TLS Reporting](https://datatracker.ietf.org/doc/html/rfc8460)
+//!
 //! ## License
 //!
 //! Licensed under either of
@@ -265,6 +269,7 @@ use arc::Set;
 use common::{crypto::HashAlgorithm, headers::Header, lru::LruCache, verify::DomainKey};
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
+use mta_sts::{MtaSts, TlsRpt};
 use spf::{Macro, Spf};
 use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
 
@@ -272,6 +277,7 @@ pub mod arc;
 pub mod common;
 pub mod dkim;
 pub mod dmarc;
+pub mod mta_sts;
 pub mod report;
 pub mod spf;
 
@@ -289,13 +295,15 @@ pub struct Resolver {
 }
 
 #[derive(Clone)]
-pub(crate) enum Txt {
+pub enum Txt {
     Spf(Arc<Spf>),
     SpfMacro(Arc<Macro>),
     DomainKey(Arc<DomainKey>),
     DomainKeyReport(Arc<DomainKeyReport>),
     Dmarc(Arc<Dmarc>),
     Atps(Arc<Atps>),
+    MtaSts(Arc<MtaSts>),
+    TlsRpt(Arc<TlsRpt>),
     Error(Error),
 }
 

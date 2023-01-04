@@ -94,7 +94,7 @@ impl<'x> Signature<'x> {
                 }
                 D => signature.d = header.text(true).into(),
                 H => signature.h = header.items(),
-                I => signature.i = header.text_qp(true).into(),
+                I => signature.i = header.text_qp(Vec::with_capacity(20), true, false).into(),
                 L => signature.l = header.number().unwrap_or(0),
                 S => signature.s = header.text(true).into(),
                 T => signature.t = header.number().unwrap_or(0),
@@ -318,13 +318,13 @@ impl TxtRecordParser for DomainKeyReport {
         while let Some(key) = header.key() {
             match key {
                 RA => {
-                    record.ra = header.text_qp(true);
+                    record.ra = header.text_qp(Vec::with_capacity(20), true, false);
                 }
                 RP => {
                     record.rp = std::cmp::min(header.number().unwrap_or(0), 100) as u8;
                 }
                 RS => {
-                    record.rs = header.text_qp(false).into();
+                    record.rs = header.text_qp(Vec::with_capacity(20), false, false).into();
                 }
                 RR => {
                     record.rr = 0;
