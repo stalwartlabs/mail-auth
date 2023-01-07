@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2020-2022, Stalwart Labs Ltd.
+ * Copyright (c) 2020-2023, Stalwart Labs Ltd.
  *
  * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
  * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
@@ -253,7 +253,7 @@
 //!
 //! ## Copyright
 //!
-//! Copyright (C) 2020-2022, Stalwart Labs Ltd.
+//! Copyright (C) 2020-2023, Stalwart Labs Ltd.
 //!
 
 use std::{
