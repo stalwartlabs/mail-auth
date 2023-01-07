@@ -28,7 +28,6 @@ impl<'x> Feedback<'x> {
         writer: impl io::Write,
     ) -> io::Result<()> {
         // Generate ARF
-
         let arf = self.to_arf();
 
         // Generate text/plain body
