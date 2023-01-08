@@ -19,7 +19,7 @@ use crate::{
 
 use super::{ArcSet, ChainValidation, Seal, Signature};
 
-impl<'x> Signature<'x> {
+impl Signature {
     pub(crate) fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"arc-message-signature:"[..], &b" "[..]),
@@ -98,7 +98,7 @@ impl<'x> Signature<'x> {
     }
 }
 
-impl<'x> Seal<'x> {
+impl Seal {
     pub(crate) fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = if !as_header {
             (&b"arc-seal:"[..], &b" "[..])

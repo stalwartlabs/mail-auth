@@ -14,8 +14,6 @@ pub mod parse;
 pub mod seal;
 pub mod verify;
 
-use std::borrow::Cow;
-
 use sha2::Sha256;
 
 use crate::{
@@ -29,23 +27,23 @@ use crate::{
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct ArcSealer<'x, T: SigningKey<Hasher = Sha256>, State = NeedDomain> {
+pub struct ArcSealer<T: SigningKey<Hasher = Sha256>, State = NeedDomain> {
     _state: std::marker::PhantomData<State>,
     pub(crate) key: T,
-    pub(crate) signature: Signature<'x>,
-    pub(crate) seal: Seal<'x>,
+    pub(crate) signature: Signature,
+    pub(crate) seal: Seal,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct Signature<'x> {
+pub struct Signature {
     pub(crate) i: u32,
     pub(crate) a: Algorithm,
-    pub(crate) d: Cow<'x, str>,
-    pub(crate) s: Cow<'x, str>,
+    pub(crate) d: String,
+    pub(crate) s: String,
     pub(crate) b: Vec<u8>,
     pub(crate) bh: Vec<u8>,
-    pub(crate) h: Vec<Cow<'x, str>>,
-    pub(crate) z: Vec<Cow<'x, str>>,
+    pub(crate) h: Vec<String>,
+    pub(crate) z: Vec<String>,
     pub(crate) l: u64,
     pub(crate) x: u64,
     pub(crate) t: u64,
@@ -54,12 +52,12 @@ pub struct Signature<'x> {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct Seal<'x> {
+pub struct Seal {
     pub(crate) i: u32,
     pub(crate) a: Algorithm,
     pub(crate) b: Vec<u8>,
-    pub(crate) d: Cow<'x, str>,
-    pub(crate) s: Cow<'x, str>,
+    pub(crate) d: String,
+    pub(crate) s: String,
     pub(crate) t: u64,
     pub(crate) cv: ChainValidation,
 }
@@ -71,15 +69,15 @@ pub struct Results {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArcSet<'x> {
-    pub(crate) signature: Signature<'x>,
-    pub(crate) seal: Seal<'x>,
+    pub(crate) signature: Signature,
+    pub(crate) seal: Seal,
     pub(crate) results: &'x AuthenticationResults<'x>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Set<'x> {
-    pub(crate) signature: Header<'x, &'x Signature<'x>>,
-    pub(crate) seal: Header<'x, &'x Seal<'x>>,
+    pub(crate) signature: Header<'x, &'x Signature>,
+    pub(crate) seal: Header<'x, &'x Seal>,
     pub(crate) results: Header<'x, &'x Results>,
 }
 
@@ -96,7 +94,7 @@ impl Default for ChainValidation {
     }
 }
 
-impl<'x> VerifySignature for Signature<'x> {
+impl VerifySignature for Signature {
     fn signature(&self) -> &[u8] {
         &self.b
     }
@@ -114,7 +112,7 @@ impl<'x> VerifySignature for Signature<'x> {
     }
 }
 
-impl<'x> VerifySignature for Seal<'x> {
+impl VerifySignature for Seal {
     fn signature(&self) -> &[u8] {
         &self.b
     }

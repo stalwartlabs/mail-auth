@@ -8,8 +8,6 @@
  * except according to those terms.
  */
 
-use std::borrow::Cow;
-
 use crate::{
     arc::Set,
     common::{
@@ -33,10 +31,10 @@ pub enum Canonicalization {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct DkimSigner<'x, T: SigningKey, State = NeedDomain> {
+pub struct DkimSigner<T: SigningKey, State = NeedDomain> {
     _state: std::marker::PhantomData<State>,
     pub(crate) key: T,
-    pub(crate) template: Signature<'x>,
+    pub(crate) template: Signature,
 }
 
 pub struct NeedDomain;
@@ -45,21 +43,21 @@ pub struct NeedHeaders;
 pub struct Done;
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct Signature<'x> {
+pub struct Signature {
     pub(crate) v: u32,
     pub(crate) a: Algorithm,
-    pub(crate) d: Cow<'x, str>,
-    pub(crate) s: Cow<'x, str>,
+    pub(crate) d: String,
+    pub(crate) s: String,
     pub(crate) b: Vec<u8>,
     pub(crate) bh: Vec<u8>,
-    pub(crate) h: Vec<Cow<'x, str>>,
-    pub(crate) z: Vec<Cow<'x, str>>,
-    pub(crate) i: Cow<'x, str>,
+    pub(crate) h: Vec<String>,
+    pub(crate) z: Vec<String>,
+    pub(crate) i: String,
     pub(crate) l: u64,
     pub(crate) x: u64,
     pub(crate) t: u64,
     pub(crate) r: bool,                      // RFC 6651
-    pub(crate) atps: Option<Cow<'x, str>>,   // RFC 6541
+    pub(crate) atps: Option<String>,         // RFC 6541
     pub(crate) atpsh: Option<HashAlgorithm>, // RFC 6541
     pub(crate) ch: Canonicalization,
     pub(crate) cb: Canonicalization,
@@ -145,7 +143,7 @@ impl From<Algorithm> for HashAlgorithm {
     }
 }
 
-impl<'x> VerifySignature for Signature<'x> {
+impl VerifySignature for Signature {
     fn signature(&self) -> &[u8] {
         &self.b
     }
@@ -217,7 +215,7 @@ impl<'x> DkimOutput<'x> {
         }
     }
 
-    pub(crate) fn with_signature(mut self, signature: &'x Signature<'x>) -> Self {
+    pub(crate) fn with_signature(mut self, signature: &'x Signature) -> Self {
         self.signature = signature.into();
         self
     }

@@ -22,7 +22,7 @@ use crate::common::parse::*;
 
 pub(crate) const CV: u64 = (b'c' as u64) | ((b'v' as u64) << 8);
 
-impl<'x> Signature<'x> {
+impl Signature {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
@@ -67,10 +67,10 @@ impl<'x> Signature<'x> {
                     signature.ch = ch;
                     signature.cb = cb;
                 }
-                D => signature.d = header.text(true).into(),
+                D => signature.d = header.text(true),
                 H => signature.h = header.items(),
                 L => signature.l = header.number().unwrap_or(0),
-                S => signature.s = header.text(true).into(),
+                S => signature.s = header.text(true),
                 T => signature.t = header.number().unwrap_or(0),
                 X => signature.x = header.number().unwrap_or(0),
                 Z => signature.z = header.headers_qp(),
@@ -91,7 +91,7 @@ impl<'x> Signature<'x> {
     }
 }
 
-impl<'x> Seal<'x> {
+impl Seal {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut seal = Seal {
@@ -119,8 +119,8 @@ impl<'x> Seal<'x> {
                     seal.b =
                         base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
                 }
-                D => seal.d = header.text(true).into(),
-                S => seal.s = header.text(true).into(),
+                D => seal.d = header.text(true),
+                S => seal.s = header.text(true),
                 T => seal.t = header.number().unwrap_or(0),
                 CV => {
                     match header.next_skip_whitespaces().unwrap_or(0) {

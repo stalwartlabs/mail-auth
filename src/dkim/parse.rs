@@ -43,7 +43,7 @@ const RR: u64 = (b'r' as u64) | (b'r' as u64) << 8;
 const RS: u64 = (b'r' as u64) | (b's' as u64) << 8;
 const ALL: u64 = (b'a' as u64) | (b'l' as u64) << 8 | (b'l' as u64) << 16;
 
-impl<'x> Signature<'x> {
+impl Signature {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
@@ -92,18 +92,18 @@ impl<'x> Signature<'x> {
                     signature.ch = ch;
                     signature.cb = cb;
                 }
-                D => signature.d = header.text(true).into(),
+                D => signature.d = header.text(true),
                 H => signature.h = header.items(),
-                I => signature.i = header.text_qp(Vec::with_capacity(20), true, false).into(),
+                I => signature.i = header.text_qp(Vec::with_capacity(20), true, false),
                 L => signature.l = header.number().unwrap_or(0),
-                S => signature.s = header.text(true).into(),
+                S => signature.s = header.text(true),
                 T => signature.t = header.number().unwrap_or(0),
                 X => signature.x = header.number().unwrap_or(0),
                 Z => signature.z = header.headers_qp(),
                 R => signature.r = header.value() == Y,
                 ATPS => {
                     if signature.atps.is_none() {
-                        signature.atps = Some(header.text(true).into());
+                        signature.atps = Some(header.text(true));
                     }
                 }
                 ATPSH => {

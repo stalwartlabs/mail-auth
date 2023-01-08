@@ -8,8 +8,6 @@
  * except according to those terms.
  */
 
-use std::borrow::Cow;
-
 use sha1::Digest;
 
 use crate::common::headers::{HeaderIterator, Writer};
@@ -146,14 +144,14 @@ impl Canonicalization {
     }
 }
 
-impl<'x> Signature<'x> {
+impl Signature {
     #[allow(clippy::while_let_on_iterator)]
     pub(crate) fn canonicalize(
         &self,
-        message: &'x [u8],
+        message: &[u8],
         header_hasher: &mut impl Writer,
         body_hasher: &mut impl Writer,
-    ) -> (usize, Vec<Cow<'x, str>>) {
+    ) -> (usize, Vec<String>) {
         let mut headers_it = HeaderIterator::new(message);
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
@@ -184,7 +182,7 @@ impl<'x> Signature<'x> {
         signed_headers.reverse();
         for (header, found) in self.h.iter().zip(found_headers) {
             if !found {
-                signed_headers.push(header.to_string().into());
+                signed_headers.push(header.to_string());
             }
         }
 

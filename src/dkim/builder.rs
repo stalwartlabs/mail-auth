@@ -1,10 +1,19 @@
+/*
+ * Copyright (c) 2020-2023, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
+
 use crate::common::crypto::{HashAlgorithm, SigningKey};
-use std::borrow::Cow;
 
 use super::{Canonicalization, DkimSigner, Done, NeedDomain, NeedHeaders, NeedSelector, Signature};
 
-impl<'x, T: SigningKey> DkimSigner<'x, T> {
-    pub fn from_key(key: T) -> DkimSigner<'x, T, NeedDomain> {
+impl<T: SigningKey> DkimSigner<T> {
+    pub fn from_key(key: T) -> DkimSigner<T, NeedDomain> {
         DkimSigner {
             _state: Default::default(),
             template: Signature {
@@ -17,9 +26,9 @@ impl<'x, T: SigningKey> DkimSigner<'x, T> {
     }
 }
 
-impl<'x, T: SigningKey> DkimSigner<'x, T, NeedDomain> {
+impl<T: SigningKey> DkimSigner<T, NeedDomain> {
     /// Sets the domain to use for signing.
-    pub fn domain(mut self, domain: impl Into<Cow<'x, str>>) -> DkimSigner<'x, T, NeedSelector> {
+    pub fn domain(mut self, domain: impl Into<String>) -> DkimSigner<T, NeedSelector> {
         self.template.d = domain.into();
         DkimSigner {
             _state: Default::default(),
@@ -29,9 +38,9 @@ impl<'x, T: SigningKey> DkimSigner<'x, T, NeedDomain> {
     }
 }
 
-impl<'x, T: SigningKey> DkimSigner<'x, T, NeedSelector> {
+impl<T: SigningKey> DkimSigner<T, NeedSelector> {
     /// Sets the selector to use for signing.
-    pub fn selector(mut self, selector: impl Into<Cow<'x, str>>) -> DkimSigner<'x, T, NeedHeaders> {
+    pub fn selector(mut self, selector: impl Into<String>) -> DkimSigner<T, NeedHeaders> {
         self.template.s = selector.into();
         DkimSigner {
             _state: Default::default(),
@@ -41,12 +50,12 @@ impl<'x, T: SigningKey> DkimSigner<'x, T, NeedSelector> {
     }
 }
 
-impl<'x, T: SigningKey> DkimSigner<'x, T, NeedHeaders> {
+impl<T: SigningKey> DkimSigner<T, NeedHeaders> {
     /// Sets the headers to sign.
     pub fn headers(
         mut self,
-        headers: impl IntoIterator<Item = impl Into<Cow<'x, str>>>,
-    ) -> DkimSigner<'x, T, Done> {
+        headers: impl IntoIterator<Item = impl Into<String>>,
+    ) -> DkimSigner<T, Done> {
         self.template.h = headers.into_iter().map(|h| h.into()).collect();
         DkimSigner {
             _state: Default::default(),
@@ -56,9 +65,9 @@ impl<'x, T: SigningKey> DkimSigner<'x, T, NeedHeaders> {
     }
 }
 
-impl<'x, T: SigningKey> DkimSigner<'x, T, Done> {
+impl<T: SigningKey> DkimSigner<T, Done> {
     /// Sets the third party signature.
-    pub fn atps(mut self, atps: impl Into<Cow<'x, str>>) -> Self {
+    pub fn atps(mut self, atps: impl Into<String>) -> Self {
         self.template.atps = Some(atps.into());
         self
     }
@@ -70,7 +79,7 @@ impl<'x, T: SigningKey> DkimSigner<'x, T, Done> {
     }
 
     /// Sets the selector to use for signing.
-    pub fn agent_user_identifier(mut self, auid: impl Into<Cow<'x, str>>) -> Self {
+    pub fn agent_user_identifier(mut self, auid: impl Into<String>) -> Self {
         self.template.i = auid.into();
         self
     }

@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, io::Write, time::SystemTime};
+use std::{io::Write, time::SystemTime};
 
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
@@ -252,7 +252,7 @@ impl Resolver {
 impl<'x> AuthenticatedMessage<'x> {
     pub fn signed_headers<'z: 'x>(
         &'z self,
-        headers: &'x [Cow<'x, str>],
+        headers: &'x [String],
         dkim_hdr_name: &'x [u8],
         dkim_hdr_value: &'x [u8],
     ) -> impl Iterator<Item = (&'x [u8], &'x [u8])> {
@@ -288,7 +288,7 @@ impl<'x> AuthenticatedMessage<'x> {
     }
 }
 
-impl<'x> Signature<'x> {
+impl Signature {
     #[allow(clippy::while_let_on_iterator)]
     pub(crate) fn validate_auid(&self, record: &DomainKey) -> bool {
         // Enforce t=s flag

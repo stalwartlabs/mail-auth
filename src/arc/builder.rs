@@ -1,4 +1,12 @@
-use std::borrow::Cow;
+/*
+ * Copyright (c) 2020-2023, Stalwart Labs Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
+ * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
+ * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
+ * option. This file may not be copied, modified, or distributed
+ * except according to those terms.
+ */
 
 use sha2::Sha256;
 
@@ -9,8 +17,8 @@ use crate::{
 
 use super::{ArcSealer, Seal, Signature};
 
-impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T> {
-    pub fn from_key(key: T) -> ArcSealer<'x, T, NeedDomain> {
+impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T> {
+    pub fn from_key(key: T) -> ArcSealer<T, NeedDomain> {
         ArcSealer {
             _state: Default::default(),
             signature: Signature {
@@ -26,12 +34,9 @@ impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T> {
     }
 }
 
-impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, NeedDomain> {
+impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, NeedDomain> {
     /// Sets the domain to use for signing.
-    pub fn domain(
-        mut self,
-        domain: impl Into<Cow<'x, str>> + Clone,
-    ) -> ArcSealer<'x, T, NeedSelector> {
+    pub fn domain(mut self, domain: impl Into<String> + Clone) -> ArcSealer<T, NeedSelector> {
         self.signature.d = domain.clone().into();
         self.seal.d = domain.into();
         ArcSealer {
@@ -43,12 +48,9 @@ impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, NeedDomain> {
     }
 }
 
-impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, NeedSelector> {
+impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, NeedSelector> {
     /// Sets the selector to use for signing.
-    pub fn selector(
-        mut self,
-        selector: impl Into<Cow<'x, str>> + Clone,
-    ) -> ArcSealer<'x, T, NeedHeaders> {
+    pub fn selector(mut self, selector: impl Into<String> + Clone) -> ArcSealer<T, NeedHeaders> {
         self.signature.s = selector.clone().into();
         self.seal.s = selector.into();
         ArcSealer {
@@ -60,12 +62,12 @@ impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, NeedSelector> {
     }
 }
 
-impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, NeedHeaders> {
+impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, NeedHeaders> {
     /// Sets the headers to sign.
     pub fn headers(
         mut self,
-        headers: impl IntoIterator<Item = impl Into<Cow<'x, str>>>,
-    ) -> ArcSealer<'x, T, Done> {
+        headers: impl IntoIterator<Item = impl Into<String>>,
+    ) -> ArcSealer<T, Done> {
         self.signature.h = headers.into_iter().map(|h| h.into()).collect();
         ArcSealer {
             _state: Default::default(),
@@ -76,7 +78,7 @@ impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, NeedHeaders> {
     }
 }
 
-impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, Done> {
+impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
     /// Sets the number of seconds from now to use for the signature expiration.
     pub fn expiration(mut self, expiration: u64) -> Self {
         self.signature.x = expiration;

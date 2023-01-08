@@ -16,10 +16,10 @@ use sha1::Digest;
 use super::{DkimSigner, Done, Signature};
 use crate::{common::crypto::SigningKey, Error};
 
-impl<'x, T: SigningKey> DkimSigner<'x, T, Done> {
+impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a message.
     #[inline(always)]
-    pub fn sign(&self, message: &'x [u8]) -> crate::Result<Signature<'x>> {
+    pub fn sign(&self, message: &[u8]) -> crate::Result<Signature> {
         self.sign_(
             message,
             SystemTime::now()
@@ -29,7 +29,7 @@ impl<'x, T: SigningKey> DkimSigner<'x, T, Done> {
         )
     }
 
-    fn sign_(&self, message: &'x [u8], now: u64) -> crate::Result<Signature<'x>> {
+    fn sign_(&self, message: &[u8], now: u64) -> crate::Result<Signature> {
         let mut body_hasher = self.key.hasher();
         let mut header_hasher = self.key.hasher();
 
@@ -359,7 +359,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
     async fn verify<'x>(
         resolver: &Resolver,
-        signature: Signature<'x>,
+        signature: Signature,
         message_: &'x str,
         expect: Result<(), super::Error>,
     ) -> Vec<DkimOutput<'x>> {

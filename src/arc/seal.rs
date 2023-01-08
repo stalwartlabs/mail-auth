@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, io::Write, time::SystemTime};
+use std::{io::Write, time::SystemTime};
 
 use mail_builder::encoders::base64::base64_encode;
 use sha2::{Digest, Sha256};
@@ -21,8 +21,8 @@ use crate::{
 
 use super::{ArcSealer, ArcSet, ChainValidation, Signature};
 
-impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, Done> {
-    pub fn seal(
+impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
+    pub fn seal<'x>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
         results: &'x AuthenticationResults,
@@ -120,14 +120,14 @@ impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, Done> {
     }
 }
 
-impl<'x> Signature<'x> {
+impl Signature {
     #[allow(clippy::while_let_on_iterator)]
-    pub(crate) fn canonicalize(
+    pub(crate) fn canonicalize<'x>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
         header_hasher: &mut impl Writer,
         body_hasher: &mut impl Writer,
-    ) -> crate::Result<(usize, Vec<Cow<'x, str>>)> {
+    ) -> crate::Result<(usize, Vec<String>)> {
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
         let mut signed_headers = Vec::with_capacity(self.h.len());
@@ -153,7 +153,7 @@ impl<'x> Signature<'x> {
         signed_headers.reverse();
         for (header, found) in self.h.iter().zip(found_headers) {
             if !found {
-                signed_headers.push(header.to_string().into());
+                signed_headers.push(header.to_string());
             }
         }
 

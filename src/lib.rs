@@ -320,9 +320,9 @@ pub struct AuthenticatedMessage<'x> {
     pub(crate) from: Vec<String>,
     pub(crate) body: &'x [u8],
     pub(crate) body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
-    pub(crate) dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature<'x>>>>,
-    pub(crate) ams_headers: Vec<Header<'x, crate::Result<arc::Signature<'x>>>>,
-    pub(crate) as_headers: Vec<Header<'x, crate::Result<arc::Seal<'x>>>>,
+    pub(crate) dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature>>>,
+    pub(crate) ams_headers: Vec<Header<'x, crate::Result<arc::Signature>>>,
+    pub(crate) as_headers: Vec<Header<'x, crate::Result<arc::Seal>>>,
     pub(crate) aar_headers: Vec<Header<'x, crate::Result<arc::Results>>>,
 }
 
@@ -352,7 +352,7 @@ pub enum DkimResult {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct DkimOutput<'x> {
     result: DkimResult,
-    signature: Option<&'x dkim::Signature<'x>>,
+    signature: Option<&'x dkim::Signature>,
     report: Option<String>,
     is_atps: bool,
 }
