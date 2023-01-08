@@ -156,7 +156,7 @@ impl Resolver {
                             .await
                         {
                             Ok(true) => true,
-                            Ok(false) | Err(Error::DNSRecordNotFound(_)) => false,
+                            Ok(false) | Err(Error::DnsRecordNotFound(_)) => false,
                             Err(_) => {
                                 return output
                                     .with_result(SpfResult::TempError)
@@ -194,7 +194,7 @@ impl Resolver {
                                             matches = true;
                                             break;
                                         }
-                                        Ok(false) | Err(Error::DNSRecordNotFound(_)) => (),
+                                        Ok(false) | Err(Error::DnsRecordNotFound(_)) => (),
                                         Err(_) => {
                                             return output
                                                 .with_result(SpfResult::TempError)
@@ -203,7 +203,7 @@ impl Resolver {
                                     }
                                 }
                             }
-                            Err(Error::DNSRecordNotFound(_)) => (),
+                            Err(Error::DnsRecordNotFound(_)) => (),
                             Err(_) => {
                                 return output
                                     .with_result(SpfResult::TempError)
@@ -234,7 +234,7 @@ impl Resolver {
                                 continue;
                             }
                             Err(
-                                Error::DNSRecordNotFound(_)
+                                Error::DnsRecordNotFound(_)
                                 | Error::InvalidRecordType
                                 | Error::ParseError,
                             ) => {
@@ -336,7 +336,7 @@ impl Resolver {
                             continue;
                         }
                         Err(
-                            Error::DNSRecordNotFound(_)
+                            Error::DnsRecordNotFound(_)
                             | Error::InvalidRecordType
                             | Error::ParseError,
                         ) => {
@@ -459,7 +459,7 @@ impl From<&Qualifier> for SpfResult {
 impl From<Error> for SpfResult {
     fn from(err: Error) -> Self {
         match err {
-            Error::DNSRecordNotFound(_) | Error::InvalidRecordType => SpfResult::None,
+            Error::DnsRecordNotFound(_) | Error::InvalidRecordType => SpfResult::None,
             Error::ParseError => SpfResult::PermError,
             _ => SpfResult::TempError,
         }

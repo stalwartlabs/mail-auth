@@ -25,7 +25,7 @@ pub trait SigningKey {
     fn algorithm(&self) -> Algorithm;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct RsaKey<T> {
     inner: RsaPrivateKey,
     padding: PhantomData<T>,

@@ -280,8 +280,8 @@ impl AsAuthResult for Error {
             Error::RevokedPublicKey => "revoked public key",
             Error::IncompatibleAlgorithms => "incompatible record/signature algorithms",
             Error::SignatureExpired => "signature error",
-            Error::DNSError(_) => "dns error",
-            Error::DNSRecordNotFound(_) => "dns record not found",
+            Error::DnsError(_) => "dns error",
+            Error::DnsRecordNotFound(_) => "dns record not found",
             Error::ARCInvalidInstance(i) => {
                 write!(header, "invalid ARC instance {})", i).ok();
                 return;
@@ -347,7 +347,7 @@ mod test {
                     "header.s=otherselctor header.b=YWJjZGVm header.from=jdoe@example.org"
                 ),
                 DkimOutput {
-                    result: DkimResult::TempError(Error::DNSError("".to_string())),
+                    result: DkimResult::TempError(Error::DnsError("".to_string())),
                     signature: (&Signature {
                         d: "atps.example.org".into(),
                         s: "otherselctor".into(),

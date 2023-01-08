@@ -13,12 +13,13 @@ use std::borrow::Cow;
 use crate::{
     arc::Set,
     common::{
-        crypto::{Algorithm, HashAlgorithm},
+        crypto::{Algorithm, HashAlgorithm, SigningKey},
         verify::VerifySignature,
     },
     ArcOutput, DkimOutput, DkimResult, Error, Version,
 };
 
+pub mod builder;
 pub mod canonicalize;
 pub mod headers;
 pub mod parse;
@@ -30,6 +31,18 @@ pub enum Canonicalization {
     Relaxed,
     Simple,
 }
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct DkimSigner<'x, T: SigningKey, State = NeedDomain> {
+    _state: std::marker::PhantomData<State>,
+    pub(crate) key: T,
+    pub(crate) template: Signature<'x>,
+}
+
+pub struct NeedDomain;
+pub struct NeedSelector;
+pub struct NeedHeaders;
+pub struct Done;
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Signature<'x> {
@@ -197,7 +210,7 @@ impl<'x> DkimOutput<'x> {
     }
 
     pub(crate) fn dns_error(err: Error) -> Self {
-        if matches!(&err, Error::DNSError(_)) {
+        if matches!(&err, Error::DnsError(_)) {
             DkimOutput::temp_err(err)
         } else {
             DkimOutput::perm_err(err)
@@ -239,7 +252,7 @@ impl<'x> ArcOutput<'x> {
 
 impl From<Error> for DkimResult {
     fn from(err: Error) -> Self {
-        if matches!(&err, Error::DNSError(_)) {
+        if matches!(&err, Error::DnsError(_)) {
             DkimResult::TempError(err)
         } else {
             DkimResult::PermError(err)

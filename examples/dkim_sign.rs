@@ -10,7 +10,7 @@
 
 use mail_auth::{
     common::{crypto::Ed25519Key, crypto::RsaKey, headers::HeaderWriter},
-    dkim::Signature,
+    dkim::DkimSigner,
 };
 use mail_parser::decoders::base64::base64_decode;
 use sha2::Sha256;
@@ -44,11 +44,11 @@ I'm going to need those TPS reports ASAP. So, if you could do that, that'd be gr
 fn main() {
     // Sign an e-mail message using RSA-SHA256
     let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-    let signature_rsa = Signature::new()
-        .headers(["From", "To", "Subject"])
+    let signature_rsa = DkimSigner::from_key(pk_rsa)
         .domain("example.com")
         .selector("default")
-        .sign(TEST_MESSAGE.as_bytes(), &pk_rsa)
+        .headers(["From", "To", "Subject"])
+        .sign(TEST_MESSAGE.as_bytes())
         .unwrap();
 
     // Sign an e-mail message using ED25519-SHA256
@@ -57,11 +57,11 @@ fn main() {
         &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
     )
     .unwrap();
-    let signature_ed = Signature::new()
-        .headers(["From", "To", "Subject"])
+    let signature_ed = DkimSigner::from_key(pk_ed)
         .domain("example.com")
         .selector("default-ed")
-        .sign(TEST_MESSAGE.as_bytes(), &pk_ed)
+        .headers(["From", "To", "Subject"])
+        .sign(TEST_MESSAGE.as_bytes())
         .unwrap();
 
     // Print the message including both signatures to stdout

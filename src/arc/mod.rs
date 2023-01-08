@@ -8,6 +8,7 @@
  * except according to those terms.
  */
 
+pub mod builder;
 pub mod headers;
 pub mod parse;
 pub mod seal;
@@ -15,11 +16,25 @@ pub mod verify;
 
 use std::borrow::Cow;
 
+use sha2::Sha256;
+
 use crate::{
-    common::{crypto::Algorithm, headers::Header, verify::VerifySignature},
-    dkim::Canonicalization,
+    common::{
+        crypto::{Algorithm, SigningKey},
+        headers::Header,
+        verify::VerifySignature,
+    },
+    dkim::{Canonicalization, NeedDomain},
     ArcOutput, AuthenticationResults, DkimResult,
 };
+
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct ArcSealer<'x, T: SigningKey<Hasher = Sha256>, State = NeedDomain> {
+    _state: std::marker::PhantomData<State>,
+    pub(crate) key: T,
+    pub(crate) signature: Signature<'x>,
+    pub(crate) seal: Seal<'x>,
+}
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Signature<'x> {

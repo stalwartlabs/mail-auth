@@ -52,11 +52,11 @@ Features:
 ```rust
     // Sign an e-mail message using RSA-SHA256
     let pk_rsa =  RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-    let signature_rsa = Signature::new()
-        .headers(["From", "To", "Subject"])
+    let signature_rsa = DkimSigner::from_key(pk_rsa)
         .domain("example.com")
         .selector("default")
-        .sign(RFC5322_MESSAGE.as_bytes(), &pk_rsa)
+        .headers(["From", "To", "Subject"])
+        .sign(RFC5322_MESSAGE.as_bytes())
         .unwrap();
 
     // Sign an e-mail message using ED25519-SHA256
@@ -65,12 +65,12 @@ Features:
         &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
     )
     .unwrap();
-    let signature_ed = Signature::new()
-        .headers(["From", "To", "Subject"])
+    let signature_ed = DkimSigner::from_key(pk_ed)
         .domain("example.com")
         .selector("default-ed")
-        .sign(RFC5322_MESSAGE.as_bytes(), &pk_ed)
-        .unwrap();
+        .headers(["From", "To", "Subject"])
+        .sign(RFC5322_MESSAGE.as_bytes())
+        .unwrap();    
 
     // Print the message including both signatures to stdout
     println!(
@@ -119,11 +119,11 @@ Features:
     if arc_result.can_be_sealed() {
         // Seal the e-mail message using RSA-SHA256
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        let arc_set = ArcSet::new(&auth_results)
+        let arc_set = ArcSealer::from_key(pk_rsa)
             .domain("example.org")
             .selector("default")
             .headers(["From", "To", "Subject", "DKIM-Signature"])
-            .seal(&authenticated_message, &arc_result, &pk_rsa)
+            .seal(&authenticated_message, &auth_results, &arc_result)
             .unwrap();
 
         // Print the sealed message to stdout

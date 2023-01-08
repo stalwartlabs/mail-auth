@@ -137,7 +137,7 @@ impl Resolver {
                     .await
                 {
                     Ok(_) => true,
-                    Err(Error::DNSError(_)) => return None,
+                    Err(Error::DnsError(_)) => return None,
                     _ => false,
                 }
             {
@@ -169,7 +169,7 @@ impl Resolver {
                 Ok(dmarc) => {
                     return Ok(Some(dmarc));
                 }
-                Err(Error::DNSRecordNotFound(_)) | Err(Error::InvalidRecordType) => (),
+                Err(Error::DnsRecordNotFound(_)) | Err(Error::InvalidRecordType) => (),
                 Err(err) => return Err(err),
             }
 

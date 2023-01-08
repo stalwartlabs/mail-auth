@@ -269,9 +269,9 @@ impl Resolver {
             let key = key.into_fqdn().into_owned();
             return match self.ipv4_lookup(key.as_str()).await {
                 Ok(_) => Ok(true),
-                Err(Error::DNSRecordNotFound(_)) => match self.ipv6_lookup(key.as_str()).await {
+                Err(Error::DnsRecordNotFound(_)) => match self.ipv6_lookup(key.as_str()).await {
                     Ok(_) => Ok(true),
-                    Err(Error::DNSRecordNotFound(_)) => Ok(false),
+                    Err(Error::DnsRecordNotFound(_)) => Ok(false),
                     Err(err) => Err(err),
                 },
                 Err(err) => Err(err),
@@ -354,9 +354,9 @@ impl From<ResolveError> for Error {
     fn from(err: ResolveError) -> Self {
         match err.kind() {
             ResolveErrorKind::NoRecordsFound { response_code, .. } => {
-                Error::DNSRecordNotFound(*response_code)
+                Error::DnsRecordNotFound(*response_code)
             }
-            _ => Error::DNSError(err.to_string()),
+            _ => Error::DnsError(err.to_string()),
         }
     }
 }
@@ -543,8 +543,8 @@ fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     } else if domain.contains("_invalid_record.") {
         Error::InvalidRecordType
     } else if domain.contains("_dns_error.") {
-        Error::DNSError("".to_string())
+        Error::DnsError("".to_string())
     } else {
-        Error::DNSRecordNotFound(trust_dns_resolver::proto::op::ResponseCode::NXDomain)
+        Error::DnsRecordNotFound(trust_dns_resolver::proto::op::ResponseCode::NXDomain)
     })
 }

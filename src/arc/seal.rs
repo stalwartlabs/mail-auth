@@ -15,57 +15,52 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     common::{crypto::SigningKey, headers::Writer},
-    dkim::Canonicalization,
+    dkim::{Canonicalization, Done},
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
 };
 
-use super::{ArcSet, ChainValidation, Seal, Signature};
+use super::{ArcSealer, ArcSet, ChainValidation, Signature};
 
-impl<'x> ArcSet<'x> {
-    pub fn new(results: &'x AuthenticationResults) -> Self {
-        ArcSet {
-            signature: Signature::default(),
-            seal: Seal::default(),
-            results,
-        }
-    }
-
+impl<'x, T: SigningKey<Hasher = Sha256>> ArcSealer<'x, T, Done> {
     pub fn seal(
-        mut self,
+        &self,
         message: &'x AuthenticatedMessage<'x>,
+        results: &'x AuthenticationResults,
         arc_output: &ArcOutput,
-        with_key: &impl SigningKey<Hasher = Sha256>,
-    ) -> crate::Result<Self> {
+    ) -> crate::Result<ArcSet<'x>> {
         if !arc_output.can_be_sealed() {
             return Err(Error::ARCInvalidCV);
         }
 
-        // Set a=
-        self.signature.a = with_key.algorithm();
-        self.seal.a = with_key.algorithm();
+        // Create set
+        let mut set = ArcSet {
+            signature: self.signature.clone(),
+            seal: self.seal.clone(),
+            results,
+        };
 
         // Set i= and cv=
         if arc_output.set.is_empty() {
-            self.signature.i = 1;
-            self.seal.i = 1;
-            self.seal.cv = ChainValidation::None;
+            set.signature.i = 1;
+            set.seal.i = 1;
+            set.seal.cv = ChainValidation::None;
         } else {
             let i = arc_output.set.last().unwrap().seal.header.i + 1;
-            self.signature.i = i;
-            self.seal.i = i;
-            self.seal.cv = match &arc_output.result {
+            set.signature.i = i;
+            set.seal.i = i;
+            set.seal.cv = match &arc_output.result {
                 DkimResult::Pass => ChainValidation::Pass,
                 _ => ChainValidation::Fail,
             };
         }
 
         // Create hashes
-        let mut body_hasher = with_key.hasher();
-        let mut header_hasher = with_key.hasher();
+        let mut body_hasher = self.key.hasher();
+        let mut header_hasher = self.key.hasher();
 
         // Canonicalize headers and body
         let (body_len, signed_headers) =
-            self.signature
+            set.signature
                 .canonicalize(message, &mut header_hasher, &mut body_hasher)?;
 
         if signed_headers.is_empty() {
@@ -77,24 +72,24 @@ impl<'x> ArcSet<'x> {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        self.signature.bh = base64_encode(&body_hasher.finalize())?;
-        self.signature.t = now;
-        self.signature.x = if self.signature.x > 0 {
-            now + self.signature.x
+        set.signature.bh = base64_encode(&body_hasher.finalize())?;
+        set.signature.t = now;
+        set.signature.x = if set.signature.x > 0 {
+            now + set.signature.x
         } else {
             0
         };
-        self.signature.h = signed_headers;
-        if self.signature.l > 0 {
-            self.signature.l = body_len as u64;
+        set.signature.h = signed_headers;
+        if set.signature.l > 0 {
+            set.signature.l = body_len as u64;
         }
 
         // Add signature to hash
-        self.signature.write(&mut header_hasher, false);
+        set.signature.write(&mut header_hasher, false);
 
         // Sign
-        let b = with_key.sign(&header_hasher.finalize())?;
-        self.signature.b = base64_encode(&b)?;
+        let b = self.key.sign(&header_hasher.finalize())?;
+        set.signature.b = base64_encode(&b)?;
 
         // Hash ARC chain
         let mut header_hasher = Sha256::new();
@@ -112,60 +107,16 @@ impl<'x> ArcSet<'x> {
         }
 
         // Hash ARC headers for the current instance
-        self.results.write(&mut header_hasher, self.seal.i, false);
-        self.signature.write(&mut header_hasher, false);
+        set.results.write(&mut header_hasher, set.seal.i, false);
+        set.signature.write(&mut header_hasher, false);
         header_hasher.write_all(b"\r\n")?;
-        self.seal.write(&mut header_hasher, false);
+        set.seal.write(&mut header_hasher, false);
 
         // Seal
-        let b = with_key.sign(&header_hasher.finalize())?;
-        self.seal.b = base64_encode(&b)?;
+        let b = self.key.sign(&header_hasher.finalize())?;
+        set.seal.b = base64_encode(&b)?;
 
-        Ok(self)
-    }
-
-    /// Sets the headers to sign.
-    pub fn headers(mut self, headers: impl IntoIterator<Item = impl Into<Cow<'x, str>>>) -> Self {
-        self.signature.h = headers.into_iter().map(|h| h.into()).collect();
-        self
-    }
-
-    /// Sets the domain to use for signing.
-    pub fn domain(mut self, domain: &'x str) -> Self {
-        self.signature.d = domain.into();
-        self.seal.d = domain.into();
-        self
-    }
-
-    /// Sets the selector to use for signing.
-    pub fn selector(mut self, selector: &'x str) -> Self {
-        self.signature.s = selector.into();
-        self.seal.s = selector.into();
-        self
-    }
-
-    /// Sets the number of seconds from now to use for the signature expiration.
-    pub fn expiration(mut self, expiration: u64) -> Self {
-        self.signature.x = expiration;
-        self
-    }
-
-    /// Include the body length in the signature.
-    pub fn body_length(mut self, body_length: bool) -> Self {
-        self.signature.l = u64::from(body_length);
-        self
-    }
-
-    /// Sets header canonicalization algorithm.
-    pub fn header_canonicalization(mut self, ch: Canonicalization) -> Self {
-        self.signature.ch = ch;
-        self
-    }
-
-    /// Sets header canonicalization algorithm.
-    pub fn body_canonicalization(mut self, cb: Canonicalization) -> Self {
-        self.signature.cb = cb;
-        self
+        Ok(set)
     }
 }
 
@@ -218,14 +169,14 @@ mod test {
     use sha2::Sha256;
 
     use crate::{
-        arc::ArcSet,
+        arc::ArcSealer,
         common::{
             crypto::{Ed25519Key, RsaKey, SigningKey},
             headers::HeaderWriter,
             parse::TxtRecordParser,
             verify::DomainKey,
         },
-        dkim::Signature,
+        dkim::DkimSigner,
         AuthenticatedMessage, AuthenticationResults, DkimResult, Resolver,
     };
 
@@ -283,28 +234,38 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
         // Create private keys
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        let pk_ed = Ed25519Key::from_bytes(
-            &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
-            &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
-        )
-        .unwrap();
+        let pk_ed_public =
+            base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap();
+        let pk_ed_private = base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap();
 
         // Create DKIM-signed message
-        let mut raw_message = Signature::new()
-            .headers(["From", "To", "Subject"])
+        let mut raw_message = DkimSigner::from_key(pk_rsa.clone())
             .domain("manchego.org")
             .selector("rsa")
-            .sign(message.as_bytes(), &pk_rsa)
+            .headers(["From", "To", "Subject"])
+            .sign(message.as_bytes())
             .unwrap()
             .to_header()
             + message;
 
         // Verify and seal the message 50 times
         for _ in 0..25 {
-            raw_message =
-                arc_verify_and_seal(&resolver, &raw_message, "scamorza.org", "ed", &pk_ed).await;
-            raw_message =
-                arc_verify_and_seal(&resolver, &raw_message, "manchego.org", "rsa", &pk_rsa).await;
+            raw_message = arc_verify_and_seal(
+                &resolver,
+                &raw_message,
+                "scamorza.org",
+                "ed",
+                Ed25519Key::from_bytes(&pk_ed_public, &pk_ed_private).unwrap(),
+            )
+            .await;
+            raw_message = arc_verify_and_seal(
+                &resolver,
+                &raw_message,
+                "manchego.org",
+                "rsa",
+                pk_rsa.clone(),
+            )
+            .await;
         }
 
         //println!("{}", raw_message);
@@ -315,7 +276,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         raw_message: &str,
         d: &str,
         s: &str,
-        pk: &impl SigningKey<Hasher = Sha256>,
+        pk: impl SigningKey<Hasher = Sha256>,
     ) -> String {
         let message = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
         let dkim_result = resolver.verify_dkim(&message).await;
@@ -326,11 +287,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             arc_result.result()
         );
         let auth_results = AuthenticationResults::new(d).with_dkim_result(&dkim_result, d);
-        let arc = ArcSet::new(&auth_results)
+        let arc = ArcSealer::from_key(pk)
             .domain(d)
             .selector(s)
             .headers(["From", "To", "Subject", "DKIM-Signature"])
-            .seal(&message, &arc_result, pk)
+            .seal(&message, &auth_results, &arc_result)
             .unwrap_or_else(|err| panic!("Got {:?} for {}", err, raw_message));
         format!(
             "{}{}{}",

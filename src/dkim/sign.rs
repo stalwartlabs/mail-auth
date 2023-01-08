@@ -8,141 +8,64 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, time::SystemTime};
+use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
 use sha1::Digest;
 
-use super::{Canonicalization, HashAlgorithm, Signature};
+use super::{DkimSigner, Done, Signature};
 use crate::{common::crypto::SigningKey, Error};
 
-impl<'x> Signature<'x> {
-    /// Creates a new DKIM signature.
-    pub fn new() -> Self {
-        Signature {
-            v: 1,
-            ..Default::default()
-        }
-    }
-
+impl<'x, T: SigningKey> DkimSigner<'x, T, Done> {
     /// Signs a message.
     #[inline(always)]
-    pub fn sign(mut self, message: &'x [u8], with_key: &impl SigningKey) -> crate::Result<Self> {
-        if !self.d.is_empty() && !self.s.is_empty() && !self.h.is_empty() {
-            let now = SystemTime::now()
+    pub fn sign(&self, message: &'x [u8]) -> crate::Result<Signature<'x>> {
+        self.sign_(
+            message,
+            SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            self.a = with_key.algorithm();
-            self.sign_(message, with_key, now)
-        } else {
-            Err(Error::MissingParameters)
-        }
+                .unwrap_or(0),
+        )
     }
 
-    fn sign_(
-        mut self,
-        message: &'x [u8],
-        with_key: &impl SigningKey,
-        now: u64,
-    ) -> crate::Result<Self> {
-        let mut body_hasher = with_key.hasher();
-        let mut header_hasher = with_key.hasher();
+    fn sign_(&self, message: &'x [u8], now: u64) -> crate::Result<Signature<'x>> {
+        let mut body_hasher = self.key.hasher();
+        let mut header_hasher = self.key.hasher();
 
         // Canonicalize headers and body
         let (body_len, signed_headers) =
-            self.canonicalize(message, &mut header_hasher, &mut body_hasher);
+            self.template
+                .canonicalize(message, &mut header_hasher, &mut body_hasher);
 
         if signed_headers.is_empty() {
             return Err(Error::NoHeadersFound);
         }
 
         // Create Signature
-        self.bh = base64_encode(&body_hasher.finalize())?;
-        self.t = now;
-        self.x = if self.x > 0 { now + self.x } else { 0 };
-        self.h = signed_headers;
-        if self.l > 0 {
-            self.l = body_len as u64;
+        let mut signature = self.template.clone();
+        signature.bh = base64_encode(&body_hasher.finalize())?;
+        signature.t = now;
+        signature.x = if signature.x > 0 {
+            now + signature.x
+        } else {
+            0
+        };
+        signature.h = signed_headers;
+        if signature.l > 0 {
+            signature.l = body_len as u64;
         }
 
         // Add signature to hash
-        self.write(&mut header_hasher, false);
+        signature.write(&mut header_hasher, false);
 
         // Sign
-        let b = with_key.sign(&header_hasher.finalize())?;
+        let b = self.key.sign(&header_hasher.finalize())?;
 
         // Encode
-        self.b = base64_encode(&b)?;
+        signature.b = base64_encode(&b)?;
 
-        Ok(self)
-    }
-
-    /// Sets the headers to sign.
-    pub fn headers(mut self, headers: impl IntoIterator<Item = impl Into<Cow<'x, str>>>) -> Self {
-        self.h = headers.into_iter().map(|h| h.into()).collect();
-        self
-    }
-
-    /// Sets the domain to use for signing.
-    pub fn domain(mut self, domain: impl Into<Cow<'x, str>>) -> Self {
-        self.d = domain.into();
-        self
-    }
-
-    /// Sets the selector to use for signing.
-    pub fn selector(mut self, selector: impl Into<Cow<'x, str>>) -> Self {
-        self.s = selector.into();
-        self
-    }
-
-    /// Sets the third party signature.
-    pub fn atps(mut self, atps: impl Into<Cow<'x, str>>) -> Self {
-        self.atps = Some(atps.into());
-        self
-    }
-
-    /// Sets the third-party signature hashing algorithm.
-    pub fn atpsh(mut self, atpsh: HashAlgorithm) -> Self {
-        self.atpsh = atpsh.into();
-        self
-    }
-
-    /// Sets the selector to use for signing.
-    pub fn agent_user_identifier(mut self, auid: impl Into<Cow<'x, str>>) -> Self {
-        self.i = auid.into();
-        self
-    }
-
-    /// Sets the number of seconds from now to use for the signature expiration.
-    pub fn expiration(mut self, expiration: u64) -> Self {
-        self.x = expiration;
-        self
-    }
-
-    /// Include the body length in the signature.
-    pub fn body_length(mut self, body_length: bool) -> Self {
-        self.l = u64::from(body_length);
-        self
-    }
-
-    /// Request reports.
-    pub fn reporting(mut self, reporting: bool) -> Self {
-        self.r = reporting;
-        self
-    }
-
-    /// Sets header canonicalization algorithm.
-    pub fn header_canonicalization(mut self, ch: Canonicalization) -> Self {
-        self.ch = ch;
-        self
-    }
-
-    /// Sets header canonicalization algorithm.
-    pub fn body_canonicalization(mut self, cb: Canonicalization) -> Self {
-        self.cb = cb;
-        self
+        Ok(signature)
     }
 }
 
@@ -160,7 +83,7 @@ mod test {
             parse::TxtRecordParser,
             verify::DomainKey,
         },
-        dkim::{Atps, Canonicalization, DomainKeyReport, HashAlgorithm, Signature},
+        dkim::{Atps, Canonicalization, DkimSigner, DomainKeyReport, HashAlgorithm, Signature},
         AuthenticatedMessage, DkimOutput, DkimResult, Resolver,
     };
 
@@ -195,10 +118,10 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
     #[test]
     fn dkim_sign() {
         let pk = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        let signature = Signature::new()
-            .headers(["From", "To", "Subject"])
+        let signature = DkimSigner::from_key(pk)
             .domain("stalw.art")
             .selector("default")
+            .headers(["From", "To", "Subject"])
             .sign_(
                 concat!(
                     "From: hello@stalw.art\r\n",
@@ -207,7 +130,6 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                     "Here goes the test\r\n\r\n"
                 )
                 .as_bytes(),
-                &pk,
                 311923920,
             )
             .unwrap();
@@ -278,12 +200,12 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         // Test RSA-SHA256 relaxed/relaxed
         verify(
             &resolver,
-            Signature::new()
-                .headers(["From", "To", "Subject"])
+            DkimSigner::from_key(pk_rsa.clone())
                 .domain("example.com")
                 .selector("default")
+                .headers(["From", "To", "Subject"])
                 .agent_user_identifier("\"John Doe\" <jdoe@example.com>")
-                .sign(message.as_bytes(), &pk_rsa)
+                .sign(message.as_bytes())
                 .unwrap(),
             message,
             Ok(()),
@@ -293,11 +215,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         // Test ED25519-SHA256 relaxed/relaxed
         verify(
             &resolver,
-            Signature::new()
-                .headers(["From", "To", "Subject"])
+            DkimSigner::from_key(pk_ed)
                 .domain("example.com")
                 .selector("ed")
-                .sign(message.as_bytes(), &pk_ed)
+                .headers(["From", "To", "Subject"])
+                .sign(message.as_bytes())
                 .unwrap(),
             message,
             Ok(()),
@@ -307,7 +229,9 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         // Test RSA-SHA256 simple/simple with duplicated headers
         verify(
             &resolver,
-            Signature::new()
+            DkimSigner::from_key(pk_rsa.clone())
+                .domain("example.com")
+                .selector("default")
                 .headers([
                     "From",
                     "To",
@@ -315,11 +239,9 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                     "X-Duplicate-Header",
                     "X-Does-Not-Exist",
                 ])
-                .domain("example.com")
-                .selector("default")
                 .header_canonicalization(Canonicalization::Simple)
                 .body_canonicalization(Canonicalization::Simple)
-                .sign(message_multiheader.as_bytes(), &pk_rsa)
+                .sign(message_multiheader.as_bytes())
                 .unwrap(),
             message_multiheader,
             Ok(()),
@@ -329,13 +251,13 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         // Test RSA-SHA256 simple/relaxed with fixed body length
         verify(
             &resolver,
-            Signature::new()
-                .headers(["From", "To", "Subject"])
+            DkimSigner::from_key(pk_rsa.clone())
                 .domain("example.com")
                 .selector("default")
+                .headers(["From", "To", "Subject"])
                 .header_canonicalization(Canonicalization::Simple)
                 .body_length(true)
-                .sign(message.as_bytes(), &pk_rsa)
+                .sign(message.as_bytes())
                 .unwrap(),
             &(message.to_string() + "\r\n----- Mailing list"),
             Ok(()),
@@ -345,12 +267,12 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         // Test AUID not matching domain
         verify(
             &resolver,
-            Signature::new()
-                .headers(["From", "To", "Subject"])
+            DkimSigner::from_key(pk_rsa.clone())
                 .domain("example.com")
                 .selector("default")
+                .headers(["From", "To", "Subject"])
                 .agent_user_identifier("@wrongdomain.com")
-                .sign(message.as_bytes(), &pk_rsa)
+                .sign(message.as_bytes())
                 .unwrap(),
             message,
             Err(super::Error::FailedAUIDMatch),
@@ -360,13 +282,13 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         // Test expired signature and reporting
         let r = verify(
             &resolver,
-            Signature::new()
-                .headers(["From", "To", "Subject"])
+            DkimSigner::from_key(pk_rsa.clone())
                 .domain("example.com")
                 .selector("default")
+                .headers(["From", "To", "Subject"])
                 .expiration(12345)
                 .reporting(true)
-                .sign_(message.as_bytes(), &pk_rsa, 12345)
+                .sign_(message.as_bytes(), 12345)
                 .unwrap(),
             message,
             Err(super::Error::SignatureExpired),
@@ -380,16 +302,16 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         // Verify ATPS (failure)
         verify(
             &resolver,
-            Signature::new()
-                .headers(["From", "To", "Subject"])
+            DkimSigner::from_key(pk_rsa.clone())
                 .domain("example.com")
                 .selector("default")
+                .headers(["From", "To", "Subject"])
                 .atps("example.com")
                 .atpsh(HashAlgorithm::Sha256)
-                .sign_(message.as_bytes(), &pk_rsa, 12345)
+                .sign_(message.as_bytes(), 12345)
                 .unwrap(),
             message,
-            Err(super::Error::DNSRecordNotFound(ResponseCode::NXDomain)),
+            Err(super::Error::DnsRecordNotFound(ResponseCode::NXDomain)),
         )
         .await;
 
@@ -401,13 +323,13 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
         verify(
             &resolver,
-            Signature::new()
-                .headers(["From", "To", "Subject"])
+            DkimSigner::from_key(pk_rsa.clone())
                 .domain("example.com")
                 .selector("default")
+                .headers(["From", "To", "Subject"])
                 .atps("example.com")
                 .atpsh(HashAlgorithm::Sha256)
-                .sign_(message.as_bytes(), &pk_rsa, 12345)
+                .sign_(message.as_bytes(), 12345)
                 .unwrap(),
             message,
             Ok(()),
@@ -422,12 +344,12 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
         verify(
             &resolver,
-            Signature::new()
-                .headers(["From", "To", "Subject"])
+            DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
+                .headers(["From", "To", "Subject"])
                 .atps("example.com")
-                .sign_(message.as_bytes(), &pk_rsa, 12345)
+                .sign_(message.as_bytes(), 12345)
                 .unwrap(),
             message,
             Ok(()),
