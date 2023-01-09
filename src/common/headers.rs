@@ -23,6 +23,16 @@ impl<'x, T> Header<'x, T> {
     }
 }
 
+pub trait HeaderStream<'x> {
+    fn next_header(&mut self) -> Option<(&'x [u8], &'x [u8])>;
+    fn body(&mut self) -> &'x [u8];
+}
+
+pub(crate) struct ChainedHeaderIterator<'x, T: Iterator<Item = &'x [u8]>> {
+    parts: T,
+    iter: HeaderIterator<'x>,
+}
+
 pub(crate) struct HeaderIterator<'x> {
     message: &'x [u8],
     iter: Peekable<Enumerate<Iter<'x, u8>>>,
@@ -96,6 +106,18 @@ impl<'x> HeaderIterator<'x> {
     }
 }
 
+impl<'x> HeaderStream<'x> for HeaderIterator<'x> {
+    fn next_header(&mut self) -> Option<(&'x [u8], &'x [u8])> {
+        self.next()
+    }
+
+    fn body(&mut self) -> &'x [u8] {
+        self.body_offset()
+            .and_then(|offset| self.message.get(offset..))
+            .unwrap_or_default()
+    }
+}
+
 impl<'x> Iterator for HeaderIterator<'x> {
     type Item = (&'x [u8], &'x [u8]);
 
@@ -150,6 +172,30 @@ impl<'x> Iterator for HeaderIterator<'x> {
         }
 
         None
+    }
+}
+
+impl<'x, T: Iterator<Item = &'x [u8]>> ChainedHeaderIterator<'x, T> {
+    pub fn new(mut parts: T) -> Self {
+        ChainedHeaderIterator {
+            iter: HeaderIterator::new(parts.next().unwrap()),
+            parts,
+        }
+    }
+}
+
+impl<'x, T: Iterator<Item = &'x [u8]>> HeaderStream<'x> for ChainedHeaderIterator<'x, T> {
+    fn next_header(&mut self) -> Option<(&'x [u8], &'x [u8])> {
+        if let Some(header) = self.iter.next_header() {
+            Some(header)
+        } else {
+            self.iter = HeaderIterator::new(self.parts.next()?);
+            self.iter.next_header()
+        }
+    }
+
+    fn body(&mut self) -> &'x [u8] {
+        self.iter.body()
     }
 }
 
@@ -367,7 +413,7 @@ const MSGID: u64 = (b'm' as u64)
 mod test {
     use crate::common::headers::{AuthenticatedHeader, HeaderParser};
 
-    use super::HeaderIterator;
+    use super::{ChainedHeaderIterator, HeaderIterator, HeaderStream};
 
     #[test]
     fn header_iterator() {
@@ -479,5 +525,34 @@ mod test {
         assert!(parser.has_date);
         assert!(parser.has_message_id);
         assert_eq!(parser.num_received, 3);
+    }
+
+    #[test]
+    fn chained_header_iterator() {
+        let parts = vec![
+            &b"From: a\nTo: b\nEmpty:\nMulti: 1\n 2\n"[..],
+            &b"Subject: c\nReceived: d\n\nhey"[..],
+        ];
+        let mut headers = vec![
+            ("From", " a\n"),
+            ("To", " b\n"),
+            ("Empty", "\n"),
+            ("Multi", " 1\n 2\n"),
+            ("Subject", " c\n"),
+            ("Received", " d\n"),
+        ]
+        .into_iter();
+        let mut it = ChainedHeaderIterator::new(parts.iter().copied());
+
+        while let Some((k, v)) = it.next_header() {
+            assert_eq!(
+                (
+                    std::str::from_utf8(k).unwrap(),
+                    std::str::from_utf8(v).unwrap()
+                ),
+                headers.next().unwrap()
+            );
+        }
+        assert_eq!(it.body(), b"hey");
     }
 }

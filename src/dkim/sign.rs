@@ -14,7 +14,10 @@ use mail_builder::encoders::base64::base64_encode;
 
 use super::{DkimSigner, Done, Signature};
 use crate::{
-    common::crypto::{HashContext, SigningKey},
+    common::{
+        crypto::{HashContext, SigningKey},
+        headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream},
+    },
     Error,
 };
 
@@ -22,8 +25,8 @@ impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a message.
     #[inline(always)]
     pub fn sign(&self, message: &[u8]) -> crate::Result<Signature> {
-        self.sign_(
-            message,
+        self.sign_stream(
+            HeaderIterator::new(message),
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -31,7 +34,26 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         )
     }
 
-    fn sign_(&self, message: &[u8], now: u64) -> crate::Result<Signature> {
+    #[inline(always)]
+    /// Signs a chained message.
+    pub fn sign_chained<'x>(
+        &self,
+        chunks: impl Iterator<Item = &'x [u8]>,
+    ) -> crate::Result<Signature> {
+        self.sign_stream(
+            ChainedHeaderIterator::new(chunks),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+        )
+    }
+
+    fn sign_stream<'x>(
+        &self,
+        message: impl HeaderStream<'x>,
+        now: u64,
+    ) -> crate::Result<Signature> {
         let mut body_hasher = self.key.hasher();
         let mut header_hasher = self.key.hasher();
 
@@ -81,6 +103,7 @@ mod test {
     use crate::{
         common::{
             crypto::{Ed25519Key, RsaKey, Sha256},
+            headers::HeaderIterator,
             parse::TxtRecordParser,
             verify::DomainKey,
         },
@@ -123,14 +146,16 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             .domain("stalw.art")
             .selector("default")
             .headers(["From", "To", "Subject"])
-            .sign_(
-                concat!(
-                    "From: hello@stalw.art\r\n",
-                    "To: dkim@stalw.art\r\n",
-                    "Subject: Testing  DKIM!\r\n\r\n",
-                    "Here goes the test\r\n\r\n"
-                )
-                .as_bytes(),
+            .sign_stream(
+                HeaderIterator::new(
+                    concat!(
+                        "From: hello@stalw.art\r\n",
+                        "To: dkim@stalw.art\r\n",
+                        "Subject: Testing  DKIM!\r\n\r\n",
+                        "Here goes the test\r\n\r\n"
+                    )
+                    .as_bytes(),
+                ),
                 311923920,
             )
             .unwrap();
@@ -289,7 +314,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .headers(["From", "To", "Subject"])
                 .expiration(12345)
                 .reporting(true)
-                .sign_(message.as_bytes(), 12345)
+                .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
             message,
             Err(super::Error::SignatureExpired),
@@ -309,7 +334,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .headers(["From", "To", "Subject"])
                 .atps("example.com")
                 .atpsh(HashAlgorithm::Sha256)
-                .sign_(message.as_bytes(), 12345)
+                .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
             message,
             Err(super::Error::DnsRecordNotFound(ResponseCode::NXDomain)),
@@ -330,7 +355,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .headers(["From", "To", "Subject"])
                 .atps("example.com")
                 .atpsh(HashAlgorithm::Sha256)
-                .sign_(message.as_bytes(), 12345)
+                .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
             message,
             Ok(()),
@@ -350,7 +375,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .selector("default")
                 .headers(["From", "To", "Subject"])
                 .atps("example.com")
-                .sign_(message.as_bytes(), 12345)
+                .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
             message,
             Ok(()),

@@ -10,7 +10,7 @@
 
 use crate::common::{
     crypto::{HashContext, HashImpl},
-    headers::{HeaderIterator, Writer},
+    headers::{HeaderStream, Writer},
 };
 
 use super::{Canonicalization, Signature};
@@ -147,18 +147,17 @@ impl Canonicalization {
 
 impl Signature {
     #[allow(clippy::while_let_on_iterator)]
-    pub(crate) fn canonicalize(
+    pub(crate) fn canonicalize<'x>(
         &self,
-        message: &[u8],
+        mut message: impl HeaderStream<'x>,
         header_hasher: &mut impl Writer,
         body_hasher: &mut impl Writer,
     ) -> (usize, Vec<String>) {
-        let mut headers_it = HeaderIterator::new(message);
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
         let mut signed_headers = Vec::with_capacity(self.h.len());
 
-        for (name, value) in &mut headers_it {
+        while let Some((name, value)) = message.next_header() {
             if let Some(pos) = self
                 .h
                 .iter()
@@ -170,10 +169,7 @@ impl Signature {
             }
         }
 
-        let body = headers_it
-            .body_offset()
-            .and_then(|pos| message.get(pos..))
-            .unwrap_or_default();
+        let body = message.body();
         let body_len = body.len();
         self.ch
             .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher);
