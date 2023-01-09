@@ -83,11 +83,12 @@ impl<'x> AuthenticationResults<'x> {
         spf: &SpfOutput,
         ip_addr: IpAddr,
         from: &str,
+        ehlo_domain: &str,
     ) -> Self {
         let (mail_from, addr) = if !from.is_empty() {
             (Cow::from(from), from)
         } else {
-            (format!("postmaster@{}", from).into(), "<>")
+            (format!("postmaster@{}", ehlo_domain).into(), "<>")
         };
         self.auth_results.push_str(";\r\n\tspf=");
         spf.result.as_spf_result(
@@ -419,7 +420,7 @@ mod test {
             (
                 concat!(
                     "spf=pass (localhost: domain of jdoe@example.org designates 192.168.1.1 ",
-                    "as permitted sender) smtp.mailfrom=jdoe@example.org smtp.helo=example.org"
+                    "as permitted sender) smtp.mailfrom=jdoe@example.org"
                 ),
                 concat!(
                     "pass (localhost: domain of jdoe@example.org designates 192.168.1.1 as ",
@@ -435,8 +436,7 @@ mod test {
             (
                 concat!(
                     "spf=fail (mx.domain.org: domain of sender@otherdomain.org does not ",
-                    "designate a:b:c::f as permitted sender) smtp.mailfrom=sender@otherdomain.org ",
-                    "smtp.helo=otherdomain.org"
+                    "designate a:b:c::f as permitted sender) smtp.mailfrom=sender@otherdomain.org"
                 ),
                 concat!(
                     "fail (mx.domain.org: domain of sender@otherdomain.org does not designate ",
@@ -453,7 +453,7 @@ mod test {
             (
                 concat!(
                     "spf=neutral (mx.domain.org: domain of postmaster@example.org reports neutral ",
-                    "for a:b:c::f) smtp.mailfrom=postmaster@example.org smtp.helo=example.org"
+                    "for a:b:c::f) smtp.mailfrom=<>"
                 ),
                 concat!(
                     "neutral (mx.domain.org: domain of postmaster@example.org reports neutral for ",
@@ -468,7 +468,7 @@ mod test {
             ),
         ] {
             auth_results.hostname = receiver;
-            auth_results = auth_results.with_spf_result(
+            auth_results = auth_results.with_spf_mailfrom_result(
                 &SpfOutput {
                     result,
                     domain: "".to_string(),
@@ -476,8 +476,8 @@ mod test {
                     explanation: None,
                 },
                 ip_addr,
-                helo,
                 mail_from,
+                helo,
             );
             let received_spf = ReceivedSpf::new(
                 &SpfOutput {

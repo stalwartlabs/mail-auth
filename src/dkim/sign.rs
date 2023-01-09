@@ -46,7 +46,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
 
         // Create Signature
         let mut signature = self.template.clone();
-        signature.bh = base64_encode(&body_hasher.complete().as_ref())?;
+        signature.bh = base64_encode(body_hasher.complete().as_ref())?;
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
