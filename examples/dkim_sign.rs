@@ -9,11 +9,14 @@
  */
 
 use mail_auth::{
-    common::{crypto::Ed25519Key, crypto::RsaKey, headers::HeaderWriter},
+    common::{
+        crypto::RsaKey,
+        crypto::{Ed25519Key, Sha256},
+        headers::HeaderWriter,
+    },
     dkim::DkimSigner,
 };
 use mail_parser::decoders::base64::base64_decode;
-use sha2::Sha256;
 
 const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
 MIICXwIBAAKBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYtIxN2SnFC

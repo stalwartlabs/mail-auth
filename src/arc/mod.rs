@@ -14,11 +14,9 @@ pub mod parse;
 pub mod seal;
 pub mod verify;
 
-use sha2::Sha256;
-
 use crate::{
     common::{
-        crypto::{Algorithm, SigningKey},
+        crypto::{Algorithm, Sha256, SigningKey},
         headers::Header,
         verify::VerifySignature,
     },
