@@ -8,6 +8,8 @@
  * except according to those terms.
  */
 
+use crate::{Error, IprevResult};
+
 pub mod auth_results;
 pub mod base32;
 pub mod crypto;
@@ -17,3 +19,13 @@ pub mod message;
 pub mod parse;
 pub mod resolver;
 pub mod verify;
+
+impl From<Error> for IprevResult {
+    fn from(err: Error) -> Self {
+        if matches!(&err, Error::DnsError(_)) {
+            IprevResult::TempError(err)
+        } else {
+            IprevResult::PermError(err)
+        }
+    }
+}

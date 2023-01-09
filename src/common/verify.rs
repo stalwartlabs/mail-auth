@@ -8,13 +8,68 @@
  * except according to those terms.
  */
 
-use crate::dkim::Canonicalization;
+use std::net::IpAddr;
+
+use crate::{dkim::Canonicalization, Error, IprevOutput, IprevResult, Resolver};
 
 use super::crypto::{Algorithm, VerifyingKey};
 
 pub struct DomainKey {
     pub(crate) p: Box<dyn VerifyingKey + Send + Sync>,
     pub(crate) f: u64,
+}
+
+impl Resolver {
+    pub async fn verify_iprev(&self, addr: IpAddr) -> IprevOutput {
+        match self.ptr_lookup(addr).await {
+            Ok(ptr) => {
+                let mut last_err = None;
+                for host in ptr.iter().take(2) {
+                    match &addr {
+                        IpAddr::V4(ip) => match self.ipv4_lookup(host).await {
+                            Ok(ips) => {
+                                if ips.iter().any(|cip| cip == ip) {
+                                    return IprevOutput {
+                                        result: IprevResult::Pass,
+                                        ptr: ptr.into(),
+                                    };
+                                }
+                            }
+                            Err(err) => {
+                                last_err = err.into();
+                            }
+                        },
+                        IpAddr::V6(ip) => match self.ipv6_lookup(host).await {
+                            Ok(ips) => {
+                                if ips.iter().any(|cip| cip == ip) {
+                                    return IprevOutput {
+                                        result: IprevResult::Pass,
+                                        ptr: ptr.into(),
+                                    };
+                                }
+                            }
+                            Err(err) => {
+                                last_err = err.into();
+                            }
+                        },
+                    }
+                }
+
+                IprevOutput {
+                    result: if let Some(err) = last_err {
+                        err.into()
+                    } else {
+                        IprevResult::Fail(Error::NotAligned)
+                    },
+                    ptr: ptr.into(),
+                }
+            }
+            Err(err) => IprevOutput {
+                result: err.into(),
+                ptr: None,
+            },
+        }
+    }
 }
 
 impl DomainKey {

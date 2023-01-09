@@ -78,7 +78,7 @@ impl Resolver {
                     output.policy = dmarc.sp;
                     DmarcResult::Pass
                 } else {
-                    DmarcResult::Fail(Error::DMARCNotAligned)
+                    DmarcResult::Fail(Error::NotAligned)
                 };
             }
 
@@ -107,7 +107,7 @@ impl Resolver {
                     }) {
                         output.policy = dmarc.sp;
                     }
-                    DmarcResult::Fail(Error::DMARCNotAligned)
+                    DmarcResult::Fail(Error::NotAligned)
                 };
             }
         }
@@ -259,8 +259,8 @@ mod test {
                 "subdomain.example.org",
                 DkimResult::Pass,
                 SpfResult::Pass,
-                DmarcResult::Fail(Error::DMARCNotAligned),
-                DmarcResult::Fail(Error::DMARCNotAligned),
+                DmarcResult::Fail(Error::NotAligned),
+                DmarcResult::Fail(Error::NotAligned),
                 Policy::Quarantine,
             ),
             // Strict - Pass with tree walk

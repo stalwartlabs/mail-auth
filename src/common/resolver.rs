@@ -255,7 +255,14 @@ impl Resolver {
         let ptr = ptr_lookup
             .as_lookup()
             .record_iter()
-            .filter_map(|r| r.data()?.as_ptr()?.to_lowercase().to_string().into())
+            .filter_map(|r| {
+                let r = r.data()?.as_ptr()?;
+                if !r.is_empty() {
+                    r.to_lowercase().to_string().into()
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
 
         Ok(self

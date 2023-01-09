@@ -401,6 +401,21 @@ pub enum DmarcResult {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
+pub struct IprevOutput {
+    result: IprevResult,
+    ptr: Option<Arc<Vec<String>>>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum IprevResult {
+    Pass,
+    Fail(crate::Error),
+    TempError(crate::Error),
+    PermError(crate::Error),
+    None,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub(crate) enum Version {
     V1,
 }
@@ -419,22 +434,18 @@ pub enum Error {
     UnsupportedKeyType,
     FailedBodyHashMatch,
     FailedVerification,
-    FailedAUIDMatch,
+    FailedAuidMatch,
     RevokedPublicKey,
     IncompatibleAlgorithms,
     SignatureExpired,
-
     DnsError(String),
     DnsRecordNotFound(ResponseCode),
-
-    ARCChainTooLong,
-    ARCInvalidInstance(u32),
-    ARCInvalidCV,
-    ARCHasHeaderTag,
-    ARCBrokenChain,
-
-    DMARCNotAligned,
-
+    ArcChainTooLong,
+    ArcInvalidInstance(u32),
+    ArcInvalidCV,
+    ArcHasHeaderTag,
+    ArcBrokenChain,
+    NotAligned,
     InvalidRecordType,
 }
 
@@ -467,18 +478,18 @@ impl Display for Error {
             ),
             Error::FailedVerification => write!(f, "Signature verification failed"),
             Error::SignatureExpired => write!(f, "Signature expired"),
-            Error::FailedAUIDMatch => write!(f, "AUID does not match domain name"),
-            Error::ARCInvalidInstance(i) => {
+            Error::FailedAuidMatch => write!(f, "AUID does not match domain name"),
+            Error::ArcInvalidInstance(i) => {
                 write!(f, "Invalid 'i={}' value found in ARC header", i)
             }
-            Error::ARCInvalidCV => write!(f, "Invalid 'cv=' value found in ARC header"),
-            Error::ARCHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal"),
-            Error::ARCBrokenChain => write!(f, "Broken or missing ARC chain"),
-            Error::ARCChainTooLong => write!(f, "Too many ARC headers"),
+            Error::ArcInvalidCV => write!(f, "Invalid 'cv=' value found in ARC header"),
+            Error::ArcHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal"),
+            Error::ArcBrokenChain => write!(f, "Broken or missing ARC chain"),
+            Error::ArcChainTooLong => write!(f, "Too many ARC headers"),
             Error::InvalidRecordType => write!(f, "Invalid record"),
             Error::DnsError(err) => write!(f, "DNS resolution error: {}", err),
             Error::DnsRecordNotFound(code) => write!(f, "DNS record not found: {}", code),
-            Error::DMARCNotAligned => write!(f, "DMARC policy not aligned"),
+            Error::NotAligned => write!(f, "Policy not aligned"),
         }
     }
 }

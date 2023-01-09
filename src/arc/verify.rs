@@ -29,11 +29,11 @@ impl Resolver {
         if arc_headers == 0 {
             return ArcOutput::default();
         } else if arc_headers > 50 {
-            return ArcOutput::default().with_result(DkimResult::Fail(Error::ARCChainTooLong));
+            return ArcOutput::default().with_result(DkimResult::Fail(Error::ArcChainTooLong));
         } else if (arc_headers != message.as_headers.len())
             || (arc_headers != message.aar_headers.len())
         {
-            return ArcOutput::default().with_result(DkimResult::Fail(Error::ARCBrokenChain));
+            return ArcOutput::default().with_result(DkimResult::Fail(Error::ArcBrokenChain));
         }
 
         let now = SystemTime::now()
@@ -72,11 +72,11 @@ impl Resolver {
                     || (signature.i as usize != (pos + 1))
                     || (results.i as usize != (pos + 1))
                 {
-                    output.result = DkimResult::Fail(Error::ARCInvalidInstance((pos + 1) as u32));
+                    output.result = DkimResult::Fail(Error::ArcInvalidInstance((pos + 1) as u32));
                 } else if (pos == 0 && seal.cv != ChainValidation::None)
                     || (pos > 0 && seal.cv != ChainValidation::Pass)
                 {
-                    output.result = DkimResult::Fail(Error::ARCInvalidCV);
+                    output.result = DkimResult::Fail(Error::ArcInvalidCV);
                 } else if pos == arc_headers - 1 {
                     // Validate last signature in the chain
                     if signature.x == 0 || (signature.x > signature.t && signature.x > now) {

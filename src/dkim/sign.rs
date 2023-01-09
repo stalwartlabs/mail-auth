@@ -275,7 +275,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 .sign(message.as_bytes())
                 .unwrap(),
             message,
-            Err(super::Error::FailedAUIDMatch),
+            Err(super::Error::FailedAuidMatch),
         )
         .await;
 

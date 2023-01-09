@@ -102,7 +102,7 @@ impl Resolver {
 
             // Enforce t=s flag
             if !signature.validate_auid(&record) {
-                output.push(DkimOutput::fail(Error::FailedAUIDMatch).with_signature(signature));
+                output.push(DkimOutput::fail(Error::FailedAuidMatch).with_signature(signature));
                 continue;
             }
 
@@ -211,7 +211,7 @@ impl Resolver {
                             | Error::Io(_)
                             | Error::FailedVerification
                             | Error::FailedBodyHashMatch
-                            | Error::FailedAUIDMatch => (record.rr & RR_VERIFICATION) != 0,
+                            | Error::FailedAuidMatch => (record.rr & RR_VERIFICATION) != 0,
                             Error::Base64
                             | Error::UnsupportedVersion
                             | Error::UnsupportedAlgorithm
@@ -226,12 +226,12 @@ impl Resolver {
                             | Error::RevokedPublicKey => (record.rr & RR_DNS) != 0,
                             Error::MissingParameters
                             | Error::NoHeadersFound
-                            | Error::ARCChainTooLong
-                            | Error::ARCInvalidInstance(_)
-                            | Error::ARCInvalidCV
-                            | Error::ARCHasHeaderTag
-                            | Error::ARCBrokenChain
-                            | Error::DMARCNotAligned => (record.rr & RR_OTHER) != 0,
+                            | Error::ArcChainTooLong
+                            | Error::ArcInvalidInstance(_)
+                            | Error::ArcInvalidCV
+                            | Error::ArcHasHeaderTag
+                            | Error::ArcBrokenChain
+                            | Error::NotAligned => (record.rr & RR_OTHER) != 0,
                         };
 
                         if send_report {

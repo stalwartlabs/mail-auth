@@ -48,7 +48,7 @@ impl Signature {
                 I => {
                     signature.i = header.number().unwrap_or(0) as u32;
                     if !(1..=50).contains(&signature.i) {
-                        return Err(Error::ARCInvalidInstance(signature.i));
+                        return Err(Error::ArcInvalidInstance(signature.i));
                     }
                 }
                 A => {
@@ -133,22 +133,22 @@ impl Seal {
                         b'p' | b'P' if header.match_bytes(b"ass") => {
                             cv = ChainValidation::Pass.into();
                         }
-                        _ => return Err(Error::ARCInvalidCV),
+                        _ => return Err(Error::ArcInvalidCV),
                     }
                     if !header.seek_tag_end() {
-                        return Err(Error::ARCInvalidCV);
+                        return Err(Error::ArcInvalidCV);
                     }
                 }
                 H => {
-                    return Err(Error::ARCHasHeaderTag);
+                    return Err(Error::ArcHasHeaderTag);
                 }
                 _ => header.ignore(),
             }
         }
-        seal.cv = cv.ok_or(Error::ARCInvalidCV)?;
+        seal.cv = cv.ok_or(Error::ArcInvalidCV)?;
 
         if !(1..=50).contains(&seal.i) {
-            Err(Error::ARCInvalidInstance(seal.i))
+            Err(Error::ArcInvalidInstance(seal.i))
         } else if !seal.d.is_empty() && !seal.s.is_empty() && !seal.b.is_empty() {
             Ok(seal)
         } else {
@@ -176,7 +176,7 @@ impl Results {
         if (1..=50).contains(&results.i) {
             Ok(results)
         } else {
-            Err(Error::ARCInvalidInstance(results.i))
+            Err(Error::ArcInvalidInstance(results.i))
         }
     }
 }

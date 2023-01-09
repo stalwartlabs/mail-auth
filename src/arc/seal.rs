@@ -29,7 +29,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         arc_output: &ArcOutput,
     ) -> crate::Result<ArcSet<'x>> {
         if !arc_output.can_be_sealed() {
-            return Err(Error::ARCInvalidCV);
+            return Err(Error::ArcInvalidCV);
         }
 
         // Create set

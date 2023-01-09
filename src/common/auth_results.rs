@@ -14,7 +14,7 @@ use mail_builder::encoders::base64::base64_encode;
 
 use crate::{
     ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
-    ReceivedSpf, SpfOutput, SpfResult,
+    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult,
 };
 
 use super::headers::{HeaderWriter, Writer};
@@ -113,6 +113,13 @@ impl<'x> AuthenticationResults<'x> {
             dmarc.domain, dmarc.policy
         )
         .ok();
+        self
+    }
+
+    pub fn with_iprev_result(mut self, iprev: &IprevOutput, remote_ip: IpAddr) -> Self {
+        self.auth_results.push_str(";\r\n\tiprev=");
+        iprev.result.as_auth_result(&mut self.auth_results);
+        write!(self.auth_results, " policy.iprev={}", remote_ip).ok();
         self
     }
 }
@@ -235,6 +242,27 @@ impl AsAuthResult for DmarcResult {
     }
 }
 
+impl AsAuthResult for IprevResult {
+    fn as_auth_result(&self, header: &mut String) {
+        match &self {
+            IprevResult::Pass => header.push_str("pass"),
+            IprevResult::Fail(err) => {
+                header.push_str("fail");
+                err.as_auth_result(header);
+            }
+            IprevResult::PermError(err) => {
+                header.push_str("permerror");
+                err.as_auth_result(header);
+            }
+            IprevResult::TempError(err) => {
+                header.push_str("temperror");
+                err.as_auth_result(header);
+            }
+            IprevResult::None => header.push_str("none"),
+        }
+    }
+}
+
 impl AsAuthResult for DkimResult {
     fn as_auth_result(&self, header: &mut String) {
         match &self {
@@ -276,21 +304,21 @@ impl AsAuthResult for Error {
             Error::UnsupportedKeyType => "unsupported key type",
             Error::FailedBodyHashMatch => "body hash did not verify",
             Error::FailedVerification => "verification failed",
-            Error::FailedAUIDMatch => "auid does not match",
+            Error::FailedAuidMatch => "auid does not match",
             Error::RevokedPublicKey => "revoked public key",
             Error::IncompatibleAlgorithms => "incompatible record/signature algorithms",
             Error::SignatureExpired => "signature error",
             Error::DnsError(_) => "dns error",
             Error::DnsRecordNotFound(_) => "dns record not found",
-            Error::ARCInvalidInstance(i) => {
+            Error::ArcInvalidInstance(i) => {
                 write!(header, "invalid ARC instance {})", i).ok();
                 return;
             }
-            Error::ARCInvalidCV => "invalid ARC cv",
-            Error::ARCChainTooLong => "too many ARC headers",
-            Error::ARCHasHeaderTag => "ARC has header tag",
-            Error::ARCBrokenChain => "broken ARC chain",
-            Error::DMARCNotAligned => "dmarc not aligned",
+            Error::ArcInvalidCV => "invalid ARC cv",
+            Error::ArcChainTooLong => "too many ARC headers",
+            Error::ArcHasHeaderTag => "ARC has header tag",
+            Error::ArcBrokenChain => "broken ARC chain",
+            Error::NotAligned => "policy not aligned",
             Error::InvalidRecordType => "invalid dns record type",
         });
         header.push(')');
@@ -301,7 +329,8 @@ impl AsAuthResult for Error {
 mod test {
     use crate::{
         dkim::Signature, dmarc::Policy, ArcOutput, AuthenticationResults, DkimOutput, DkimResult,
-        DmarcOutput, DmarcResult, Error, ReceivedSpf, SpfOutput, SpfResult,
+        DmarcOutput, DmarcResult, Error, IprevOutput, IprevResult, ReceivedSpf, SpfOutput,
+        SpfResult,
     };
 
     #[test]
@@ -470,9 +499,9 @@ mod test {
                 },
             ),
             (
-                "dmarc=fail (dmarc not aligned) header.from=example.com policy.dmarc=quarantine",
+                "dmarc=fail (policy not aligned) header.from=example.com policy.dmarc=quarantine",
                 DmarcOutput {
-                    dkim_result: DmarcResult::Fail(Error::DMARCNotAligned),
+                    dkim_result: DmarcResult::Fail(Error::NotAligned),
                     spf_result: DmarcResult::None,
                     domain: "example.com".to_string(),
                     policy: Policy::Quarantine,
@@ -506,6 +535,31 @@ mod test {
                 },
                 remote_ip,
             );
+            assert_eq!(
+                auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
+                expected_auth_results
+            );
+        }
+
+        for (expected_auth_results, iprev, remote_ip) in [
+            (
+                "iprev=pass policy.iprev=192.127.9.2",
+                IprevOutput {
+                    result: IprevResult::Pass,
+                    ptr: None,
+                },
+                "192.127.9.2".parse().unwrap(),
+            ),
+            (
+                "iprev=fail (policy not aligned) policy.iprev=1:2:3::a",
+                IprevOutput {
+                    result: IprevResult::Fail(Error::NotAligned),
+                    ptr: None,
+                },
+                "1:2:3::a".parse().unwrap(),
+            ),
+        ] {
+            auth_results = auth_results.with_iprev_result(&iprev, remote_ip);
             assert_eq!(
                 auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
                 expected_auth_results
