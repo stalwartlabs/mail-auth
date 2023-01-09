@@ -9,10 +9,12 @@
  */
 
 use mail_parser::{parsers::MessageStream, HeaderValue};
-use sha1::Sha1;
-use sha2::Sha256;
 
-use crate::{arc, common::crypto::HashAlgorithm, dkim, AuthenticatedMessage};
+use crate::{
+    arc,
+    common::crypto::{HashAlgorithm, Sha1, Sha256},
+    dkim, AuthenticatedMessage,
+};
 
 use super::headers::{AuthenticatedHeader, Header, HeaderParser};
 

@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use std::io;
+use super::headers::Writer;
 
 pub(crate) static BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
@@ -68,30 +68,21 @@ impl Base32Writer {
     }
 }
 
-impl io::Write for Base32Writer {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let start_pos = self.pos;
-
-        for &byte in bytes {
+impl Writer for Base32Writer {
+    fn write(&mut self, buf: &[u8]) {
+        for &byte in buf {
             self.push_byte(byte, false);
         }
-
-        Ok(self.pos - start_pos)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-
-    use std::io::Write;
-
-    use sha1::{Digest, Sha1};
-
-    use crate::common::base32::Base32Writer;
+    use crate::common::{
+        base32::Base32Writer,
+        crypto::{HashContext, HashImpl, Sha1},
+        headers::Writer,
+    };
 
     #[test]
     fn base32_hash() {
@@ -100,9 +91,9 @@ mod tests {
             ("two.example.net", "ZTZGRRV3F45A4U6HLDKBF3ZCOW4V2AJX"),
         ] {
             let mut writer = Base32Writer::with_capacity(10);
-            let mut hash = Sha1::new();
-            hash.update(test.as_bytes());
-            writer.write_all(&hash.finalize()[..]).ok();
+            let mut hash = Sha1::hasher();
+            hash.write(test.as_bytes());
+            writer.write(hash.complete().as_ref());
             assert_eq!(writer.finalize(), expected_result);
         }
     }

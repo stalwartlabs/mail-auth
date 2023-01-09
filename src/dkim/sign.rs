@@ -11,10 +11,12 @@
 use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
-use sha1::Digest;
 
 use super::{DkimSigner, Done, Signature};
-use crate::{common::crypto::SigningKey, Error};
+use crate::{
+    common::crypto::{HashContext, SigningKey},
+    Error,
+};
 
 impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a message.
@@ -44,7 +46,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
 
         // Create Signature
         let mut signature = self.template.clone();
-        signature.bh = base64_encode(&body_hasher.finalize())?;
+        signature.bh = base64_encode(&body_hasher.complete().as_ref())?;
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
@@ -60,7 +62,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         signature.write(&mut header_hasher, false);
 
         // Sign
-        let b = self.key.sign(&header_hasher.finalize())?;
+        let b = self.key.sign(header_hasher.complete())?;
 
         // Encode
         signature.b = base64_encode(&b)?;
@@ -74,12 +76,11 @@ mod test {
     use std::time::{Duration, Instant};
 
     use mail_parser::decoders::base64::base64_decode;
-    use sha2::Sha256;
     use trust_dns_resolver::proto::op::ResponseCode;
 
     use crate::{
         common::{
-            crypto::{Ed25519Key, RsaKey},
+            crypto::{Ed25519Key, RsaKey, Sha256},
             parse::TxtRecordParser,
             verify::DomainKey,
         },

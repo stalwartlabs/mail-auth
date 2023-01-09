@@ -8,14 +8,12 @@
  * except according to those terms.
  */
 
-use std::{io::Write, time::SystemTime};
-
-use sha1::{Digest, Sha1};
-use sha2::Sha256;
+use std::time::SystemTime;
 
 use crate::{
     common::{
         base32::Base32Writer,
+        headers::Writer,
         verify::{DomainKey, VerifySignature},
     },
     is_within_pct, AuthenticatedMessage, DkimOutput, DkimResult, Error, Resolver,
@@ -131,18 +129,10 @@ impl Resolver {
 
                 if found {
                     let mut query_domain = match &signature.atpsh {
-                        Some(HashAlgorithm::Sha256) => {
+                        Some(algorithm) => {
                             let mut writer = Base32Writer::with_capacity(40);
-                            let mut hash = Sha256::new();
-                            hash.update(signature.d.as_bytes());
-                            writer.write_all(&hash.finalize()[..]).ok();
-                            writer.finalize()
-                        }
-                        Some(HashAlgorithm::Sha1) => {
-                            let mut writer = Base32Writer::with_capacity(40);
-                            let mut hash = Sha1::new();
-                            hash.update(signature.d.as_bytes());
-                            writer.write_all(&hash.finalize()[..]).ok();
+                            let output = algorithm.hash(signature.d.as_bytes());
+                            writer.write(output.as_ref());
                             writer.finalize()
                         }
                         None => signature.d.to_string(),
