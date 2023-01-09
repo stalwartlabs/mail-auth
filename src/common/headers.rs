@@ -33,6 +33,9 @@ pub(crate) struct HeaderParser<'x> {
     message: &'x [u8],
     iter: Peekable<Enumerate<Iter<'x, u8>>>,
     start_pos: usize,
+    pub num_received: usize,
+    pub has_message_id: bool,
+    pub has_date: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +61,9 @@ impl<'x> HeaderParser<'x> {
             message,
             iter: message.iter().enumerate().peekable(),
             start_pos: 0,
+            num_received: 0,
+            has_message_id: false,
+            has_date: false,
         }
     }
 
@@ -223,6 +229,10 @@ impl<'x> Iterator for HeaderParser<'x> {
                     .unwrap_or_default();
                 let header_value = self.message.get(colon_pos + 1..pos + 1).unwrap_or_default();
                 let header_name = match hash {
+                    RECEIVED if token_start + 8 == token_end + 1 => {
+                        self.num_received += 1;
+                        AuthenticatedHeader::Other(header_name)
+                    }
                     FROM => AuthenticatedHeader::From(header_name),
                     AS => AuthenticatedHeader::As(header_name),
                     AAR if self
@@ -248,6 +258,20 @@ impl<'x> Iterator for HeaderParser<'x> {
                         .eq_ignore_ascii_case(b"nature") =>
                     {
                         AuthenticatedHeader::Ds(header_name)
+                    }
+                    MSGID
+                        if self
+                            .message
+                            .get(token_start + 8..token_end + 1)
+                            .unwrap_or_default()
+                            .eq_ignore_ascii_case(b"id") =>
+                    {
+                        self.has_message_id = true;
+                        AuthenticatedHeader::Other(header_name)
+                    }
+                    DATE => {
+                        self.has_date = true;
+                        AuthenticatedHeader::Other(header_name)
                     }
                     _ => AuthenticatedHeader::Other(header_name),
                 };
@@ -321,6 +345,23 @@ const AS: u64 = (b'a' as u64)
     | (b'e' as u64) << 40
     | (b'a' as u64) << 48
     | (b'l' as u64) << 56;
+const RECEIVED: u64 = (b'r' as u64)
+    | (b'e' as u64) << 8
+    | (b'c' as u64) << 16
+    | (b'e' as u64) << 24
+    | (b'i' as u64) << 32
+    | (b'v' as u64) << 40
+    | (b'e' as u64) << 48
+    | (b'd' as u64) << 56;
+const DATE: u64 = (b'd' as u64) | (b'a' as u64) << 8 | (b't' as u64) << 16 | (b'e' as u64) << 24;
+const MSGID: u64 = (b'm' as u64)
+    | (b'e' as u64) << 8
+    | (b's' as u64) << 16
+    | (b's' as u64) << 24
+    | (b'a' as u64) << 32
+    | (b'g' as u64) << 40
+    | (b'e' as u64) << 48
+    | (b'-' as u64) << 56;
 
 #[cfg(test)]
 mod test {
@@ -408,12 +449,17 @@ mod test {
             "From: jdoe@domain\n",
             "F r o m : jane@domain.com\n",
             "ARC-Authentication: i=1;\n",
+            "Received: r1\n",
+            "Received: r2\n",
+            "Received: r3\n",
+            "Received-From: test\n",
+            "Date: date\n",
+            "Message-Id: myid\n",
             "\nhey",
         );
+        let mut parser = HeaderParser::new(message.as_bytes());
         assert_eq!(
-            HeaderParser::new(message.as_bytes())
-                .map(|(h, _)| { h })
-                .collect::<Vec<_>>(),
+            (&mut parser).map(|(h, _)| { h }).collect::<Vec<_>>(),
             vec![
                 AuthenticatedHeader::Ams(b"ARC-Message-Signature"),
                 AuthenticatedHeader::Aar(b"ARC-Authentication-Results"),
@@ -422,7 +468,16 @@ mod test {
                 AuthenticatedHeader::From(b"From"),
                 AuthenticatedHeader::From(b"F r o m "),
                 AuthenticatedHeader::Other(b"ARC-Authentication"),
+                AuthenticatedHeader::Other(b"Received"),
+                AuthenticatedHeader::Other(b"Received"),
+                AuthenticatedHeader::Other(b"Received"),
+                AuthenticatedHeader::Other(b"Received-From"),
+                AuthenticatedHeader::Other(b"Date"),
+                AuthenticatedHeader::Other(b"Message-Id"),
             ]
         );
+        assert!(parser.has_date);
+        assert!(parser.has_message_id);
+        assert_eq!(parser.num_received, 3);
     }
 }

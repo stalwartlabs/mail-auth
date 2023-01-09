@@ -77,7 +77,7 @@ impl Resolver {
     }
 
     #[allow(clippy::while_let_on_iterator)]
-    pub(crate) async fn check_host(
+    pub async fn check_host(
         &self,
         ip: IpAddr,
         domain: &str,

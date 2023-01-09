@@ -22,11 +22,15 @@ impl<'x> AuthenticatedMessage<'x> {
             headers: Vec::new(),
             from: Vec::new(),
             body: b"",
+            body_offset: 0,
             body_hashes: Vec::new(),
             dkim_headers: Vec::new(),
             ams_headers: Vec::new(),
             as_headers: Vec::new(),
             aar_headers: Vec::new(),
+            received_headers_count: 0,
+            date_header_present: false,
+            message_id_header_present: false,
         };
 
         let mut headers = HeaderParser::new(raw_message);
@@ -138,11 +142,18 @@ impl<'x> AuthenticatedMessage<'x> {
             return None;
         }
 
+        // Update header counts
+        message.received_headers_count = headers.num_received;
+        message.message_id_header_present = headers.has_message_id;
+        message.date_header_present = headers.has_date;
+
         // Obtain message body
-        message.body = headers
-            .body_offset()
-            .and_then(|pos| raw_message.get(pos..))
-            .unwrap_or_default();
+        if let Some(offset) = headers.body_offset() {
+            message.body_offset = offset;
+            message.body = raw_message.get(offset..).unwrap_or_default();
+        } else {
+            message.body_offset = raw_message.len();
+        }
 
         // Calculate body hashes
         for (cb, ha, l, bh) in &mut message.body_hashes {
@@ -178,5 +189,25 @@ impl<'x> AuthenticatedMessage<'x> {
         }
 
         message.into()
+    }
+
+    pub fn received_headers_count(&self) -> usize {
+        self.received_headers_count
+    }
+
+    pub fn has_message_id_header(&self) -> bool {
+        self.message_id_header_present
+    }
+
+    pub fn has_date_header(&self) -> bool {
+        self.date_header_present
+    }
+
+    pub fn body_offset(&self) -> usize {
+        self.body_offset
+    }
+
+    pub fn from(&self) -> &[String] {
+        &self.from
     }
 }

@@ -61,17 +61,33 @@ impl<'x> AuthenticationResults<'x> {
         self
     }
 
-    pub fn with_spf_result(
+    pub fn with_spf_ehlo_result(
         mut self,
         spf: &SpfOutput,
         ip_addr: IpAddr,
-        helo: &str,
-        mail_from: &str,
+        ehlo_domain: &str,
     ) -> Self {
-        let mail_from = if !mail_from.is_empty() {
-            Cow::from(mail_from)
+        self.auth_results.push_str(";\r\n\tspf=");
+        spf.result.as_spf_result(
+            &mut self.auth_results,
+            self.hostname,
+            &format!("postmaster@{}", ehlo_domain),
+            ip_addr,
+        );
+        write!(self.auth_results, " smtp.helo={}", ehlo_domain).ok();
+        self
+    }
+
+    pub fn with_spf_mailfrom_result(
+        mut self,
+        spf: &SpfOutput,
+        ip_addr: IpAddr,
+        from: &str,
+    ) -> Self {
+        let (mail_from, addr) = if !from.is_empty() {
+            (Cow::from(from), from)
         } else {
-            format!("postmaster@{}", helo).into()
+            (format!("postmaster@{}", from).into(), "<>")
         };
         self.auth_results.push_str(";\r\n\tspf=");
         spf.result.as_spf_result(
@@ -80,12 +96,7 @@ impl<'x> AuthenticationResults<'x> {
             mail_from.as_ref(),
             ip_addr,
         );
-        write!(
-            self.auth_results,
-            " smtp.mailfrom={} smtp.helo={}",
-            mail_from, helo
-        )
-        .ok();
+        write!(self.auth_results, " smtp.mailfrom={}", addr).ok();
         self
     }
 

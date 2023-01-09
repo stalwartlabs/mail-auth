@@ -319,11 +319,15 @@ pub struct AuthenticatedMessage<'x> {
     pub(crate) headers: Vec<(&'x [u8], &'x [u8])>,
     pub(crate) from: Vec<String>,
     pub(crate) body: &'x [u8],
+    pub(crate) body_offset: usize,
     pub(crate) body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
     pub(crate) dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature>>>,
     pub(crate) ams_headers: Vec<Header<'x, crate::Result<arc::Signature>>>,
     pub(crate) as_headers: Vec<Header<'x, crate::Result<arc::Seal>>>,
     pub(crate) aar_headers: Vec<Header<'x, crate::Result<arc::Results>>>,
+    pub(crate) received_headers_count: usize,
+    pub(crate) date_header_present: bool,
+    pub(crate) message_id_header_present: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -402,8 +406,8 @@ pub enum DmarcResult {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IprevOutput {
-    result: IprevResult,
-    ptr: Option<Arc<Vec<String>>>,
+    pub result: IprevResult,
+    pub ptr: Option<Arc<Vec<String>>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -494,6 +498,20 @@ impl Display for Error {
     }
 }
 
+impl Display for SpfResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            SpfResult::Pass => "Pass",
+            SpfResult::Fail => "Fail",
+            SpfResult::SoftFail => "SoftFail",
+            SpfResult::Neutral => "Neutral",
+            SpfResult::TempError => "TempError",
+            SpfResult::PermError => "PermError",
+            SpfResult::None => "None",
+        })
+    }
+}
+
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Error::Io(err.to_string())
@@ -509,6 +527,17 @@ impl From<rsa::errors::Error> for Error {
 impl From<ed25519_dalek::ed25519::Error> for Error {
     fn from(err: ed25519_dalek::ed25519::Error) -> Self {
         Error::CryptoError(err.to_string())
+    }
+}
+
+impl Default for SpfOutput {
+    fn default() -> Self {
+        Self {
+            result: SpfResult::None,
+            domain: Default::default(),
+            report: Default::default(),
+            explanation: Default::default(),
+        }
     }
 }
 
