@@ -90,6 +90,14 @@ impl URI {
             max_size,
         }
     }
+
+    pub fn uri(&self) -> &str {
+        &self.uri
+    }
+
+    pub fn max_size(&self) -> usize {
+        self.max_size
+    }
 }
 
 impl From<Error> for DmarcResult {
@@ -153,6 +161,16 @@ impl DmarcOutput {
 
     pub fn dmarc_record(&self) -> Option<&Dmarc> {
         self.record.as_deref()
+    }
+
+    pub fn dmarc_record_cloned(&self) -> Option<Arc<Dmarc>> {
+        self.record.clone()
+    }
+
+    pub fn requested_reports(&self) -> bool {
+        self.record
+            .as_ref()
+            .map_or(false, |r| !r.rua.is_empty() || !r.ruf.is_empty())
     }
 
     /// Returns the failure reporting options

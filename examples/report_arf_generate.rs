@@ -40,6 +40,7 @@ fn main() {
         .with_identity_alignment(IdentityAlignment::DkimSpf)
         .with_message(&b"From: hello@world.org\r\nTo: ciao@mundo.org\r\n\r\n"[..])
         .to_rfc5322(
+            "DMARC Reports",
             "no-reply@example.org",
             "ruf@otherdomain.com",
             "DMARC Authentication Failure Report",

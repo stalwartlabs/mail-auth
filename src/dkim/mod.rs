@@ -161,6 +161,12 @@ impl VerifySignature for Signature {
     }
 }
 
+impl Signature {
+    pub fn identity(&self) -> &str {
+        &self.i
+    }
+}
+
 impl<'x> DkimOutput<'x> {
     pub(crate) fn pass() -> Self {
         DkimOutput {

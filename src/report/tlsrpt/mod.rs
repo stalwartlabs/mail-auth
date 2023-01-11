@@ -51,7 +51,7 @@ pub struct Policy {
     pub failure_details: Vec<FailureDetails>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PolicyDetails {
     #[serde(rename = "policy-type")]
     pub policy_type: PolicyType,
@@ -80,7 +80,7 @@ pub struct Summary {
     pub total_failure: u32,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailureDetails {
     #[serde(rename = "result-type")]
     pub result_type: ResultType,
@@ -89,8 +89,7 @@ pub struct FailureDetails {
     pub sending_mta_ip: Option<IpAddr>,
 
     #[serde(rename = "receiving-mx-hostname")]
-    #[serde(default)]
-    pub receiving_mx_hostname: String,
+    pub receiving_mx_hostname: Option<String>,
 
     #[serde(rename = "receiving-mx-helo")]
     pub receiving_mx_helo: Option<String>,
@@ -106,8 +105,7 @@ pub struct FailureDetails {
     pub additional_information: Option<String>,
 
     #[serde(rename = "failure-reason-code")]
-    #[serde(default)]
-    pub failure_reason_code: String,
+    pub failure_reason_code: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,7 +120,7 @@ pub struct DateRange {
     pub end_datetime: DateTime,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PolicyType {
     #[serde(rename = "tlsa")]
     Tlsa,
@@ -131,10 +129,11 @@ pub enum PolicyType {
     #[serde(rename = "no-policy-found")]
     NoPolicyFound,
     #[serde(other)]
+    #[default]
     Other,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResultType {
     #[serde(rename = "starttls-not-supported")]
     StartTlsNotSupported,
@@ -159,6 +158,7 @@ pub enum ResultType {
     #[serde(rename = "sts-webpki-invalid")]
     StsWebpkiInvalid,
     #[serde(other)]
+    #[default]
     Other,
 }
 
@@ -177,4 +177,29 @@ where
     S: Serializer,
 {
     serializer.serialize_str(&datetime.to_rfc3339())
+}
+
+impl PolicyDetails {
+    pub fn new(policy_type: PolicyType, policy_domain: impl Into<String>) -> Self {
+        Self {
+            policy_type,
+            policy_string: vec![],
+            policy_domain: policy_domain.into(),
+            mx_host: vec![],
+        }
+    }
+}
+
+impl FailureDetails {
+    pub fn new(result_type: impl Into<ResultType>) -> Self {
+        FailureDetails {
+            result_type: result_type.into(),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_failure_reason_code(mut self, code: impl Into<String>) -> Self {
+        self.failure_reason_code = Some(code.into());
+        self
+    }
 }

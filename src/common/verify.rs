@@ -88,7 +88,7 @@ impl DomainKey {
     }
 }
 
-pub(crate) trait VerifySignature {
+pub trait VerifySignature {
     fn selector(&self) -> &str;
 
     fn domain(&self) -> &str;

@@ -8,7 +8,11 @@
  * except according to those terms.
  */
 
-use std::{borrow::Cow, fmt::Write, net::IpAddr};
+use std::{
+    borrow::Cow,
+    fmt::{Display, Write},
+    net::IpAddr,
+};
 
 use mail_builder::encoders::base64::base64_encode;
 
@@ -27,38 +31,47 @@ impl<'x> AuthenticationResults<'x> {
         }
     }
 
-    pub fn with_dkim_result(mut self, dkim: &[DkimOutput], header_from: &str) -> Self {
+    pub fn with_dkim_results(mut self, dkim: &[DkimOutput], header_from: &str) -> Self {
         for dkim in dkim {
-            if !dkim.is_atps {
-                self.auth_results.push_str(";\r\n\tdkim=");
-            } else {
-                self.auth_results.push_str(";\r\n\tdkim-atps=");
-            }
-            dkim.result.as_auth_result(&mut self.auth_results);
-            if let Some(signature) = &dkim.signature {
-                if !signature.i.is_empty() {
-                    self.auth_results.push_str(" header.i=");
-                    self.auth_results.push_str(&signature.i);
-                } else {
-                    self.auth_results.push_str(" header.d=");
-                    self.auth_results.push_str(&signature.d);
-                }
-                self.auth_results.push_str(" header.s=");
-                self.auth_results.push_str(&signature.s);
-                if signature.b.len() >= 6 {
-                    self.auth_results.push_str(" header.b=");
-                    self.auth_results.push_str(
-                        &String::from_utf8(base64_encode(&signature.b[..6]).unwrap_or_default())
-                            .unwrap_or_default(),
-                    );
-                }
-            }
-
-            if dkim.is_atps {
-                write!(self.auth_results, " header.from={}", header_from).ok();
-            }
+            self.set_dkim_result(dkim, header_from);
         }
         self
+    }
+
+    pub fn with_dkim_result(mut self, dkim: &DkimOutput, header_from: &str) -> Self {
+        self.set_dkim_result(dkim, header_from);
+        self
+    }
+
+    pub fn set_dkim_result(&mut self, dkim: &DkimOutput, header_from: &str) {
+        if !dkim.is_atps {
+            self.auth_results.push_str(";\r\n\tdkim=");
+        } else {
+            self.auth_results.push_str(";\r\n\tdkim-atps=");
+        }
+        dkim.result.as_auth_result(&mut self.auth_results);
+        if let Some(signature) = &dkim.signature {
+            if !signature.i.is_empty() {
+                self.auth_results.push_str(" header.i=");
+                self.auth_results.push_str(&signature.i);
+            } else {
+                self.auth_results.push_str(" header.d=");
+                self.auth_results.push_str(&signature.d);
+            }
+            self.auth_results.push_str(" header.s=");
+            self.auth_results.push_str(&signature.s);
+            if signature.b.len() >= 6 {
+                self.auth_results.push_str(" header.b=");
+                self.auth_results.push_str(
+                    &String::from_utf8(base64_encode(&signature.b[..6]).unwrap_or_default())
+                        .unwrap_or_default(),
+                );
+            }
+        }
+
+        if dkim.is_atps {
+            write!(self.auth_results, " header.from={}", header_from).ok();
+        }
     }
 
     pub fn with_spf_ehlo_result(
@@ -133,6 +146,13 @@ impl<'x> AuthenticationResults<'x> {
         iprev.result.as_auth_result(&mut self.auth_results);
         write!(self.auth_results, " policy.iprev={}", remote_ip).ok();
         self
+    }
+}
+
+impl<'x> Display for AuthenticationResults<'x> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.hostname)?;
+        f.write_str(&self.auth_results)
     }
 }
 
@@ -401,7 +421,7 @@ mod test {
                 },
             ),
         ] {
-            auth_results = auth_results.with_dkim_result(&[dkim], "jdoe@example.org");
+            auth_results = auth_results.with_dkim_results(&[dkim], "jdoe@example.org");
             assert_eq!(
                 auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
                 expected_auth_results

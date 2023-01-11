@@ -363,3 +363,19 @@ impl Default for FeedbackType {
         FeedbackType::Other
     }
 }
+
+impl From<&crate::DkimResult> for AuthFailureType {
+    fn from(value: &crate::DkimResult) -> Self {
+        match value {
+            crate::DkimResult::Neutral(err)
+            | crate::DkimResult::Fail(err)
+            | crate::DkimResult::PermError(err)
+            | crate::DkimResult::TempError(err) => match err {
+                crate::Error::FailedBodyHashMatch => AuthFailureType::BodyHash,
+                crate::Error::RevokedPublicKey => AuthFailureType::Revoked,
+                _ => AuthFailureType::Signature,
+            },
+            crate::DkimResult::Pass | crate::DkimResult::None => AuthFailureType::Signature,
+        }
+    }
+}

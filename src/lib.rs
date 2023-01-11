@@ -318,7 +318,7 @@ pub struct MX {
 pub struct AuthenticatedMessage<'x> {
     pub(crate) headers: Vec<(&'x [u8], &'x [u8])>,
     pub(crate) from: Vec<String>,
-    pub(crate) body: &'x [u8],
+    pub(crate) raw_message: &'x [u8],
     pub(crate) body_offset: usize,
     pub(crate) body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
     pub(crate) dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature>>>,

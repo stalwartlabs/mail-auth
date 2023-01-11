@@ -15,7 +15,6 @@ use std::fmt::Write;
 use std::net::IpAddr;
 
 use crate::{
-    dmarc::Dmarc,
     report::{
         ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
         PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
@@ -23,6 +22,8 @@ use crate::{
     },
     ArcOutput, DkimOutput, DmarcOutput, SpfOutput,
 };
+
+use super::PolicyPublished;
 
 impl Report {
     pub fn new() -> Self {
@@ -182,21 +183,8 @@ impl Report {
         self
     }
 
-    pub fn with_policy_published(mut self, dmarc: &Dmarc) -> Self {
-        self.policy_published.adkim = (&dmarc.adkim).into();
-        self.policy_published.aspf = (&dmarc.aspf).into();
-        self.policy_published.p = (&dmarc.p).into();
-        self.policy_published.sp = (&dmarc.sp).into();
-        self.policy_published.testing = dmarc.t;
-        self.policy_published.fo = match &dmarc.fo {
-            crate::dmarc::Report::All => "0",
-            crate::dmarc::Report::Any => "1",
-            crate::dmarc::Report::Dkim => "d",
-            crate::dmarc::Report::Spf => "s",
-            crate::dmarc::Report::DkimSpf => "d:s",
-        }
-        .to_string()
-        .into();
+    pub fn with_policy_published(mut self, policy_published: PolicyPublished) -> Self {
+        self.policy_published = policy_published;
         self
     }
 }
@@ -206,7 +194,7 @@ impl Record {
         Record::default()
     }
 
-    pub fn with_dkim_output(mut self, dkim_output: &[DkimOutput]) {
+    pub fn with_dkim_output(mut self, dkim_output: &[DkimOutput]) -> Self {
         for dkim in dkim_output {
             if let Some(signature) = &dkim.signature {
                 let (result, human_result) = match &dkim.result {
@@ -232,9 +220,10 @@ impl Record {
                 });
             }
         }
+        self
     }
 
-    pub fn with_spf_output(mut self, spf_output: &SpfOutput, scope: SPFDomainScope) {
+    pub fn with_spf_output(mut self, spf_output: &SpfOutput, scope: SPFDomainScope) -> Self {
         self.auth_results.spf.push(SPFAuthResult {
             domain: spf_output.domain.to_string(),
             scope,
@@ -249,9 +238,10 @@ impl Record {
             },
             human_result: None,
         });
+        self
     }
 
-    pub fn with_dmarc_output(mut self, dmarc_output: &DmarcOutput) {
+    pub fn with_dmarc_output(mut self, dmarc_output: &DmarcOutput) -> Self {
         self.row.policy_evaluated.disposition = match dmarc_output.policy {
             crate::dmarc::Policy::None => ActionDisposition::None,
             crate::dmarc::Policy::Quarantine => ActionDisposition::Quarantine,
@@ -260,9 +250,10 @@ impl Record {
         };
         self.row.policy_evaluated.dkim = (&dmarc_output.dkim_result).into();
         self.row.policy_evaluated.spf = (&dmarc_output.spf_result).into();
+        self
     }
 
-    pub fn with_arc_output(mut self, arc_output: &ArcOutput) {
+    pub fn with_arc_output(mut self, arc_output: &ArcOutput) -> Self {
         if arc_output.result == crate::DkimResult::Pass {
             let mut comment = "arc=pass".to_string();
             for set in arc_output.set.iter().rev() {
@@ -279,6 +270,7 @@ impl Record {
                 .reason
                 .push(PolicyOverrideReason::new(PolicyOverride::LocalPolicy).with_comment(comment));
         }
+        self
     }
 
     pub fn source_ip(&self) -> IpAddr {
@@ -378,6 +370,30 @@ impl Record {
     pub fn with_spf_auth_result(mut self, auth_result: SPFAuthResult) -> Self {
         self.auth_results.spf.push(auth_result);
         self
+    }
+}
+
+impl From<DmarcOutput> for PolicyPublished {
+    fn from(value: DmarcOutput) -> Self {
+        let dmarc = value.record.unwrap();
+        PolicyPublished {
+            domain: value.domain,
+            adkim: (&dmarc.adkim).into(),
+            aspf: (&dmarc.aspf).into(),
+            p: (&dmarc.p).into(),
+            sp: (&dmarc.sp).into(),
+            testing: dmarc.t,
+            fo: match &dmarc.fo {
+                crate::dmarc::Report::All => "0",
+                crate::dmarc::Report::Any => "1",
+                crate::dmarc::Report::Dkim => "d",
+                crate::dmarc::Report::Spf => "s",
+                crate::dmarc::Report::DkimSpf => "d:s",
+            }
+            .to_string()
+            .into(),
+            version_published: None,
+        }
     }
 }
 

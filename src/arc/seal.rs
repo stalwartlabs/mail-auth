@@ -14,7 +14,7 @@ use mail_builder::encoders::base64::base64_encode;
 
 use crate::{
     common::{
-        crypto::{HashContext, Sha256, SigningKey},
+        crypto::{HashAlgorithm, HashContext, Sha256, SigningKey},
         headers::Writer,
     },
     dkim::{Canonicalization, Done},
@@ -55,18 +55,38 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
                 _ => ChainValidation::Fail,
             };
         }
-
-        // Create hashes
-        let mut body_hasher = self.key.hasher();
+        // Canonicalize headers
         let mut header_hasher = self.key.hasher();
-
-        // Canonicalize headers and body
-        let (body_len, signed_headers) =
-            set.signature
-                .canonicalize(message, &mut header_hasher, &mut body_hasher)?;
+        let signed_headers = set
+            .signature
+            .canonicalize_headers(message, &mut header_hasher)?;
 
         if signed_headers.is_empty() {
             return Err(Error::NoHeadersFound);
+        }
+
+        // Canonicalize body
+        if set.signature.l > 0 {
+            set.signature.l = (message.raw_message.len() - message.body_offset) as u64;
+        }
+        let ha = HashAlgorithm::from(set.signature.a);
+        if let Some((_, _, _, bh)) = message
+            .body_hashes
+            .iter()
+            .find(|(c, h, l, _)| c == &set.signature.cb && h == &ha && l == &set.signature.l)
+        {
+            // Use cached hash
+            set.signature.bh = base64_encode(bh)?;
+        } else {
+            let mut body_hasher = self.key.hasher();
+            set.signature.cb.canonicalize_body(
+                message
+                    .raw_message
+                    .get(message.body_offset..)
+                    .unwrap_or_default(),
+                &mut body_hasher,
+            );
+            set.signature.bh = base64_encode(body_hasher.complete().as_ref())?;
         }
 
         // Create Signature
@@ -74,7 +94,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        set.signature.bh = base64_encode(body_hasher.complete().as_ref())?;
+
         set.signature.t = now;
         set.signature.x = if set.signature.x > 0 {
             now + set.signature.x
@@ -82,9 +102,6 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             0
         };
         set.signature.h = signed_headers;
-        if set.signature.l > 0 {
-            set.signature.l = body_len as u64;
-        }
 
         // Add signature to hash
         set.signature.write(&mut header_hasher, false);
@@ -123,13 +140,11 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
 }
 
 impl Signature {
-    #[allow(clippy::while_let_on_iterator)]
-    pub(crate) fn canonicalize<'x>(
+    pub(crate) fn canonicalize_headers<'x>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
         header_hasher: &mut impl Writer,
-        body_hasher: &mut impl Writer,
-    ) -> crate::Result<(usize, Vec<String>)> {
+    ) -> crate::Result<Vec<String>> {
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
         let mut signed_headers = Vec::with_capacity(self.h.len());
@@ -146,10 +161,8 @@ impl Signature {
             }
         }
 
-        let body_len = message.body.len();
         self.ch
             .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher);
-        self.cb.canonicalize_body(message.body, body_hasher);
 
         // Add any missing headers
         signed_headers.reverse();
@@ -159,7 +172,7 @@ impl Signature {
             }
         }
 
-        Ok((body_len, signed_headers))
+        Ok(signed_headers)
     }
 }
 
@@ -287,7 +300,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             "ARC validation failed: {:?}",
             arc_result.result()
         );
-        let auth_results = AuthenticationResults::new(d).with_dkim_result(&dkim_result, d);
+        let auth_results = AuthenticationResults::new(d).with_dkim_results(&dkim_result, d);
         let arc = ArcSealer::from_key(pk)
             .domain(d)
             .selector(s)

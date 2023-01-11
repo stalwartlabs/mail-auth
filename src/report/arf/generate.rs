@@ -22,7 +22,8 @@ use crate::report::{AuthFailureType, DeliveryResult, Feedback, FeedbackType, Ide
 impl<'x> Feedback<'x> {
     pub fn write_rfc5322(
         &self,
-        from: &'x str,
+        from_name: &'x str,
+        from_addr: &'x str,
         to: &'x str,
         subject: &'x str,
         writer: impl io::Write,
@@ -89,7 +90,7 @@ impl<'x> Feedback<'x> {
         }
 
         MessageBuilder::new()
-            .header("From", HeaderType::Text(from.into()))
+            .from((from_name, from_addr))
             .header("To", HeaderType::Text(to.into()))
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
             .subject(subject)
@@ -100,9 +101,15 @@ impl<'x> Feedback<'x> {
             .write_to(writer)
     }
 
-    pub fn to_rfc5322(&self, from: &str, to: &str, subject: &str) -> io::Result<String> {
+    pub fn to_rfc5322(
+        &self,
+        from_name: &str,
+        from_addr: &str,
+        to: &str,
+        subject: &str,
+    ) -> io::Result<String> {
         let mut buf = Vec::new();
-        self.write_rfc5322(from, to, subject, &mut buf)?;
+        self.write_rfc5322(from_name, from_addr, to, subject, &mut buf)?;
         String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
@@ -223,7 +230,7 @@ impl<'x> Feedback<'x> {
             write!(&mut arf, "Reported-URI: {}\r\n", value).ok();
         }
         if let Some(value) = &self.reporting_mta {
-            write!(&mut arf, "Reporting-MTA: {}\r\n", value).ok();
+            write!(&mut arf, "Reporting-MTA: dns;{}\r\n", value).ok();
         }
         if let Some(value) = &self.source_ip {
             write!(&mut arf, "Source-IP: {}\r\n", value).ok();
@@ -275,6 +282,7 @@ mod test {
 
         let message = feedback
             .to_rfc5322(
+                "DMARC Reporter",
                 "no-reply@example.org",
                 "ruf@otherdomain.com",
                 "DMARC Authentication Failure Report",

@@ -49,7 +49,7 @@ async fn main() {
 
     // Build Authenticated-Results header
     let auth_results = AuthenticationResults::new("mx.mydomain.org")
-        .with_dkim_result(&dkim_result, "sender@example.org")
+        .with_dkim_results(&dkim_result, "sender@example.org")
         .with_arc_result(&arc_result, "127.0.0.1".parse().unwrap());
 
     // Seal message

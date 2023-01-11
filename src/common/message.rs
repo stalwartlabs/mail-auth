@@ -23,7 +23,7 @@ impl<'x> AuthenticatedMessage<'x> {
         let mut message = AuthenticatedMessage {
             headers: Vec::new(),
             from: Vec::new(),
-            body: b"",
+            raw_message,
             body_offset: 0,
             body_hashes: Vec::new(),
             dkim_headers: Vec::new(),
@@ -152,16 +152,16 @@ impl<'x> AuthenticatedMessage<'x> {
         // Obtain message body
         if let Some(offset) = headers.body_offset() {
             message.body_offset = offset;
-            message.body = raw_message.get(offset..).unwrap_or_default();
         } else {
             message.body_offset = raw_message.len();
         }
+        let body = raw_message.get(message.body_offset..).unwrap_or_default();
 
         // Calculate body hashes
         for (cb, ha, l, bh) in &mut message.body_hashes {
             *bh = match ha {
-                HashAlgorithm::Sha256 => cb.hash_body::<Sha256>(message.body, *l).as_ref().to_vec(),
-                HashAlgorithm::Sha1 => cb.hash_body::<Sha1>(message.body, *l).as_ref().to_vec(),
+                HashAlgorithm::Sha256 => cb.hash_body::<Sha256>(body, *l).as_ref().to_vec(),
+                HashAlgorithm::Sha1 => cb.hash_body::<Sha1>(body, *l).as_ref().to_vec(),
             };
         }
 
@@ -205,11 +205,19 @@ impl<'x> AuthenticatedMessage<'x> {
         self.date_header_present
     }
 
+    pub fn raw_headers(&self) -> &[u8] {
+        self.raw_message.get(..self.body_offset).unwrap_or_default()
+    }
+
     pub fn body_offset(&self) -> usize {
         self.body_offset
     }
 
-    pub fn from(&self) -> &[String] {
+    pub fn froms(&self) -> &[String] {
         &self.from
+    }
+
+    pub fn from(&self) -> &str {
+        self.from.first().map_or("", |f| f.as_str())
     }
 }
