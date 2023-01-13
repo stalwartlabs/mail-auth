@@ -15,6 +15,7 @@ use std::fmt::Write;
 use std::net::IpAddr;
 
 use crate::{
+    dmarc::Dmarc,
     report::{
         ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
         PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
@@ -183,6 +184,10 @@ impl Report {
         self
     }
 
+    pub fn add_record(&mut self, record: Record) {
+        self.record.push(record);
+    }
+
     pub fn with_policy_published(mut self, policy_published: PolicyPublished) -> Self {
         self.policy_published = policy_published;
         self
@@ -273,12 +278,12 @@ impl Record {
         self
     }
 
-    pub fn source_ip(&self) -> IpAddr {
+    pub fn source_ip(&self) -> Option<IpAddr> {
         self.row.source_ip
     }
 
     pub fn with_source_ip(mut self, source_ip: IpAddr) -> Self {
-        self.row.source_ip = source_ip;
+        self.row.source_ip = source_ip.into();
         self
     }
 
@@ -373,11 +378,10 @@ impl Record {
     }
 }
 
-impl From<DmarcOutput> for PolicyPublished {
-    fn from(value: DmarcOutput) -> Self {
-        let dmarc = value.record.unwrap();
+impl PolicyPublished {
+    pub fn from_record(domain: impl Into<String>, dmarc: &Dmarc) -> Self {
         PolicyPublished {
-            domain: value.domain,
+            domain: domain.into(),
             adkim: (&dmarc.adkim).into(),
             aspf: (&dmarc.aspf).into(),
             p: (&dmarc.p).into(),

@@ -12,13 +12,19 @@ use super::headers::Writer;
 
 pub(crate) static BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-pub(crate) struct Base32Writer {
+pub struct Base32Writer {
     last_byte: u8,
     pos: usize,
     result: String,
 }
 
 impl Base32Writer {
+    pub fn encode(bytes: &[u8]) -> String {
+        let mut w = Base32Writer::with_capacity(bytes.len());
+        w.write(bytes);
+        w.finalize()
+    }
+
     pub fn with_capacity(capacity: usize) -> Self {
         Base32Writer {
             result: String::with_capacity((capacity + 3) / 4 * 5),

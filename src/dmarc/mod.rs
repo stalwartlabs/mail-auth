@@ -10,12 +10,14 @@
 
 use std::{fmt::Display, sync::Arc};
 
+use serde::{Deserialize, Serialize};
+
 use crate::{DmarcOutput, DmarcResult, Error, Version};
 
 pub mod parse;
 pub mod verify;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub struct Dmarc {
     pub(crate) v: Version,
     pub(crate) adkim: Alignment,
@@ -33,27 +35,27 @@ pub struct Dmarc {
     pub(crate) t: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct URI {
-    uri: String,
-    max_size: usize,
+    pub uri: String,
+    pub max_size: usize,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub(crate) enum Alignment {
     Relaxed,
     Strict,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub(crate) enum Psd {
     Yes,
     No,
     Default,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub enum Report {
     All,
     Any,
@@ -62,7 +64,7 @@ pub enum Report {
     DkimSpf,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq)]
 pub enum Policy {
     None,
     Quarantine,
@@ -145,6 +147,10 @@ impl DmarcOutput {
 
     pub fn domain(&self) -> &str {
         &self.domain
+    }
+
+    pub fn into_domain(self) -> String {
+        self.domain
     }
 
     pub fn policy(&self) -> Policy {

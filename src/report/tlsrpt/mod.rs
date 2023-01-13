@@ -198,8 +198,18 @@ impl FailureDetails {
         }
     }
 
-    pub fn with_failure_reason_code(mut self, code: impl Into<String>) -> Self {
-        self.failure_reason_code = Some(code.into());
+    pub fn with_failure_reason_code(mut self, value: impl Into<String>) -> Self {
+        self.failure_reason_code = Some(value.into());
+        self
+    }
+
+    pub fn with_receiving_mx_hostname(mut self, value: impl Into<String>) -> Self {
+        self.receiving_mx_hostname = Some(value.into());
+        self
+    }
+
+    pub fn with_receiving_ip(mut self, value: IpAddr) -> Self {
+        self.receiving_ip = Some(value);
         self
     }
 }

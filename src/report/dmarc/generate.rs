@@ -9,7 +9,11 @@
  */
 
 use flate2::{write::GzEncoder, Compression};
-use mail_builder::{headers::HeaderType, MessageBuilder};
+use mail_builder::{
+    headers::{address::Address, HeaderType},
+    mime::make_boundary,
+    MessageBuilder,
+};
 
 use crate::report::{
     ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Disposition, DkimResult,
@@ -26,10 +30,10 @@ use std::{
 impl Report {
     pub fn write_rfc5322<'x>(
         &self,
-        receiver_domain: &'x str,
         submitter: &'x str,
-        from: &'x str,
-        to: &'x str,
+        from_name: &'x str,
+        from_addr: &'x str,
+        to: impl Iterator<Item = &'x str>,
         writer: impl io::Write,
     ) -> io::Result<()> {
         // Compress XML report
@@ -39,9 +43,13 @@ impl Report {
         let compressed_bytes = e.finish()?;
 
         MessageBuilder::new()
-            .header("From", HeaderType::Text(from.into()))
-            .header("To", HeaderType::Text(to.into()))
+            .from((from_name, from_addr))
+            .header(
+                "To",
+                HeaderType::Address(Address::List(to.map(|to| (*to).into()).collect())),
+            )
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
+            .message_id(format!("<{}@{}>", make_boundary("."), submitter))
             .subject(format!(
                 "Report Domain: {} Submitter: {} Report-ID: <{}>",
                 self.domain(),
@@ -55,7 +63,7 @@ impl Report {
                     "Submitter: {}\r\n",
                     "Report-ID: {}\r\n",
                 ),
-                receiver_domain,
+                submitter,
                 self.domain(),
                 submitter,
                 self.report_id()
@@ -64,7 +72,7 @@ impl Report {
                 "application/gzip",
                 format!(
                     "{}!{}!{}!{}.xml.gz",
-                    receiver_domain,
+                    submitter,
                     self.domain(),
                     self.date_range_begin(),
                     self.date_range_end()
@@ -76,13 +84,13 @@ impl Report {
 
     pub fn to_rfc5322<'x>(
         &self,
-        receiver_domain: &'x str,
         submitter: &'x str,
-        from: &'x str,
-        to: &'x str,
+        from_name: &'x str,
+        from_addr: &'x str,
+        to: impl Iterator<Item = &'x str>,
     ) -> io::Result<String> {
         let mut buf = Vec::new();
-        self.write_rfc5322(receiver_domain, submitter, from, to, &mut buf)?;
+        self.write_rfc5322(submitter, from_name, from_addr, to, &mut buf)?;
         String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
@@ -178,7 +186,9 @@ impl Record {
 impl Row {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t<row>").ok();
-        writeln!(xml, "\t\t\t<source_ip>{}</source_ip>", self.source_ip).ok();
+        if let Some(source_ip) = &self.source_ip {
+            writeln!(xml, "\t\t\t<source_ip>{}</source_ip>", source_ip).ok();
+        }
         writeln!(xml, "\t\t\t<count>{}</count>", self.count).ok();
         self.policy_evaluated.to_xml(xml);
         writeln!(xml, "\t\t</row>").ok();
@@ -516,7 +526,7 @@ mod test {
                 "initech.net",
                 "Initech Industries",
                 "noreply-dmarc@initech.net",
-                "dmarc-reports@example.org",
+                &["dmarc-reports@example.org"],
             )
             .unwrap();
         let parsed_report = Report::parse_rfc5322(message.as_bytes()).unwrap();

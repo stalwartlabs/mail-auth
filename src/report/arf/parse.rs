@@ -209,7 +209,11 @@ impl<'x> Feedback<'x> {
                     } else if key.eq_ignore_ascii_case(b"Reported-URI") {
                         f.reported_uri.push(txt_value.into());
                     } else if key.eq_ignore_ascii_case(b"Reporting-MTA") {
-                        f.reporting_mta = Some(txt_value.into());
+                        f.reporting_mta = Some(if let Some(mta) = txt_value.strip_prefix("dns;") {
+                            mta.trim().into()
+                        } else {
+                            txt_value.into()
+                        });
                     } else if key.eq_ignore_ascii_case(b"Received-Date") {
                         if let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date() {
                             f.arrival_date = dt.to_timestamp().into();

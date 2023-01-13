@@ -15,7 +15,7 @@
     "http://example.net/earn_money.html",
     "mailto:user@example.com"
   ],
-  "reporting_mta": "dns; mail.example.com",
+  "reporting_mta": "mail.example.com",
   "source_ip": "192.0.2.1",
   "user_agent": "SomeGenerator/1.0",
   "version": 1,

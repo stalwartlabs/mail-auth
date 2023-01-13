@@ -8,6 +8,8 @@
  * except according to those terms.
  */
 
+use serde::{Deserialize, Serialize};
+
 pub mod parse;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -15,12 +17,12 @@ pub struct MtaSts {
     pub id: String,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TlsRpt {
-    rua: Vec<ReportUri>,
+    pub rua: Vec<ReportUri>,
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReportUri {
     Mail(String),
     Http(String),

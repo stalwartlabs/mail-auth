@@ -12,7 +12,7 @@ use std::{fmt::Write, io, time::SystemTime};
 
 use mail_builder::{
     headers::{content_type::ContentType, HeaderType},
-    mime::{BodyPart, MimePart},
+    mime::{make_boundary, BodyPart, MimePart},
     MessageBuilder,
 };
 use mail_parser::DateTime;
@@ -93,6 +93,11 @@ impl<'x> Feedback<'x> {
             .from((from_name, from_addr))
             .header("To", HeaderType::Text(to.into()))
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
+            .message_id(format!(
+                "<{}@{}>",
+                make_boundary("."),
+                self.reporting_mta().unwrap_or("localhost")
+            ))
             .subject(subject)
             .body(MimePart::new(
                 ContentType::new("multipart/report").attribute("report-type", "feedback-report"),

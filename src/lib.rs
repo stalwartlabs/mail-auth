@@ -419,7 +419,7 @@ pub enum IprevResult {
     None,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub(crate) enum Version {
     V1,
 }

@@ -12,10 +12,7 @@ pub mod arf;
 pub mod dmarc;
 pub mod tlsrpt;
 
-use std::{
-    borrow::Cow,
-    net::{IpAddr, Ipv4Addr},
-};
+use std::{borrow::Cow, net::IpAddr};
 
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +47,7 @@ pub enum Disposition {
     Unspecified,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActionDisposition {
     None,
     Pass,
@@ -61,26 +58,26 @@ pub enum ActionDisposition {
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct PolicyPublished {
-    domain: String,
-    version_published: Option<f32>,
-    adkim: Alignment,
-    aspf: Alignment,
-    p: Disposition,
-    sp: Disposition,
-    testing: bool,
-    fo: Option<String>,
+    pub domain: String,
+    pub version_published: Option<f32>,
+    pub adkim: Alignment,
+    pub aspf: Alignment,
+    pub p: Disposition,
+    pub sp: Disposition,
+    pub testing: bool,
+    pub fo: Option<String>,
 }
 
 impl Eq for PolicyPublished {}
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DmarcResult {
     Pass,
     Fail,
     Unspecified,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PolicyOverride {
     Forwarded,
     SampledOut,
@@ -90,13 +87,13 @@ pub enum PolicyOverride {
     Other,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PolicyOverrideReason {
     type_: PolicyOverride,
     comment: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct PolicyEvaluated {
     disposition: ActionDisposition,
     dkim: DmarcResult,
@@ -104,27 +101,27 @@ pub struct PolicyEvaluated {
     reason: Vec<PolicyOverrideReason>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Row {
-    source_ip: IpAddr,
+    source_ip: Option<IpAddr>,
     count: u32,
     policy_evaluated: PolicyEvaluated,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Extension {
     name: String,
     definition: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Identifier {
     envelope_to: Option<String>,
     envelope_from: String,
     header_from: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DkimResult {
     None,
     Pass,
@@ -135,7 +132,7 @@ pub enum DkimResult {
     PermError,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct DKIMAuthResult {
     domain: String,
     selector: String,
@@ -143,14 +140,14 @@ pub struct DKIMAuthResult {
     human_result: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SPFDomainScope {
     Helo,
     MailFrom,
     Unspecified,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SpfResult {
     None,
     Neutral,
@@ -161,7 +158,7 @@ pub enum SpfResult {
     PermError,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct SPFAuthResult {
     domain: String,
     scope: SPFDomainScope,
@@ -169,13 +166,13 @@ pub struct SPFAuthResult {
     human_result: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct AuthResult {
     dkim: Vec<DKIMAuthResult>,
     spf: Vec<SPFAuthResult>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Record {
     row: Row,
     identifiers: Identifier,
@@ -193,16 +190,6 @@ pub struct Report {
 }
 
 impl Eq for Report {}
-
-impl Default for Row {
-    fn default() -> Self {
-        Self {
-            source_ip: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-            count: 0,
-            policy_evaluated: PolicyEvaluated::default(),
-        }
-    }
-}
 
 impl Default for Alignment {
     fn default() -> Self {

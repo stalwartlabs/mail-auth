@@ -9,6 +9,7 @@
  */
 
 use std::io::{BufRead, Cursor, Read};
+use std::net::IpAddr;
 use std::str::FromStr;
 
 use flate2::read::GzDecoder;
@@ -375,8 +376,8 @@ impl Row {
         while let Some(tag) = reader.next_tag(buf)? {
             match tag.name().as_ref() {
                 b"source_ip" => {
-                    if let Some(ip) = reader.next_value(buf)? {
-                        r.source_ip = ip;
+                    if let Some(ip) = reader.next_value::<IpAddr>(buf)? {
+                        r.source_ip = ip.into();
                     }
                 }
                 b"count" => {

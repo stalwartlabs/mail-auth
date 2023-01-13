@@ -12,8 +12,8 @@ use std::io;
 
 use flate2::{write::GzEncoder, Compression};
 use mail_builder::{
-    headers::{content_type::ContentType, HeaderType},
-    mime::{BodyPart, MimePart},
+    headers::{address::Address, content_type::ContentType, HeaderType},
+    mime::{make_boundary, BodyPart, MimePart},
     MessageBuilder,
 };
 
@@ -23,10 +23,10 @@ impl TlsReport {
     pub fn write_rfc5322<'x>(
         &self,
         report_domain: &'x str,
-        receiver_domain: &'x str,
         submitter: &'x str,
-        from: &'x str,
-        to: &'x str,
+        from_name: &'x str,
+        from_addr: &'x str,
+        to: &'x [&str],
         writer: impl io::Write,
     ) -> io::Result<()> {
         // Compress JSON report
@@ -36,8 +36,12 @@ impl TlsReport {
         let compressed_bytes = e.finish()?;
 
         MessageBuilder::new()
-            .header("From", HeaderType::Text(from.into()))
-            .header("To", HeaderType::Text(to.into()))
+            .from((from_name, from_addr))
+            .header(
+                "To",
+                HeaderType::Address(Address::List(to.iter().map(|to| (*to).into()).collect())),
+            )
+            .message_id(format!("<{}@{}>", make_boundary("."), submitter))
             .header("TLS-Report-Domain", HeaderType::Text(report_domain.into()))
             .header("TLS-Report-Submitter", HeaderType::Text(submitter.into()))
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
@@ -58,7 +62,7 @@ impl TlsReport {
                                     "Submitter: {}\r\n",
                                     "Report-ID: {}\r\n",
                                 ),
-                                receiver_domain, report_domain, submitter, self.report_id
+                                submitter, report_domain, submitter, self.report_id
                             )
                             .into(),
                         ),
@@ -69,7 +73,7 @@ impl TlsReport {
                     )
                     .attachment(format!(
                         "{}!{}!{}!{}.json.gz",
-                        receiver_domain,
+                        submitter,
                         report_domain,
                         self.date_range.start_datetime.to_timestamp(),
                         self.date_range.end_datetime.to_timestamp()
@@ -82,20 +86,13 @@ impl TlsReport {
     pub fn to_rfc5322<'x>(
         &self,
         report_domain: &'x str,
-        receiver_domain: &'x str,
         submitter: &'x str,
-        from: &'x str,
-        to: &'x str,
+        from_name: &'x str,
+        from_addr: &'x str,
+        to: &'x [&str],
     ) -> io::Result<String> {
         let mut buf = Vec::new();
-        self.write_rfc5322(
-            report_domain,
-            receiver_domain,
-            submitter,
-            from,
-            to,
-            &mut buf,
-        )?;
+        self.write_rfc5322(report_domain, submitter, from_name, from_addr, to, &mut buf)?;
         String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
@@ -129,7 +126,7 @@ mod test {
                 "example.org",
                 "mx.example.org",
                 "no-reply@example.org",
-                "tls-reports@hello-world.inc",
+                &["tls-reports@hello-world.inc"],
             )
             .unwrap();
 
