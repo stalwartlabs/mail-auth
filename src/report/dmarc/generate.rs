@@ -31,8 +31,7 @@ impl Report {
     pub fn write_rfc5322<'x>(
         &self,
         submitter: &'x str,
-        from_name: &'x str,
-        from_addr: &'x str,
+        from: impl Into<Address<'x>>,
         to: impl Iterator<Item = &'x str>,
         writer: impl io::Write,
     ) -> io::Result<()> {
@@ -43,7 +42,7 @@ impl Report {
         let compressed_bytes = e.finish()?;
 
         MessageBuilder::new()
-            .from((from_name, from_addr))
+            .from(from)
             .header(
                 "To",
                 HeaderType::Address(Address::List(to.map(|to| (*to).into()).collect())),
@@ -85,12 +84,11 @@ impl Report {
     pub fn to_rfc5322<'x>(
         &self,
         submitter: &'x str,
-        from_name: &'x str,
-        from_addr: &'x str,
+        from: impl Into<Address<'x>>,
         to: impl Iterator<Item = &'x str>,
     ) -> io::Result<String> {
         let mut buf = Vec::new();
-        self.write_rfc5322(submitter, from_name, from_addr, to, &mut buf)?;
+        self.write_rfc5322(submitter, from, to, &mut buf)?;
         String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
@@ -524,9 +522,8 @@ mod test {
         let message = report
             .to_rfc5322(
                 "initech.net",
-                "Initech Industries",
-                "noreply-dmarc@initech.net",
-                &["dmarc-reports@example.org"],
+                ("Initech Industries", "noreply-dmarc@initech.net"),
+                ["dmarc-reports@example.org"].iter().copied(),
             )
             .unwrap();
         let parsed_report = Report::parse_rfc5322(message.as_bytes()).unwrap();

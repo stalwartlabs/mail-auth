@@ -24,22 +24,32 @@ impl TlsReport {
         &self,
         report_domain: &'x str,
         submitter: &'x str,
-        from_name: &'x str,
-        from_addr: &'x str,
-        to: &'x [&str],
+        from: impl Into<Address<'x>>,
+        to: impl Iterator<Item = &'x str>,
         writer: impl io::Write,
     ) -> io::Result<()> {
         // Compress JSON report
         let json = self.to_json();
         let mut e = GzEncoder::new(Vec::with_capacity(json.len()), Compression::default());
         io::Write::write_all(&mut e, json.as_bytes())?;
-        let compressed_bytes = e.finish()?;
+        let bytes = e.finish()?;
+        self.write_rfc5322_from_bytes(report_domain, submitter, from, to, &bytes, writer)
+    }
 
+    pub fn write_rfc5322_from_bytes<'x>(
+        &self,
+        report_domain: &str,
+        submitter: &str,
+        from: impl Into<Address<'x>>,
+        to: impl Iterator<Item = &'x str>,
+        bytes: &[u8],
+        writer: impl io::Write,
+    ) -> io::Result<()> {
         MessageBuilder::new()
-            .from((from_name, from_addr))
+            .from(from)
             .header(
                 "To",
-                HeaderType::Address(Address::List(to.iter().map(|to| (*to).into()).collect())),
+                HeaderType::Address(Address::List(to.map(|to| (*to).into()).collect())),
             )
             .message_id(format!("<{}@{}>", make_boundary("."), submitter))
             .header("TLS-Report-Domain", HeaderType::Text(report_domain.into()))
@@ -69,7 +79,7 @@ impl TlsReport {
                     ),
                     MimePart::new(
                         ContentType::new("application/tlsrpt+gzip"),
-                        BodyPart::Binary(compressed_bytes.into()),
+                        BodyPart::Binary(bytes.into()),
                     )
                     .attachment(format!(
                         "{}!{}!{}!{}.json.gz",
@@ -87,12 +97,11 @@ impl TlsReport {
         &self,
         report_domain: &'x str,
         submitter: &'x str,
-        from_name: &'x str,
-        from_addr: &'x str,
-        to: &'x [&str],
+        from: impl Into<Address<'x>>,
+        to: impl Iterator<Item = &'x str>,
     ) -> io::Result<String> {
         let mut buf = Vec::new();
-        self.write_rfc5322(report_domain, submitter, from_name, from_addr, to, &mut buf)?;
+        self.write_rfc5322(report_domain, submitter, from, to, &mut buf)?;
         String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
@@ -110,12 +119,12 @@ mod test {
     #[test]
     fn tlsrpt_generate() {
         let report = TlsReport {
-            organization_name: "Hello World, Inc.".to_string(),
+            organization_name: "Hello World, Inc.".to_string().into(),
             date_range: DateRange {
                 start_datetime: DateTime::from_timestamp(49823749),
                 end_datetime: DateTime::from_timestamp(49823899),
             },
-            contact_info: "tls-report@hello-world.inc".to_string(),
+            contact_info: "tls-report@hello-world.inc".to_string().into(),
             report_id: "abc-123".to_string(),
             policies: vec![],
         };
@@ -124,9 +133,8 @@ mod test {
             .to_rfc5322(
                 "hello-world.inc",
                 "example.org",
-                "mx.example.org",
                 "no-reply@example.org",
-                &["tls-reports@hello-world.inc"],
+                ["tls-reports@hello-world.inc"].iter().copied(),
             )
             .unwrap();
 

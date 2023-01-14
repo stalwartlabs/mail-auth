@@ -282,6 +282,7 @@ pub mod mta_sts;
 pub mod report;
 pub mod spf;
 
+pub use flate2;
 pub use sha1;
 pub use sha2;
 pub use trust_dns_resolver;

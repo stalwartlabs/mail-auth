@@ -11,7 +11,7 @@
 use std::{fmt::Write, io, time::SystemTime};
 
 use mail_builder::{
-    headers::{content_type::ContentType, HeaderType},
+    headers::{address::Address, content_type::ContentType, HeaderType},
     mime::{make_boundary, BodyPart, MimePart},
     MessageBuilder,
 };
@@ -22,8 +22,7 @@ use crate::report::{AuthFailureType, DeliveryResult, Feedback, FeedbackType, Ide
 impl<'x> Feedback<'x> {
     pub fn write_rfc5322(
         &self,
-        from_name: &'x str,
-        from_addr: &'x str,
+        from: impl Into<Address<'x>>,
         to: &'x str,
         subject: &'x str,
         writer: impl io::Write,
@@ -90,7 +89,7 @@ impl<'x> Feedback<'x> {
         }
 
         MessageBuilder::new()
-            .from((from_name, from_addr))
+            .from(from)
             .header("To", HeaderType::Text(to.into()))
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
             .message_id(format!(
@@ -108,13 +107,12 @@ impl<'x> Feedback<'x> {
 
     pub fn to_rfc5322(
         &self,
-        from_name: &str,
-        from_addr: &str,
-        to: &str,
-        subject: &str,
+        from: impl Into<Address<'x>>,
+        to: &'x str,
+        subject: &'x str,
     ) -> io::Result<String> {
         let mut buf = Vec::new();
-        self.write_rfc5322(from_name, from_addr, to, subject, &mut buf)?;
+        self.write_rfc5322(from, to, subject, &mut buf)?;
         String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
     }
 
@@ -287,8 +285,7 @@ mod test {
 
         let message = feedback
             .to_rfc5322(
-                "DMARC Reporter",
-                "no-reply@example.org",
+                ("DMARC Reporter", "no-reply@example.org"),
                 "ruf@otherdomain.com",
                 "DMARC Authentication Failure Report",
             )

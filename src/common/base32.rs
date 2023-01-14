@@ -8,9 +8,26 @@
  * except according to those terms.
  */
 
+use std::slice::Iter;
+
 use super::headers::Writer;
 
 pub(crate) static BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+pub static BASE32_INVERSE: [u8; 256] = [
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 26, 27, 28, 29, 30, 31, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+    17, 18, 19, 20, 21, 22, 23, 24, 25, 255, 255, 255, 255, 255, 255, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+    255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255, 255,
+];
 
 pub struct Base32Writer {
     last_byte: u8,
@@ -82,10 +99,60 @@ impl Writer for Base32Writer {
     }
 }
 
+#[derive(Debug)]
+pub struct Base32Reader<'x> {
+    bytes: Iter<'x, u8>,
+    last_byte: u8,
+    pos: usize,
+}
+
+impl<'x> Base32Reader<'x> {
+    pub fn new(bytes: &'x [u8]) -> Self {
+        Base32Reader {
+            bytes: bytes.iter(),
+            pos: 0,
+            last_byte: 0,
+        }
+    }
+
+    #[inline(always)]
+    fn map_byte(&mut self) -> Option<u8> {
+        match self.bytes.next() {
+            Some(&byte) => match BASE32_INVERSE[byte as usize] {
+                byte if byte != u8::MAX => {
+                    self.last_byte = byte;
+                    Some(byte)
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+impl Iterator for Base32Reader<'_> {
+    type Item = u8;
+    fn next(&mut self) -> Option<Self::Item> {
+        let pos = self.pos % 5;
+        let last_byte = self.last_byte;
+        let byte = self.map_byte()?;
+        self.pos += 1;
+
+        match pos {
+            0 => ((byte << 3) | (self.map_byte().unwrap_or(0) >> 2)).into(),
+            1 => ((last_byte << 6) | (byte << 1) | (self.map_byte().unwrap_or(0) >> 4)).into(),
+            2 => ((last_byte << 4) | (byte >> 1)).into(),
+            3 => ((last_byte << 7) | (byte << 2) | (self.map_byte().unwrap_or(0) >> 3)).into(),
+            4 => ((last_byte << 5) | byte).into(),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::common::{
-        base32::Base32Writer,
+        base32::{Base32Reader, Base32Writer},
         crypto::{HashContext, HashImpl, Sha1},
         headers::Writer,
     };
@@ -96,11 +163,20 @@ mod tests {
             ("one.example.net", "QSP4I4D24CRHOPDZ3O3ZIU2KSGS3X6Z6"),
             ("two.example.net", "ZTZGRRV3F45A4U6HLDKBF3ZCOW4V2AJX"),
         ] {
+            // Encode
             let mut writer = Base32Writer::with_capacity(10);
             let mut hash = Sha1::hasher();
             hash.write(test.as_bytes());
-            writer.write(hash.complete().as_ref());
+            let hash = hash.complete();
+            writer.write(hash.as_ref());
             assert_eq!(writer.finalize(), expected_result);
+
+            // Decode
+            let mut original = Vec::new();
+            for byte in Base32Reader::new(expected_result.as_bytes()) {
+                original.push(byte);
+            }
+            assert_eq!(original, hash.as_ref());
         }
     }
 }

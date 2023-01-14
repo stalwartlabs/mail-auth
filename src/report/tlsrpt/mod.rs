@@ -20,14 +20,14 @@ pub mod parse;
 pub struct TlsReport {
     #[serde(rename = "organization-name")]
     #[serde(default)]
-    pub organization_name: String,
+    pub organization_name: Option<String>,
 
     #[serde(rename = "date-range")]
     pub date_range: DateRange,
 
     #[serde(rename = "contact-info")]
     #[serde(default)]
-    pub contact_info: String,
+    pub contact_info: Option<String>,
 
     #[serde(rename = "report-id")]
     #[serde(default)]
@@ -80,7 +80,7 @@ pub struct Summary {
     pub total_failure: u32,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FailureDetails {
     #[serde(rename = "result-type")]
     pub result_type: ResultType,
@@ -133,7 +133,7 @@ pub enum PolicyType {
     Other,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResultType {
     #[serde(rename = "starttls-not-supported")]
     StartTlsNotSupported,
