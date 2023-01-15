@@ -513,6 +513,43 @@ impl Display for SpfResult {
     }
 }
 
+impl Display for IprevResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IprevResult::Pass => f.write_str("pass"),
+            IprevResult::Fail(err) => write!(f, "fail; {}", err),
+            IprevResult::TempError(err) => write!(f, "temp error; {}", err),
+            IprevResult::PermError(err) => write!(f, "perm error; {}", err),
+            IprevResult::None => f.write_str("none"),
+        }
+    }
+}
+
+impl Display for DkimResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DkimResult::Pass => f.write_str("pass"),
+            DkimResult::Fail(err) => write!(f, "fail; {}", err),
+            DkimResult::Neutral(err) => write!(f, "neutral; {}", err),
+            DkimResult::TempError(err) => write!(f, "temp error; {}", err),
+            DkimResult::PermError(err) => write!(f, "perm error; {}", err),
+            DkimResult::None => f.write_str("none"),
+        }
+    }
+}
+
+impl Display for DmarcResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DmarcResult::Pass => f.write_str("pass"),
+            DmarcResult::Fail(err) => write!(f, "fail; {}", err),
+            DmarcResult::TempError(err) => write!(f, "temp error; {}", err),
+            DmarcResult::PermError(err) => write!(f, "perm error; {}", err),
+            DmarcResult::None => f.write_str("none"),
+        }
+    }
+}
+
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Error::Io(err.to_string())

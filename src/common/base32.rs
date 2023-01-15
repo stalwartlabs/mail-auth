@@ -50,7 +50,7 @@ impl Base32Writer {
         }
     }
 
-    fn push_byte(&mut self, byte: u8, is_remainder: bool) {
+    pub fn push_byte(&mut self, byte: u8, is_remainder: bool) {
         let (ch1, ch2) = match self.pos % 5 {
             0 => ((byte & 0xF8) >> 3, u8::MAX),
             1 => (
