@@ -99,9 +99,8 @@ fn main() {
         )
         .to_rfc5322(
             "initech.net",
-            "Initech Industries",
-            "noreply-dmarc@initech.net",
-            "dmarc-reports@example.org",
+            ("Initech Industries", "noreply-dmarc@initech.net"),
+            ["dmarc-reports@example.org"].iter().copied(),
         )
         .unwrap();
 

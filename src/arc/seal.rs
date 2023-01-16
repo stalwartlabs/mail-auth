@@ -247,13 +247,13 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
 
         // Create private keys
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let pk_ed_public =
             base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap();
         let pk_ed_private = base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap();
 
         // Create DKIM-signed message
-        let mut raw_message = DkimSigner::from_key(pk_rsa.clone())
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let mut raw_message = DkimSigner::from_key(pk_rsa)
             .domain("manchego.org")
             .selector("rsa")
             .headers(["From", "To", "Subject"])
@@ -264,6 +264,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
         // Verify and seal the message 50 times
         for _ in 0..25 {
+            let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+
             raw_message = arc_verify_and_seal(
                 &resolver,
                 &raw_message,
@@ -272,14 +274,8 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 Ed25519Key::from_bytes(&pk_ed_public, &pk_ed_private).unwrap(),
             )
             .await;
-            raw_message = arc_verify_and_seal(
-                &resolver,
-                &raw_message,
-                "manchego.org",
-                "rsa",
-                pk_rsa.clone(),
-            )
-            .await;
+            raw_message =
+                arc_verify_and_seal(&resolver, &raw_message, "manchego.org", "rsa", pk_rsa).await;
         }
 
         //println!("{}", raw_message);

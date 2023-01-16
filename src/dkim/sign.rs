@@ -198,7 +198,6 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
 
         // Create private keys
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let pk_ed = Ed25519Key::from_bytes(
             &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
             &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
@@ -224,9 +223,10 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
 
         // Test RSA-SHA256 relaxed/relaxed
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
-            DkimSigner::from_key(pk_rsa.clone())
+            DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
@@ -253,9 +253,10 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         .await;
 
         // Test RSA-SHA256 simple/simple with duplicated headers
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
-            DkimSigner::from_key(pk_rsa.clone())
+            DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
                 .headers([
@@ -275,9 +276,10 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         .await;
 
         // Test RSA-SHA256 simple/relaxed with fixed body length
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
-            DkimSigner::from_key(pk_rsa.clone())
+            DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
@@ -291,9 +293,10 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         .await;
 
         // Test AUID not matching domain
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
-            DkimSigner::from_key(pk_rsa.clone())
+            DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
@@ -306,9 +309,10 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         .await;
 
         // Test expired signature and reporting
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let r = verify(
             &resolver,
-            DkimSigner::from_key(pk_rsa.clone())
+            DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
@@ -326,9 +330,10 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         assert_eq!(r.as_deref(), Some("dkim-failures@example.com"));
 
         // Verify ATPS (failure)
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
-            DkimSigner::from_key(pk_rsa.clone())
+            DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
@@ -342,6 +347,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         .await;
 
         // Verify ATPS (success)
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         resolver.txt_add(
             "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.".to_string(),
             Atps::parse(b"v=ATPS1;").unwrap(),
@@ -349,7 +355,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
         verify(
             &resolver,
-            DkimSigner::from_key(pk_rsa.clone())
+            DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
@@ -363,6 +369,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         .await;
 
         // Verify ATPS (success - no hash)
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         resolver.txt_add(
             "example.com._atps.example.com.".to_string(),
             Atps::parse(b"v=ATPS1;").unwrap(),

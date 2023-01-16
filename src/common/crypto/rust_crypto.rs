@@ -8,7 +8,7 @@ use crate::{common::headers::Writer, dkim::Canonicalization, Error, Result};
 
 use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct RsaKey<T> {
     inner: RsaPrivateKey,
     padding: PhantomData<T>,
