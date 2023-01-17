@@ -133,7 +133,7 @@ pub enum PolicyType {
     Other,
 }
 
-#[derive(Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ResultType {
     #[serde(rename = "starttls-not-supported")]
     StartTlsNotSupported,

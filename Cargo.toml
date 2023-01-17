@@ -34,3 +34,6 @@ flate2 = "1.0.25"
 
 [dev-dependencies]
 tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
+
+[features]
+test = []

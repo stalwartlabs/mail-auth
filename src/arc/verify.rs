@@ -175,6 +175,7 @@ impl Resolver {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 mod test {
     use std::{
         fs,
@@ -220,6 +221,7 @@ mod test {
             .split('\n')
             .filter_map(|r| r.split_once(' ').map(|(a, b)| (a, b.as_bytes())))
         {
+            #[cfg(feature = "test")]
             resolver.txt_add(
                 format!("{}.", key),
                 DomainKey::parse(value).unwrap(),

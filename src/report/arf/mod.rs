@@ -29,6 +29,10 @@ impl<'x> Feedback<'x> {
         self.original_envelope_id.as_deref()
     }
 
+    pub fn feedback_type(&self) -> FeedbackType {
+        self.feedback_type
+    }
+
     pub fn with_original_envelope_id(mut self, value: impl Into<Cow<'x, str>>) -> Self {
         self.original_envelope_id = Some(value.into());
         self

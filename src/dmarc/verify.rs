@@ -188,6 +188,7 @@ impl Resolver {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 mod test {
     use std::time::{Duration, Instant};
 
@@ -312,6 +313,7 @@ mod test {
                 Policy::Reject,
             ),
         ] {
+            #[cfg(feature = "test")]
             resolver.txt_add(
                 dmarc_dns,
                 Dmarc::parse(dmarc.as_bytes()).unwrap(),
@@ -347,6 +349,7 @@ mod test {
     #[tokio::test]
     async fn dmarc_verify_report_address() {
         let resolver = Resolver::new_system_conf().unwrap();
+        #[cfg(feature = "test")]
         resolver.txt_add(
             "example.org.report.dmarc.external.org.",
             Dmarc::parse(b"v=DMARC1").unwrap(),

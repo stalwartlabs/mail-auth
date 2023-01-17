@@ -198,7 +198,7 @@
 //! To run the testsuite:
 //!
 //! ```bash
-//!  $ cargo test --all-features
+//!  $ cargo test --features test
 //! ```
 //!
 //! To fuzz the library with `cargo-fuzz`:
@@ -286,6 +286,7 @@ pub use flate2;
 pub use sha1;
 pub use sha2;
 pub use trust_dns_resolver;
+pub use zip;
 
 pub struct Resolver {
     pub(crate) resolver: TokioAsyncResolver,

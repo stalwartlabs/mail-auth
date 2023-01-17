@@ -513,6 +513,7 @@ impl HasLabels for &str {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 mod test {
 
     use std::{
@@ -557,104 +558,107 @@ mod test {
                         line
                     };
 
-                    if let Some(name) = line.strip_prefix("name:") {
-                        test_name = name.trim();
-                    } else if let Some(record) = line.strip_prefix("spf:") {
-                        let (name, record) = record.trim().split_once(' ').unwrap();
-                        resolver.txt_add(
-                            name.trim().to_string(),
-                            Spf::parse(record.as_bytes()),
-                            valid_until,
-                        );
-                    } else if let Some(record) = line.strip_prefix("exp:") {
-                        let (name, record) = record.trim().split_once(' ').unwrap();
-                        resolver.txt_add(
-                            name.trim().to_string(),
-                            Macro::parse(record.as_bytes()),
-                            valid_until,
-                        );
-                    } else if let Some(record) = line.strip_prefix("a:") {
-                        let (name, record) = record.trim().split_once(' ').unwrap();
-                        resolver.ipv4_add(
-                            name.trim().to_string(),
-                            record
-                                .split(',')
-                                .map(|item| item.trim().parse::<Ipv4Addr>().unwrap())
-                                .collect(),
-                            valid_until,
-                        );
-                    } else if let Some(record) = line.strip_prefix("aaaa:") {
-                        let (name, record) = record.trim().split_once(' ').unwrap();
-                        resolver.ipv6_add(
-                            name.trim().to_string(),
-                            record
-                                .split(',')
-                                .map(|item| item.trim().parse::<Ipv6Addr>().unwrap())
-                                .collect(),
-                            valid_until,
-                        );
-                    } else if let Some(record) = line.strip_prefix("ptr:") {
-                        let (name, record) = record.trim().split_once(' ').unwrap();
-                        resolver.ptr_add(
-                            name.trim().parse::<IpAddr>().unwrap(),
-                            record
-                                .split(',')
-                                .map(|item| item.trim().to_string())
-                                .collect(),
-                            valid_until,
-                        );
-                    } else if let Some(record) = line.strip_prefix("mx:") {
-                        let (name, record) = record.trim().split_once(' ').unwrap();
-                        let mut mxs = Vec::new();
-                        for (pos, item) in record.split(',').enumerate() {
-                            let ip = item.trim().parse::<IpAddr>().unwrap();
-                            let mx_name = format!("mx.{}.{}", ip, pos);
-                            match ip {
-                                IpAddr::V4(ip) => {
-                                    resolver.ipv4_add(mx_name.clone(), vec![ip], valid_until)
+                    #[cfg(feature = "test")]
+                    {
+                        if let Some(name) = line.strip_prefix("name:") {
+                            test_name = name.trim();
+                        } else if let Some(record) = line.strip_prefix("spf:") {
+                            let (name, record) = record.trim().split_once(' ').unwrap();
+                            resolver.txt_add(
+                                name.trim().to_string(),
+                                Spf::parse(record.as_bytes()),
+                                valid_until,
+                            );
+                        } else if let Some(record) = line.strip_prefix("exp:") {
+                            let (name, record) = record.trim().split_once(' ').unwrap();
+                            resolver.txt_add(
+                                name.trim().to_string(),
+                                Macro::parse(record.as_bytes()),
+                                valid_until,
+                            );
+                        } else if let Some(record) = line.strip_prefix("a:") {
+                            let (name, record) = record.trim().split_once(' ').unwrap();
+                            resolver.ipv4_add(
+                                name.trim().to_string(),
+                                record
+                                    .split(',')
+                                    .map(|item| item.trim().parse::<Ipv4Addr>().unwrap())
+                                    .collect(),
+                                valid_until,
+                            );
+                        } else if let Some(record) = line.strip_prefix("aaaa:") {
+                            let (name, record) = record.trim().split_once(' ').unwrap();
+                            resolver.ipv6_add(
+                                name.trim().to_string(),
+                                record
+                                    .split(',')
+                                    .map(|item| item.trim().parse::<Ipv6Addr>().unwrap())
+                                    .collect(),
+                                valid_until,
+                            );
+                        } else if let Some(record) = line.strip_prefix("ptr:") {
+                            let (name, record) = record.trim().split_once(' ').unwrap();
+                            resolver.ptr_add(
+                                name.trim().parse::<IpAddr>().unwrap(),
+                                record
+                                    .split(',')
+                                    .map(|item| item.trim().to_string())
+                                    .collect(),
+                                valid_until,
+                            );
+                        } else if let Some(record) = line.strip_prefix("mx:") {
+                            let (name, record) = record.trim().split_once(' ').unwrap();
+                            let mut mxs = Vec::new();
+                            for (pos, item) in record.split(',').enumerate() {
+                                let ip = item.trim().parse::<IpAddr>().unwrap();
+                                let mx_name = format!("mx.{}.{}", ip, pos);
+                                match ip {
+                                    IpAddr::V4(ip) => {
+                                        resolver.ipv4_add(mx_name.clone(), vec![ip], valid_until)
+                                    }
+                                    IpAddr::V6(ip) => {
+                                        resolver.ipv6_add(mx_name.clone(), vec![ip], valid_until)
+                                    }
                                 }
-                                IpAddr::V6(ip) => {
-                                    resolver.ipv6_add(mx_name.clone(), vec![ip], valid_until)
-                                }
+                                mxs.push(MX {
+                                    exchanges: vec![mx_name],
+                                    preference: (pos + 1) as u16,
+                                });
                             }
-                            mxs.push(MX {
-                                exchanges: vec![mx_name],
-                                preference: (pos + 1) as u16,
-                            });
-                        }
-                        resolver.mx_add(name.trim().to_string(), mxs, valid_until);
-                    } else if let Some(value) = line.strip_prefix("domain:") {
-                        helo = value.trim();
-                    } else if let Some(value) = line.strip_prefix("sender:") {
-                        mail_from = value.trim();
-                    } else if let Some(value) = line.strip_prefix("ip:") {
-                        client_ip = value.trim().parse().unwrap();
-                    } else if let Some(value) = line.strip_prefix("expect:") {
-                        let value = value.trim();
-                        let (result, exp): (SpfResult, &str) =
-                            if let Some((result, exp)) = value.split_once(' ') {
-                                (result.trim().try_into().unwrap(), exp.trim())
-                            } else {
-                                (value.try_into().unwrap(), "")
-                            };
-                        let output = resolver
-                            .verify_spf(client_ip, helo, "localdomain.org", mail_from)
-                            .await;
-                        assert_eq!(
-                            output.result(),
-                            result,
-                            "Failed for {:?}, test {}.",
-                            test_name,
-                            test_num,
-                        );
+                            resolver.mx_add(name.trim().to_string(), mxs, valid_until);
+                        } else if let Some(value) = line.strip_prefix("domain:") {
+                            helo = value.trim();
+                        } else if let Some(value) = line.strip_prefix("sender:") {
+                            mail_from = value.trim();
+                        } else if let Some(value) = line.strip_prefix("ip:") {
+                            client_ip = value.trim().parse().unwrap();
+                        } else if let Some(value) = line.strip_prefix("expect:") {
+                            let value = value.trim();
+                            let (result, exp): (SpfResult, &str) =
+                                if let Some((result, exp)) = value.split_once(' ') {
+                                    (result.trim().try_into().unwrap(), exp.trim())
+                                } else {
+                                    (value.try_into().unwrap(), "")
+                                };
+                            let output = resolver
+                                .verify_spf(client_ip, helo, "localdomain.org", mail_from)
+                                .await;
+                            assert_eq!(
+                                output.result(),
+                                result,
+                                "Failed for {:?}, test {}.",
+                                test_name,
+                                test_num,
+                            );
 
-                        if !exp.is_empty() {
-                            assert_eq!(Some(exp.to_string()).as_deref(), output.explanation());
-                        }
-                        test_num += 1;
-                        if test_name != last_test_name {
-                            println!("Passed test {:?}", test_name);
-                            last_test_name = test_name;
+                            if !exp.is_empty() {
+                                assert_eq!(Some(exp.to_string()).as_deref(), output.explanation());
+                            }
+                            test_num += 1;
+                            if test_name != last_test_name {
+                                println!("Passed test {:?}", test_name);
+                                last_test_name = test_name;
+                            }
                         }
                     }
                 }

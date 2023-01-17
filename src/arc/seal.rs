@@ -177,6 +177,7 @@ impl Signature {
 }
 
 #[cfg(test)]
+#[allow(unused)]
 mod test {
     use std::time::{Duration, Instant};
 
@@ -235,16 +236,19 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
         // Crate resolver
         let resolver = Resolver::new_system_conf().unwrap();
-        resolver.txt_add(
-            "rsa._domainkey.manchego.org.".to_string(),
-            DomainKey::parse(RSA_PUBLIC_KEY.as_bytes()).unwrap(),
-            Instant::now() + Duration::new(3600, 0),
-        );
-        resolver.txt_add(
-            "ed._domainkey.scamorza.org.".to_string(),
-            DomainKey::parse(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
-            Instant::now() + Duration::new(3600, 0),
-        );
+        #[cfg(feature = "test")]
+        {
+            resolver.txt_add(
+                "rsa._domainkey.manchego.org.".to_string(),
+                DomainKey::parse(RSA_PUBLIC_KEY.as_bytes()).unwrap(),
+                Instant::now() + Duration::new(3600, 0),
+            );
+            resolver.txt_add(
+                "ed._domainkey.scamorza.org.".to_string(),
+                DomainKey::parse(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
+                Instant::now() + Duration::new(3600, 0),
+            );
+        }
 
         // Create private keys
         let pk_ed_public =
