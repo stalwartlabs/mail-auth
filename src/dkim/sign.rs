@@ -207,7 +207,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
         // Create resolver
         let resolver = Resolver::new_system_conf().unwrap();
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         {
             resolver.txt_add(
                 "default._domainkey.example.com.".to_string(),
@@ -352,7 +352,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
         // Verify ATPS (success)
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         resolver.txt_add(
             "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.".to_string(),
             Atps::parse(b"v=ATPS1;").unwrap(),
@@ -375,7 +375,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
         // Verify ATPS (success - no hash)
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         resolver.txt_add(
             "example.com._atps.example.com.".to_string(),
             Atps::parse(b"v=ATPS1;").unwrap(),

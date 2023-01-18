@@ -558,7 +558,7 @@ mod test {
                         line
                     };
 
-                    #[cfg(feature = "test")]
+                    #[cfg(any(test, feature = "test"))]
                     {
                         if let Some(name) = line.strip_prefix("name:") {
                             test_name = name.trim();

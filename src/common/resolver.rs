@@ -109,7 +109,7 @@ impl Resolver {
             return T::unwrap_txt(value);
         }
 
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         if true {
             return mock_resolve(key.as_ref());
         }
@@ -150,7 +150,7 @@ impl Resolver {
             return Ok(value);
         }
 
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         if true {
             return mock_resolve(key.as_ref());
         }
@@ -190,7 +190,7 @@ impl Resolver {
             return Ok(value);
         }
 
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         if true {
             return mock_resolve(key.as_ref());
         }
@@ -216,7 +216,7 @@ impl Resolver {
             return Ok(value);
         }
 
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         if true {
             return mock_resolve(key.as_ref());
         }
@@ -246,7 +246,7 @@ impl Resolver {
             return Ok(value);
         }
 
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         if true {
             return mock_resolve(&addr.to_string());
         }
@@ -271,7 +271,7 @@ impl Resolver {
     }
 
     pub async fn exists<'x>(&self, key: impl IntoFqdn<'x>) -> crate::Result<bool> {
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         if true {
             let key = key.into_fqdn().into_owned();
             return match self.ipv4_lookup(key.as_str()).await {
@@ -302,7 +302,7 @@ impl Resolver {
         }
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(any(test, feature = "test"))]
     pub fn txt_add<'x>(
         &self,
         name: impl IntoFqdn<'x>,
@@ -313,7 +313,7 @@ impl Resolver {
             .insert(name.into_fqdn().into_owned(), value.into(), valid_until);
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(any(test, feature = "test"))]
     pub fn ipv4_add<'x>(
         &self,
         name: impl IntoFqdn<'x>,
@@ -324,7 +324,7 @@ impl Resolver {
             .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(any(test, feature = "test"))]
     pub fn ipv6_add<'x>(
         &self,
         name: impl IntoFqdn<'x>,
@@ -335,12 +335,12 @@ impl Resolver {
             .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(any(test, feature = "test"))]
     pub fn ptr_add(&self, name: IpAddr, value: Vec<String>, valid_until: std::time::Instant) {
         self.cache_ptr.insert(name, Arc::new(value), valid_until);
     }
 
-    #[cfg(feature = "test")]
+    #[cfg(any(test, feature = "test"))]
     pub fn mx_add<'x>(
         &self,
         name: impl IntoFqdn<'x>,
@@ -538,7 +538,7 @@ impl<'x> IntoFqdn<'x> for &String {
     }
 }
 
-#[cfg(feature = "test")]
+#[cfg(any(test, feature = "test"))]
 pub fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     Err(if domain.contains("_parse_error.") {
         Error::ParseError

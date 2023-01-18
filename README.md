@@ -187,7 +187,7 @@ More examples available under the [examples](examples) directory.
 To run the testsuite:
 
 ```bash
- $ cargo test --features test
+ $ cargo test
 ```
 
 To fuzz the library with `cargo-fuzz`:

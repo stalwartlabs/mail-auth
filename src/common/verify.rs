@@ -72,6 +72,12 @@ impl Resolver {
     }
 }
 
+impl IprevOutput {
+    pub fn result(&self) -> &IprevResult {
+        &self.result
+    }
+}
+
 impl DomainKey {
     pub(crate) fn verify<'a>(
         &self,

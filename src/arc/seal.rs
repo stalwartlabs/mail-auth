@@ -236,7 +236,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
         // Crate resolver
         let resolver = Resolver::new_system_conf().unwrap();
-        #[cfg(feature = "test")]
+        #[cfg(any(test, feature = "test"))]
         {
             resolver.txt_add(
                 "rsa._domainkey.manchego.org.".to_string(),
