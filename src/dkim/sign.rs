@@ -248,7 +248,7 @@ mod test {
             );
         }
 
-        // Test RSA-SHA256 relaxed/relaxed
+        dbg!("Test RSA-SHA256 relaxed/relaxed");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
@@ -267,7 +267,7 @@ mod test {
         )
         .await;
 
-        // Test ED25519-SHA256 relaxed/relaxed
+        dbg!("Test ED25519-SHA256 relaxed/relaxed");
         verify(
             &resolver,
             DkimSigner::from_key(pk_ed)
@@ -281,7 +281,7 @@ mod test {
         )
         .await;
 
-        // Test RSA-SHA256 simple/simple with duplicated headers
+        dbg!("Test RSA-SHA256 simple/simple with duplicated headers");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
@@ -307,7 +307,7 @@ mod test {
         )
         .await;
 
-        // Test RSA-SHA256 simple/relaxed with fixed body length
+        dbg!("Test RSA-SHA256 simple/relaxed with fixed body length");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
@@ -327,7 +327,7 @@ mod test {
         )
         .await;
 
-        // Test AUID not matching domain
+        dbg!("Test AUID not matching domains");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
@@ -346,7 +346,7 @@ mod test {
         )
         .await;
 
-        // Test expired signature and reporting
+        dbg!("Test expired signature and reporting");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
@@ -370,7 +370,7 @@ mod test {
         .report;
         assert_eq!(r.as_deref(), Some("dkim-failures@example.com"));
 
-        // Verify ATPS (failure)
+        dbg!("Verify ATPS (failure)");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
@@ -390,7 +390,7 @@ mod test {
         )
         .await;
 
-        // Verify ATPS (success)
+        dbg!("Verify ATPS (success)");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
@@ -416,7 +416,7 @@ mod test {
         )
         .await;
 
-        // Verify ATPS (success - no hash)
+        dbg!("Verify ATPS (success - no hash)");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
