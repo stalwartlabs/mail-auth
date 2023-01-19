@@ -17,7 +17,7 @@ doctest = false
 
 [dependencies]
 mail-parser = { version = "0.8", git = "https://github.com/stalwartlabs/mail-parser", features = ["ludicrous_mode", "full_encoding"] }
-mail-builder = { version = "0.2.4", git = "https://github.com/stalwartlabs/mail-builder", features = ["ludicrous_mode"] } 
+mail-builder = { version = "0.2.5", git = "https://github.com/stalwartlabs/mail-builder", features = ["ludicrous_mode"] } 
 rsa = {version = "0.7.0"}
 ed25519-dalek = "1.0.1"
 sha1 = {version = "0.10", features = ["oid"]}

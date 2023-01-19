@@ -123,7 +123,7 @@ impl<'x> AuthenticationResults<'x> {
 
     pub fn with_dmarc_result(mut self, dmarc: &DmarcOutput) -> Self {
         self.auth_results.push_str(";\r\n\tdmarc=");
-        if dmarc.spf_result == DmarcResult::Pass || dmarc.dkim_result == DmarcResult::Pass {
+        if dmarc.spf_result == DmarcResult::Pass && dmarc.dkim_result == DmarcResult::Pass {
             DmarcResult::Pass.as_auth_result(&mut self.auth_results);
         } else if dmarc.spf_result != DmarcResult::None {
             dmarc.spf_result.as_auth_result(&mut self.auth_results);
