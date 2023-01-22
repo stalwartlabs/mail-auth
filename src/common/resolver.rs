@@ -27,7 +27,7 @@ use crate::{
     dmarc::Dmarc,
     mta_sts::{MtaSts, TlsRpt},
     spf::{Macro, Spf},
-    Error, Resolver, Txt, MX,
+    Error, IpLookupStrategy, Resolver, Txt, MX,
 };
 
 use super::{
@@ -233,12 +233,48 @@ impl Resolver {
             .insert(key.into_owned(), Arc::new(ips), ipv6_lookup.valid_until()))
     }
 
-    pub async fn ip_lookup(&self, key: &str) -> crate::Result<impl Iterator<Item = IpAddr>> {
-        self.resolver
-            .lookup_ip(key)
-            .await
-            .map(|lookup| lookup.into_iter())
-            .map_err(Error::from)
+    pub async fn ip_lookup(
+        &self,
+        key: &str,
+        mut strategy: IpLookupStrategy,
+        max_results: usize,
+    ) -> crate::Result<Vec<IpAddr>> {
+        loop {
+            match strategy {
+                IpLookupStrategy::Ipv4Only | IpLookupStrategy::Ipv4thenIpv6 => {
+                    match (self.ipv4_lookup(key).await, strategy) {
+                        (Ok(result), _) => {
+                            return Ok(result
+                                .iter()
+                                .take(max_results)
+                                .copied()
+                                .map(IpAddr::from)
+                                .collect())
+                        }
+                        (Err(err), IpLookupStrategy::Ipv4Only) => return Err(err),
+                        _ => {
+                            strategy = IpLookupStrategy::Ipv6Only;
+                        }
+                    }
+                }
+                IpLookupStrategy::Ipv6Only | IpLookupStrategy::Ipv6thenIpv4 => {
+                    match (self.ipv6_lookup(key).await, strategy) {
+                        (Ok(result), _) => {
+                            return Ok(result
+                                .iter()
+                                .take(max_results)
+                                .copied()
+                                .map(IpAddr::from)
+                                .collect())
+                        }
+                        (Err(err), IpLookupStrategy::Ipv6Only) => return Err(err),
+                        _ => {
+                            strategy = IpLookupStrategy::Ipv4Only;
+                        }
+                    }
+                }
+            }
+        }
     }
 
     pub async fn ptr_lookup<'x>(&self, addr: IpAddr) -> crate::Result<Arc<Vec<String>>> {

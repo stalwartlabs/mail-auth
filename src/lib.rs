@@ -259,6 +259,7 @@
 
 use std::{
     cell::Cell,
+    default,
     fmt::Display,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -295,6 +296,21 @@ pub struct Resolver {
     pub(crate) cache_ipv4: LruCache<String, Arc<Vec<Ipv4Addr>>>,
     pub(crate) cache_ipv6: LruCache<String, Arc<Vec<Ipv6Addr>>>,
     pub(crate) cache_ptr: LruCache<IpAddr, Arc<Vec<String>>>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum IpLookupStrategy {
+    /// Only query for A (Ipv4) records
+    Ipv4Only,
+    /// Only query for AAAA (Ipv6) records
+    Ipv6Only,
+    /// Query for A and AAAA in parallel
+    //Ipv4AndIpv6,
+    /// Query for Ipv6 if that fails, query for Ipv4
+    Ipv6thenIpv4,
+    /// Query for Ipv4 if that fails, query for Ipv6 (default)
+    #[default]
+    Ipv4thenIpv6,
 }
 
 #[derive(Clone)]
