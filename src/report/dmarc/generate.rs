@@ -48,7 +48,7 @@ impl Report {
                 HeaderType::Address(Address::List(to.map(|to| (*to).into()).collect())),
             )
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
-            .message_id(format!("<{}@{}>", make_boundary("."), submitter))
+            .message_id(format!("{}@{}", make_boundary("."), submitter))
             .subject(format!(
                 "Report Domain: {} Submitter: {} Report-ID: <{}>",
                 self.domain(),

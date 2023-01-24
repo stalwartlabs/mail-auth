@@ -93,7 +93,7 @@ impl<'x> Feedback<'x> {
             .header("To", HeaderType::Text(to.into()))
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
             .message_id(format!(
-                "<{}@{}>",
+                "{}@{}",
                 make_boundary("."),
                 self.reporting_mta().unwrap_or("localhost")
             ))

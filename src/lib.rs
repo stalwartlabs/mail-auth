@@ -259,7 +259,6 @@
 
 use std::{
     cell::Cell,
-    default,
     fmt::Display,
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},

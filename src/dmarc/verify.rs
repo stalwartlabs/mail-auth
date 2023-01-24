@@ -126,7 +126,7 @@ impl Resolver {
             if address.uri.ends_with(domain)
                 || match self
                     .txt_lookup::<Dmarc>(format!(
-                        "{}.report.dmarc.{}.",
+                        "{}._report._dmarc.{}.",
                         domain,
                         address
                             .uri

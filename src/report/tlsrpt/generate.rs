@@ -51,7 +51,7 @@ impl TlsReport {
                 "To",
                 HeaderType::Address(Address::List(to.map(|to| (*to).into()).collect())),
             )
-            .message_id(format!("<{}@{}>", make_boundary("."), submitter))
+            .message_id(format!("{}@{}", make_boundary("."), submitter))
             .header("TLS-Report-Domain", HeaderType::Text(report_domain.into()))
             .header("TLS-Report-Submitter", HeaderType::Text(submitter.into()))
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
