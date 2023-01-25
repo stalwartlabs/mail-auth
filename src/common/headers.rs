@@ -343,6 +343,16 @@ pub trait HeaderWriter: Sized {
     }
 }
 
+pub trait Writable {
+    fn write(self, writer: &mut impl Writer);
+}
+
+impl Writable for &[u8] {
+    fn write(self, writer: &mut impl Writer) {
+        writer.write(self);
+    }
+}
+
 pub trait Writer {
     fn write(&mut self, buf: &[u8]);
 

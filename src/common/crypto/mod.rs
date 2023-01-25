@@ -2,7 +2,7 @@ use sha1::{digest::Output, Digest};
 
 use crate::{dkim::Canonicalization, Result};
 
-use super::headers::Writer;
+use super::headers::{Writable, Writer};
 
 mod rust_crypto;
 pub use rust_crypto::{Ed25519Key, RsaKey};
@@ -11,10 +11,12 @@ pub(crate) use rust_crypto::{Ed25519PublicKey, RsaPublicKey};
 pub trait SigningKey {
     type Hasher: HashImpl;
 
-    fn sign(&self, data: HashOutput) -> Result<Vec<u8>>;
+    fn sign(&self, input: impl Writable) -> Result<Vec<u8>>;
 
-    fn hasher(&self) -> <Self::Hasher as HashImpl>::Context {
-        <Self::Hasher as HashImpl>::hasher()
+    fn hash(&self, data: impl Writable) -> HashOutput {
+        let mut hasher = <Self::Hasher as HashImpl>::hasher();
+        data.write(&mut hasher);
+        hasher.complete()
     }
 
     fn algorithm(&self) -> Algorithm;
@@ -71,10 +73,18 @@ pub enum HashAlgorithm {
 }
 
 impl HashAlgorithm {
-    pub fn hash(&self, data: &[u8]) -> HashOutput {
+    pub fn hash(&self, data: impl Writable) -> HashOutput {
         match self {
-            Self::Sha1 => HashOutput::Sha1(sha1::Sha1::digest(data)),
-            Self::Sha256 => HashOutput::Sha256(sha2::Sha256::digest(data)),
+            Self::Sha1 => {
+                let mut hasher = sha1::Sha1::new();
+                data.write(&mut hasher);
+                HashOutput::Sha1(hasher.finalize())
+            }
+            Self::Sha256 => {
+                let mut hasher = sha2::Sha256::new();
+                data.write(&mut hasher);
+                HashOutput::Sha256(hasher.finalize())
+            }
         }
     }
 }

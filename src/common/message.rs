@@ -10,11 +10,7 @@
 
 use mail_parser::{parsers::MessageStream, HeaderValue};
 
-use crate::{
-    arc,
-    common::crypto::{HashAlgorithm, Sha1, Sha256},
-    dkim, AuthenticatedMessage,
-};
+use crate::{arc, common::crypto::HashAlgorithm, dkim, AuthenticatedMessage};
 
 use super::headers::{AuthenticatedHeader, Header, HeaderParser};
 
@@ -159,10 +155,7 @@ impl<'x> AuthenticatedMessage<'x> {
 
         // Calculate body hashes
         for (cb, ha, l, bh) in &mut message.body_hashes {
-            *bh = match ha {
-                HashAlgorithm::Sha256 => cb.hash_body::<Sha256>(body, *l).as_ref().to_vec(),
-                HashAlgorithm::Sha1 => cb.hash_body::<Sha1>(body, *l).as_ref().to_vec(),
-            };
+            *bh = ha.hash(cb.canonical_body(body, *l)).as_ref().to_vec();
         }
 
         // Sort ARC headers

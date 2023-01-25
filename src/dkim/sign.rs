@@ -12,11 +12,12 @@ use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
 
-use super::{DkimSigner, Done, Signature};
+use super::{canonicalize::CanonicalHeaders, DkimSigner, Done, Signature};
+
 use crate::{
     common::{
-        crypto::{HashContext, SigningKey},
-        headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream},
+        crypto::SigningKey,
+        headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream, Writable, Writer},
     },
     Error,
 };
@@ -54,13 +55,9 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         message: impl HeaderStream<'x>,
         now: u64,
     ) -> crate::Result<Signature> {
-        let mut body_hasher = self.key.hasher();
-        let mut header_hasher = self.key.hasher();
-
         // Canonicalize headers and body
-        let (body_len, signed_headers) =
-            self.template
-                .canonicalize(message, &mut header_hasher, &mut body_hasher);
+        let (body_len, canonical_headers, signed_headers, canonical_body) =
+            self.template.canonicalize(message);
 
         if signed_headers.is_empty() {
             return Err(Error::NoHeadersFound);
@@ -68,7 +65,8 @@ impl<T: SigningKey> DkimSigner<T, Done> {
 
         // Create Signature
         let mut signature = self.template.clone();
-        signature.bh = base64_encode(body_hasher.complete().as_ref())?;
+        let body_hash = self.key.hash(canonical_body);
+        signature.bh = base64_encode(body_hash.as_ref())?;
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
@@ -80,16 +78,28 @@ impl<T: SigningKey> DkimSigner<T, Done> {
             signature.l = body_len as u64;
         }
 
-        // Add signature to hash
-        signature.write(&mut header_hasher, false);
-
         // Sign
-        let b = self.key.sign(header_hasher.complete())?;
+        let b = self.key.sign(SignableMessage {
+            headers: canonical_headers,
+            signature: &signature,
+        })?;
 
         // Encode
         signature.b = base64_encode(&b)?;
 
         Ok(signature)
+    }
+}
+
+pub(super) struct SignableMessage<'a> {
+    headers: CanonicalHeaders<'a>,
+    signature: &'a Signature,
+}
+
+impl<'a> Writable for SignableMessage<'a> {
+    fn write(self, writer: &mut impl Writer) {
+        self.headers.write(writer);
+        self.signature.write(writer, false);
     }
 }
 

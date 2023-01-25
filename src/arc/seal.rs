@@ -14,10 +14,10 @@ use mail_builder::encoders::base64::base64_encode;
 
 use crate::{
     common::{
-        crypto::{HashAlgorithm, HashContext, Sha256, SigningKey},
-        headers::Writer,
+        crypto::{HashAlgorithm, Sha256, SigningKey},
+        headers::{Writable, Writer},
     },
-    dkim::{Canonicalization, Done},
+    dkim::{canonicalize::CanonicalHeaders, Canonicalization, Done},
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
 };
 
@@ -55,12 +55,9 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
                 _ => ChainValidation::Fail,
             };
         }
-        // Canonicalize headers
-        let mut header_hasher = self.key.hasher();
-        let signed_headers = set
-            .signature
-            .canonicalize_headers(message, &mut header_hasher)?;
 
+        // Canonicalize headers
+        let (canonical_headers, signed_headers) = set.signature.canonicalize_headers(message)?;
         if signed_headers.is_empty() {
             return Err(Error::NoHeadersFound);
         }
@@ -78,15 +75,16 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             // Use cached hash
             set.signature.bh = base64_encode(bh)?;
         } else {
-            let mut body_hasher = self.key.hasher();
-            set.signature.cb.canonicalize_body(
-                message
-                    .raw_message
-                    .get(message.body_offset..)
-                    .unwrap_or_default(),
-                &mut body_hasher,
+            let hash = self.key.hash(
+                set.signature.cb.canonical_body(
+                    message
+                        .raw_message
+                        .get(message.body_offset..)
+                        .unwrap_or_default(),
+                    u64::MAX,
+                ),
             );
-            set.signature.bh = base64_encode(body_hasher.complete().as_ref())?;
+            set.signature.bh = base64_encode(hash.as_ref())?;
         }
 
         // Create Signature
@@ -103,39 +101,60 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         };
         set.signature.h = signed_headers;
 
-        // Add signature to hash
-        set.signature.write(&mut header_hasher, false);
-
         // Sign
-        let b = self.key.sign(header_hasher.complete())?;
+        let b = self.key.sign(SignableSet {
+            set: &set,
+            headers: canonical_headers,
+        })?;
         set.signature.b = base64_encode(&b)?;
 
-        // Hash ARC chain
-        let mut header_hasher = self.key.hasher();
-        if !arc_output.set.is_empty() {
+        // Seal
+        let b = self.key.sign(SignableChain {
+            arc_output,
+            set: &set,
+        })?;
+        set.seal.b = base64_encode(&b)?;
+
+        Ok(set)
+    }
+}
+
+struct SignableSet<'a> {
+    set: &'a ArcSet<'a>,
+    headers: CanonicalHeaders<'a>,
+}
+
+impl<'a> Writable for SignableSet<'a> {
+    fn write(self, writer: &mut impl Writer) {
+        self.headers.write(writer);
+        self.set.signature.write(writer, false);
+    }
+}
+
+struct SignableChain<'a> {
+    arc_output: &'a ArcOutput<'a>,
+    set: &'a ArcSet<'a>,
+}
+
+impl<'a> Writable for SignableChain<'a> {
+    fn write(self, writer: &mut impl Writer) {
+        if !self.arc_output.set.is_empty() {
             Canonicalization::Relaxed.canonicalize_headers(
-                &mut arc_output.set.iter().flat_map(|set| {
+                self.arc_output.set.iter().flat_map(|set| {
                     [
                         (set.results.name, set.results.value),
                         (set.signature.name, set.signature.value),
                         (set.seal.name, set.seal.value),
                     ]
                 }),
-                &mut header_hasher,
+                writer,
             );
         }
 
-        // Hash ARC headers for the current instance
-        set.results.write(&mut header_hasher, set.seal.i, false);
-        set.signature.write(&mut header_hasher, false);
-        header_hasher.write(b"\r\n");
-        set.seal.write(&mut header_hasher, false);
-
-        // Seal
-        let b = self.key.sign(header_hasher.complete())?;
-        set.seal.b = base64_encode(&b)?;
-
-        Ok(set)
+        self.set.results.write(writer, self.set.seal.i, false);
+        self.set.signature.write(writer, false);
+        writer.write(b"\r\n");
+        self.set.seal.write(writer, false);
     }
 }
 
@@ -143,8 +162,7 @@ impl Signature {
     pub(crate) fn canonicalize_headers<'x>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
-        header_hasher: &mut impl Writer,
-    ) -> crate::Result<Vec<String>> {
+    ) -> crate::Result<(CanonicalHeaders<'x>, Vec<String>)> {
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
         let mut signed_headers = Vec::with_capacity(self.h.len());
@@ -161,8 +179,7 @@ impl Signature {
             }
         }
 
-        self.ch
-            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher);
+        let canonical_headers = self.ch.canonical_headers(headers);
 
         // Add any missing headers
         signed_headers.reverse();
@@ -172,7 +189,7 @@ impl Signature {
             }
         }
 
-        Ok(signed_headers)
+        Ok((canonical_headers, signed_headers))
     }
 }
 
