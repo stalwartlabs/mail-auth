@@ -351,7 +351,7 @@ mod test {
         let resolver = Resolver::new_system_conf().unwrap();
         #[cfg(any(test, feature = "test"))]
         resolver.txt_add(
-            "example.org.report.dmarc.external.org.",
+            "example.org._report._dmarc.external.org.",
             Dmarc::parse(b"v=DMARC1").unwrap(),
             Instant::now() + Duration::new(3200, 0),
         );
