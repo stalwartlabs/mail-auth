@@ -81,7 +81,7 @@
 //!         .selector("default-ed")
 //!         .headers(["From", "To", "Subject"])
 //!         .sign(RFC5322_MESSAGE.as_bytes())
-//!         .unwrap();  
+//!         .unwrap();
 //!
 //!     // Print the message including both signatures to stdout
 //!     println!(
