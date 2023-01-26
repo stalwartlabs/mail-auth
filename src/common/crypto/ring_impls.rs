@@ -120,9 +120,9 @@ impl SigningKey for Ed25519Key {
     type Hasher = Sha256;
 
     fn sign(&self, input: impl Writable) -> Result<Vec<u8>> {
-        let mut data = Vec::with_capacity(256);
+        let mut data = Sha256::hasher();
         input.write(&mut data);
-        Ok(self.inner.sign(&data).as_ref().to_vec())
+        Ok(self.inner.sign(data.complete().as_ref()).as_ref().to_vec())
     }
 
     fn algorithm(&self) -> Algorithm {
@@ -250,10 +250,10 @@ impl VerifyingKey for Ed25519PublicKey {
             return Err(Error::IncompatibleAlgorithms);
         }
 
-        let mut data = Vec::with_capacity(256);
-        canonicalization.canonicalize_headers(headers, &mut data);
+        let mut hasher = Sha256::hasher();
+        canonicalization.canonicalize_headers(headers, &mut hasher);
         self.inner
-            .verify(&data, signature)
+            .verify(hasher.complete().as_ref(), signature)
             .map_err(|err| Error::CryptoError(err.to_string()))
     }
 }
