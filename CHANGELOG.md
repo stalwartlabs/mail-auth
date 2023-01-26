@@ -1,3 +1,12 @@
+mail-auth 0.3.0
+================================
+- ``ring`` backend support.
+- API improvements: ``DkimSigner`` and ``ArcSealer`` builders.
+- Reverse IP authentication (iprev).
+- MTA-STS lookup.
+- SMTP TLS Report generation and parsing.
+- Bug fixes.
+
 mail-auth 0.2.0
 ================================
 - Fixed: Acronyms in type names do not match the recommended spelling from RFC 430 (#31)

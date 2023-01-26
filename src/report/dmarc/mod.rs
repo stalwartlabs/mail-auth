@@ -247,11 +247,18 @@ impl Record {
     }
 
     pub fn with_dmarc_output(mut self, dmarc_output: &DmarcOutput) -> Self {
-        self.row.policy_evaluated.disposition = match dmarc_output.policy {
-            crate::dmarc::Policy::None => ActionDisposition::None,
-            crate::dmarc::Policy::Quarantine => ActionDisposition::Quarantine,
-            crate::dmarc::Policy::Reject => ActionDisposition::Reject,
-            crate::dmarc::Policy::Unspecified => ActionDisposition::None,
+        self.row.policy_evaluated.disposition = if dmarc_output.dkim_result
+            == crate::DmarcResult::Pass
+            || dmarc_output.spf_result == crate::DmarcResult::Pass
+        {
+            ActionDisposition::Pass
+        } else {
+            match dmarc_output.policy {
+                crate::dmarc::Policy::None => ActionDisposition::None,
+                crate::dmarc::Policy::Quarantine => ActionDisposition::Quarantine,
+                crate::dmarc::Policy::Reject => ActionDisposition::Reject,
+                crate::dmarc::Policy::Unspecified => ActionDisposition::None,
+            }
         };
         self.row.policy_evaluated.dkim = (&dmarc_output.dkim_result).into();
         self.row.policy_evaluated.spf = (&dmarc_output.spf_result).into();

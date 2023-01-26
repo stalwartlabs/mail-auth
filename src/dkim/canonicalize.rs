@@ -174,7 +174,7 @@ impl Signature {
         let body = message.body();
         let body_len = body.len();
         let canonical_headers = self.ch.canonical_headers(headers);
-        let canonical_body = self.ch.canonical_body(&body, u64::MAX);
+        let canonical_body = self.ch.canonical_body(body, u64::MAX);
 
         // Add any missing headers
         signed_headers.reverse();
@@ -280,7 +280,7 @@ mod test {
                 let mut body = Vec::new();
                 CanonicalBody {
                     canonicalization,
-                    body: &raw_body,
+                    body: raw_body,
                 }
                 .write(&mut body);
                 assert_eq!(expected_body, String::from_utf8(body).unwrap());
