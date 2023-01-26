@@ -14,10 +14,10 @@ use mail_builder::encoders::base64::base64_encode;
 
 use crate::{
     common::{
-        crypto::{HashAlgorithm, HashContext, Sha256, SigningKey},
-        headers::Writer,
+        crypto::{HashAlgorithm, Sha256, SigningKey},
+        headers::{Writable, Writer},
     },
-    dkim::{Canonicalization, Done},
+    dkim::{canonicalize::CanonicalHeaders, Canonicalization, Done},
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
 };
 
@@ -55,12 +55,9 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
                 _ => ChainValidation::Fail,
             };
         }
-        // Canonicalize headers
-        let mut header_hasher = self.key.hasher();
-        let signed_headers = set
-            .signature
-            .canonicalize_headers(message, &mut header_hasher)?;
 
+        // Canonicalize headers
+        let (canonical_headers, signed_headers) = set.signature.canonicalize_headers(message)?;
         if signed_headers.is_empty() {
             return Err(Error::NoHeadersFound);
         }
@@ -78,15 +75,16 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             // Use cached hash
             set.signature.bh = base64_encode(bh)?;
         } else {
-            let mut body_hasher = self.key.hasher();
-            set.signature.cb.canonicalize_body(
-                message
-                    .raw_message
-                    .get(message.body_offset..)
-                    .unwrap_or_default(),
-                &mut body_hasher,
+            let hash = self.key.hash(
+                set.signature.cb.canonical_body(
+                    message
+                        .raw_message
+                        .get(message.body_offset..)
+                        .unwrap_or_default(),
+                    u64::MAX,
+                ),
             );
-            set.signature.bh = base64_encode(body_hasher.complete().as_ref())?;
+            set.signature.bh = base64_encode(hash.as_ref())?;
         }
 
         // Create Signature
@@ -103,39 +101,60 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         };
         set.signature.h = signed_headers;
 
-        // Add signature to hash
-        set.signature.write(&mut header_hasher, false);
-
         // Sign
-        let b = self.key.sign(header_hasher.complete())?;
+        let b = self.key.sign(SignableSet {
+            set: &set,
+            headers: canonical_headers,
+        })?;
         set.signature.b = base64_encode(&b)?;
 
-        // Hash ARC chain
-        let mut header_hasher = self.key.hasher();
-        if !arc_output.set.is_empty() {
+        // Seal
+        let b = self.key.sign(SignableChain {
+            arc_output,
+            set: &set,
+        })?;
+        set.seal.b = base64_encode(&b)?;
+
+        Ok(set)
+    }
+}
+
+struct SignableSet<'a> {
+    set: &'a ArcSet<'a>,
+    headers: CanonicalHeaders<'a>,
+}
+
+impl<'a> Writable for SignableSet<'a> {
+    fn write(self, writer: &mut impl Writer) {
+        self.headers.write(writer);
+        self.set.signature.write(writer, false);
+    }
+}
+
+struct SignableChain<'a> {
+    arc_output: &'a ArcOutput<'a>,
+    set: &'a ArcSet<'a>,
+}
+
+impl<'a> Writable for SignableChain<'a> {
+    fn write(self, writer: &mut impl Writer) {
+        if !self.arc_output.set.is_empty() {
             Canonicalization::Relaxed.canonicalize_headers(
-                &mut arc_output.set.iter().flat_map(|set| {
+                self.arc_output.set.iter().flat_map(|set| {
                     [
                         (set.results.name, set.results.value),
                         (set.signature.name, set.signature.value),
                         (set.seal.name, set.seal.value),
                     ]
                 }),
-                &mut header_hasher,
+                writer,
             );
         }
 
-        // Hash ARC headers for the current instance
-        set.results.write(&mut header_hasher, set.seal.i, false);
-        set.signature.write(&mut header_hasher, false);
-        header_hasher.write(b"\r\n");
-        set.seal.write(&mut header_hasher, false);
-
-        // Seal
-        let b = self.key.sign(header_hasher.complete())?;
-        set.seal.b = base64_encode(&b)?;
-
-        Ok(set)
+        self.set.results.write(writer, self.set.seal.i, false);
+        self.set.signature.write(writer, false);
+        writer.write(b"\r\n");
+        self.set.seal.write(writer, false);
     }
 }
 
@@ -143,8 +162,7 @@ impl Signature {
     pub(crate) fn canonicalize_headers<'x>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
-        header_hasher: &mut impl Writer,
-    ) -> crate::Result<Vec<String>> {
+    ) -> crate::Result<(CanonicalHeaders<'x>, Vec<String>)> {
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
         let mut signed_headers = Vec::with_capacity(self.h.len());
@@ -161,8 +179,7 @@ impl Signature {
             }
         }
 
-        self.ch
-            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher);
+        let canonical_headers = self.ch.canonical_headers(headers);
 
         // Add any missing headers
         signed_headers.reverse();
@@ -172,7 +189,7 @@ impl Signature {
             }
         }
 
-        Ok(signed_headers)
+        Ok((canonical_headers, signed_headers))
     }
 }
 
@@ -195,34 +212,28 @@ mod test {
         AuthenticatedMessage, AuthenticationResults, DkimResult, Resolver,
     };
 
-    const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
-MIICXwIBAAKBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYtIxN2SnFC
-jxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v/RtdC2UzJ1lWT947qR+Rcac2gb
-to/NMqJ0fzfVjH4OuKhitdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB
-AoGBALmn+XwWk7akvkUlqb+dOxyLB9i5VBVfje89Teolwc9YJT36BGN/l4e0l6QX
-/1//6DWUTB3KI6wFcm7TWJcxbS0tcKZX7FsJvUz1SbQnkS54DJck1EZO/BLa5ckJ
-gAYIaqlA9C0ZwM6i58lLlPadX/rtHb7pWzeNcZHjKrjM461ZAkEA+itss2nRlmyO
-n1/5yDyCluST4dQfO8kAB3toSEVc7DeFeDhnC1mZdjASZNvdHS4gbLIA1hUGEF9m
-3hKsGUMMPwJBAPW5v/U+AWTADFCS22t72NUurgzeAbzb1HWMqO4y4+9Hpjk5wvL/
-eVYizyuce3/fGke7aRYw/ADKygMJdW8H/OcCQQDz5OQb4j2QDpPZc0Nc4QlbvMsj
-7p7otWRO5xRa6SzXqqV3+F0VpqvDmshEBkoCydaYwc2o6WQ5EBmExeV8124XAkEA
-qZzGsIxVP+sEVRWZmW6KNFSdVUpk3qzK0Tz/WjQMe5z0UunY9Ax9/4PVhp/j61bf
-eAYXunajbBSOLlx4D+TunwJBANkPI5S9iylsbLs6NkaMHV6k5ioHBBmgCak95JGX
-GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
------END RSA PRIVATE KEY-----"#;
+    const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
 
     const RSA_PUBLIC_KEY: &str = concat!(
-        "v=DKIM1; t=s; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQ",
-        "KBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYt",
-        "IxN2SnFCjxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v",
-        "/RtdC2UzJ1lWT947qR+Rcac2gbto/NMqJ0fzfVjH4OuKhi",
-        "tdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB",
+        "v=DKIM1; t=s; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ",
+        "8AMIIBCgKCAQEAv9XYXG3uK95115mB4nJ37nGeNe2CrARm",
+        "1agrbcnSk5oIaEfMZLUR/X8gPzoiNHZcfMZEVR6bAytxUh",
+        "c5EvZIZrjSuEEeny+fFd/cTvcm3cOUUbIaUmSACj0dL2/K",
+        "wW0LyUaza9z9zor7I5XdIl1M53qVd5GI62XBB76FH+Q0bW",
+        "PZNkT4NclzTLspD/MTpNCCPhySM4Kdg5CuDczTH4aNzyS0",
+        "TqgXdtw6A4Sdsp97VXT9fkPW9rso3lrkpsl/9EQ1mR/DWK",
+        "6PBmRfIuSFuqnLKY6v/z2hXHxF7IoojfZLa2kZr9Aed4l9",
+        "WheQOTA19k5r2BmlRw/W9CrgCBo0Sdj+KQIDAQAB",
     );
 
     const ED25519_PRIVATE_KEY: &str = "nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=";
     const ED25519_PUBLIC_KEY: &str =
         "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 
+    #[cfg(any(
+        feature = "rust-crypto",
+        all(feature = "ring", feature = "rustls-pemfile")
+    ))]
     #[tokio::test]
     async fn arc_seal() {
         let message = concat!(
@@ -256,7 +267,10 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         let pk_ed_private = base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap();
 
         // Create DKIM-signed message
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         let mut raw_message = DkimSigner::from_key(pk_rsa)
             .domain("manchego.org")
             .selector("rsa")
@@ -268,14 +282,20 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
         // Verify and seal the message 50 times
         for _ in 0..25 {
+            #[cfg(feature = "rust-crypto")]
             let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+            #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+            let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
 
             raw_message = arc_verify_and_seal(
                 &resolver,
                 &raw_message,
                 "scamorza.org",
                 "ed",
+                #[cfg(feature = "rust-crypto")]
                 Ed25519Key::from_bytes(&pk_ed_public, &pk_ed_private).unwrap(),
+                #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+                Ed25519Key::from_seed_and_public_key(&pk_ed_private, &pk_ed_public).unwrap(),
             )
             .await;
             raw_message =

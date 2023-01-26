@@ -12,11 +12,12 @@ use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
 
-use super::{DkimSigner, Done, Signature};
+use super::{canonicalize::CanonicalHeaders, DkimSigner, Done, Signature};
+
 use crate::{
     common::{
-        crypto::{HashContext, SigningKey},
-        headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream},
+        crypto::SigningKey,
+        headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream, Writable, Writer},
     },
     Error,
 };
@@ -54,13 +55,9 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         message: impl HeaderStream<'x>,
         now: u64,
     ) -> crate::Result<Signature> {
-        let mut body_hasher = self.key.hasher();
-        let mut header_hasher = self.key.hasher();
-
         // Canonicalize headers and body
-        let (body_len, signed_headers) =
-            self.template
-                .canonicalize(message, &mut header_hasher, &mut body_hasher);
+        let (body_len, canonical_headers, signed_headers, canonical_body) =
+            self.template.canonicalize(message);
 
         if signed_headers.is_empty() {
             return Err(Error::NoHeadersFound);
@@ -68,7 +65,8 @@ impl<T: SigningKey> DkimSigner<T, Done> {
 
         // Create Signature
         let mut signature = self.template.clone();
-        signature.bh = base64_encode(body_hasher.complete().as_ref())?;
+        let body_hash = self.key.hash(canonical_body);
+        signature.bh = base64_encode(body_hash.as_ref())?;
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
@@ -80,16 +78,28 @@ impl<T: SigningKey> DkimSigner<T, Done> {
             signature.l = body_len as u64;
         }
 
-        // Add signature to hash
-        signature.write(&mut header_hasher, false);
-
         // Sign
-        let b = self.key.sign(header_hasher.complete())?;
+        let b = self.key.sign(SignableMessage {
+            headers: canonical_headers,
+            signature: &signature,
+        })?;
 
         // Encode
         signature.b = base64_encode(&b)?;
 
         Ok(signature)
+    }
+}
+
+pub(super) struct SignableMessage<'a> {
+    headers: CanonicalHeaders<'a>,
+    signature: &'a Signature,
+}
+
+impl<'a> Writable for SignableMessage<'a> {
+    fn write(self, writer: &mut impl Writer) {
+        self.headers.write(writer);
+        self.signature.write(writer, false);
     }
 }
 
@@ -112,36 +122,33 @@ mod test {
         AuthenticatedMessage, DkimOutput, DkimResult, Resolver,
     };
 
-    const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
-MIICXwIBAAKBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYtIxN2SnFC
-jxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v/RtdC2UzJ1lWT947qR+Rcac2gb
-to/NMqJ0fzfVjH4OuKhitdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB
-AoGBALmn+XwWk7akvkUlqb+dOxyLB9i5VBVfje89Teolwc9YJT36BGN/l4e0l6QX
-/1//6DWUTB3KI6wFcm7TWJcxbS0tcKZX7FsJvUz1SbQnkS54DJck1EZO/BLa5ckJ
-gAYIaqlA9C0ZwM6i58lLlPadX/rtHb7pWzeNcZHjKrjM461ZAkEA+itss2nRlmyO
-n1/5yDyCluST4dQfO8kAB3toSEVc7DeFeDhnC1mZdjASZNvdHS4gbLIA1hUGEF9m
-3hKsGUMMPwJBAPW5v/U+AWTADFCS22t72NUurgzeAbzb1HWMqO4y4+9Hpjk5wvL/
-eVYizyuce3/fGke7aRYw/ADKygMJdW8H/OcCQQDz5OQb4j2QDpPZc0Nc4QlbvMsj
-7p7otWRO5xRa6SzXqqV3+F0VpqvDmshEBkoCydaYwc2o6WQ5EBmExeV8124XAkEA
-qZzGsIxVP+sEVRWZmW6KNFSdVUpk3qzK0Tz/WjQMe5z0UunY9Ax9/4PVhp/j61bf
-eAYXunajbBSOLlx4D+TunwJBANkPI5S9iylsbLs6NkaMHV6k5ioHBBmgCak95JGX
-GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
------END RSA PRIVATE KEY-----"#;
+    const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
 
     const RSA_PUBLIC_KEY: &str = concat!(
-        "v=DKIM1; t=s; p=MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQ",
-        "KBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYt",
-        "IxN2SnFCjxOCKG9v3b4jYfcTNh5ijSsq631uBItLa7od+v",
-        "/RtdC2UzJ1lWT947qR+Rcac2gbto/NMqJ0fzfVjH4OuKhi",
-        "tdY9tf6mcwGjaNBcWToIMmPSPDdQPNUYckcQ2QIDAQAB",
+        "v=DKIM1; t=s; p=MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ",
+        "8AMIIBCgKCAQEAv9XYXG3uK95115mB4nJ37nGeNe2CrARm",
+        "1agrbcnSk5oIaEfMZLUR/X8gPzoiNHZcfMZEVR6bAytxUh",
+        "c5EvZIZrjSuEEeny+fFd/cTvcm3cOUUbIaUmSACj0dL2/K",
+        "wW0LyUaza9z9zor7I5XdIl1M53qVd5GI62XBB76FH+Q0bW",
+        "PZNkT4NclzTLspD/MTpNCCPhySM4Kdg5CuDczTH4aNzyS0",
+        "TqgXdtw6A4Sdsp97VXT9fkPW9rso3lrkpsl/9EQ1mR/DWK",
+        "6PBmRfIuSFuqnLKY6v/z2hXHxF7IoojfZLa2kZr9Aed4l9",
+        "WheQOTA19k5r2BmlRw/W9CrgCBo0Sdj+KQIDAQAB",
     );
 
     const ED25519_PRIVATE_KEY: &str = "nWGxne/9WmC6hEr0kuwsxERJxWl7MmkZcDusAxyuf2A=";
     const ED25519_PUBLIC_KEY: &str =
         "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 
+    #[cfg(any(
+        feature = "rust-crypto",
+        all(feature = "ring", feature = "rustls-pemfile")
+    ))]
     #[test]
     fn dkim_sign() {
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(feature = "rust-crypto")]
         let pk = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let signature = DkimSigner::from_key(pk)
             .domain("stalw.art")
@@ -160,20 +167,28 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
                 311923920,
             )
             .unwrap();
+
         assert_eq!(
             concat!(
                 "dkim-signature:v=1; a=rsa-sha256; s=default; d=stalw.art; ",
                 "c=relaxed/relaxed; h=Subject:To:From; t=311923920; ",
                 "bh=QoiUNYyUV+1tZ/xUPRcE+gST2zAStvJx1OK078Yl m5s=; ",
-                "b=F5fBuwEyirUQRZwpEP1fKGil5rNqxL2e5kExeyGdByAvS2lp5",
-                "M5CqGNzoJ9Pj8sGuGG rdD18uL0xOduqYN7uxifmD4u0BuTzaUSBQ",
-                "hONWZxFq/BZ8rn6ylZCBS3NDuxFcRkcBtMAuZtGKO wito563yyb+",
-                "Ujgtpc0DOZtntjyQGc=;",
+                "b=B/p1FPSJ+Jl4A94381+DTZZnNO4c3fVqDnj0M0Vk5JuvnKb5",
+                "dKSwaoIHPO8UUJsroqH z+R0/eWyW1Vlz+uMIZc2j7MVPJcGaY",
+                "Ni85uCQbPd8VpDKWWab6m21ngXYIpagmzKOKYllyOeK3X qwDz",
+                "Bo0T2DdNjGyMUOAWHxrKGU+fbcPHQYxTBCpfOxE/nc/uxxqh+i",
+                "2uXrsxz7PdCEN01LZiYVV yOzcv0ER9A7aDReE2XPVHnFL8jxE",
+                "2BD53HRv3hGkIDcC6wKOKG/lmID+U8tQk5CP0dLmprgjgTv Se",
+                "bu6xNc6SSIgpvwryAAzJEVwmaBqvE8RNk3Vg10lBZEuNsj2Q==;",
             ),
             signature.to_string()
         );
     }
 
+    #[cfg(any(
+        feature = "rust-crypto",
+        all(feature = "ring", feature = "rustls-pemfile")
+    ))]
     #[tokio::test]
     async fn dkim_sign_verify() {
         let message = concat!(
@@ -199,9 +214,16 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         );
 
         // Create private keys
+        #[cfg(feature = "rust-crypto")]
         let pk_ed = Ed25519Key::from_bytes(
             &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
             &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
+        )
+        .unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_ed = Ed25519Key::from_seed_and_public_key(
+            &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
+            &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
         )
         .unwrap();
 
@@ -226,8 +248,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
             );
         }
 
-        // Test RSA-SHA256 relaxed/relaxed
+        dbg!("Test RSA-SHA256 relaxed/relaxed");
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -242,7 +267,7 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         )
         .await;
 
-        // Test ED25519-SHA256 relaxed/relaxed
+        dbg!("Test ED25519-SHA256 relaxed/relaxed");
         verify(
             &resolver,
             DkimSigner::from_key(pk_ed)
@@ -256,8 +281,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         )
         .await;
 
-        // Test RSA-SHA256 simple/simple with duplicated headers
+        dbg!("Test RSA-SHA256 simple/simple with duplicated headers");
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -279,8 +307,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         )
         .await;
 
-        // Test RSA-SHA256 simple/relaxed with fixed body length
+        dbg!("Test RSA-SHA256 simple/relaxed with fixed body length");
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -296,8 +327,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         )
         .await;
 
-        // Test AUID not matching domain
+        dbg!("Test AUID not matching domains");
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -312,8 +346,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         )
         .await;
 
-        // Test expired signature and reporting
+        dbg!("Test expired signature and reporting");
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         let r = verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -333,8 +370,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         .report;
         assert_eq!(r.as_deref(), Some("dkim-failures@example.com"));
 
-        // Verify ATPS (failure)
+        dbg!("Verify ATPS (failure)");
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
             DkimSigner::from_key(pk_rsa)
@@ -350,8 +390,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         )
         .await;
 
-        // Verify ATPS (success)
+        dbg!("Verify ATPS (success)");
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(any(test, feature = "test"))]
         resolver.txt_add(
             "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.".to_string(),
@@ -373,8 +416,11 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
         )
         .await;
 
-        // Verify ATPS (success - no hash)
+        dbg!("Verify ATPS (success - no hash)");
+        #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(any(test, feature = "test"))]
         resolver.txt_add(
             "example.com._atps.example.com.".to_string(),

@@ -81,7 +81,7 @@
 //!         .selector("default-ed")
 //!         .headers(["From", "To", "Subject"])
 //!         .sign(RFC5322_MESSAGE.as_bytes())
-//!         .unwrap();  
+//!         .unwrap();
 //!
 //!     // Print the message including both signatures to stdout
 //!     println!(
@@ -283,8 +283,6 @@ pub mod report;
 pub mod spf;
 
 pub use flate2;
-pub use sha1;
-pub use sha2;
 pub use trust_dns_resolver;
 pub use zip;
 
@@ -572,12 +570,14 @@ impl From<io::Error> for Error {
     }
 }
 
+#[cfg(feature = "rsa")]
 impl From<rsa::errors::Error> for Error {
     fn from(err: rsa::errors::Error) -> Self {
         Error::CryptoError(err.to_string())
     }
 }
 
+#[cfg(feature = "ed25519-dalek")]
 impl From<ed25519_dalek::ed25519::Error> for Error {
     fn from(err: ed25519_dalek::ed25519::Error) -> Self {
         Error::CryptoError(err.to_string())

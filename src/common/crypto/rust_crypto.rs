@@ -4,7 +4,11 @@ use ed25519_dalek::Signer;
 use rsa::{pkcs1::DecodeRsaPrivateKey, PaddingScheme, PublicKey as _, RsaPrivateKey};
 use sha2::digest::Digest;
 
-use crate::{common::headers::Writer, dkim::Canonicalization, Error, Result};
+use crate::{
+    common::headers::{Writable, Writer},
+    dkim::Canonicalization,
+    Error, Result,
+};
 
 use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
 
@@ -41,11 +45,12 @@ impl<T: HashImpl> RsaKey<T> {
 impl SigningKey for RsaKey<Sha1> {
     type Hasher = Sha1;
 
-    fn sign(&self, data: HashOutput) -> Result<Vec<u8>> {
+    fn sign(&self, input: impl Writable) -> Result<Vec<u8>> {
+        let hash = self.hash(input);
         self.inner
             .sign(
                 PaddingScheme::new_pkcs1v15_sign::<<Self::Hasher as HashImpl>::Context>(),
-                data.as_ref(),
+                hash.as_ref(),
             )
             .map_err(|err| Error::CryptoError(err.to_string()))
     }
@@ -58,11 +63,12 @@ impl SigningKey for RsaKey<Sha1> {
 impl SigningKey for RsaKey<Sha256> {
     type Hasher = Sha256;
 
-    fn sign(&self, data: HashOutput) -> Result<Vec<u8>> {
+    fn sign(&self, input: impl Writable) -> Result<Vec<u8>> {
+        let hash = self.hash(input);
         self.inner
             .sign(
                 PaddingScheme::new_pkcs1v15_sign::<<Self::Hasher as HashImpl>::Context>(),
-                data.as_ref(),
+                hash.as_ref(),
             )
             .map_err(|err| Error::CryptoError(err.to_string()))
     }
@@ -93,8 +99,9 @@ impl Ed25519Key {
 impl SigningKey for Ed25519Key {
     type Hasher = Sha256;
 
-    fn sign(&self, data: HashOutput) -> Result<Vec<u8>> {
-        Ok(self.inner.sign(data.as_ref()).to_bytes().to_vec())
+    fn sign(&self, input: impl Writable) -> Result<Vec<u8>> {
+        let hash = self.hash(input);
+        Ok(self.inner.sign(hash.as_ref()).to_bytes().to_vec())
     }
 
     fn algorithm(&self) -> Algorithm {
@@ -128,7 +135,10 @@ impl VerifyingKey for RsaPublicKey {
     ) -> Result<()> {
         match algorithm {
             Algorithm::RsaSha256 => {
-                let hash = canonicalization.hash_headers::<Sha256>(headers);
+                let mut hasher = sha2::Sha256::new();
+                canonicalization.canonicalize_headers(headers, &mut hasher);
+                let hash = hasher.finalize();
+
                 self.inner
                     .verify(
                         PaddingScheme::new_pkcs1v15_sign::<sha2::Sha256>(),
@@ -138,7 +148,10 @@ impl VerifyingKey for RsaPublicKey {
                     .map_err(|_| Error::FailedVerification)
             }
             Algorithm::RsaSha1 => {
-                let hash = canonicalization.hash_headers::<Sha1>(headers);
+                let mut hasher = sha1::Sha1::new();
+                canonicalization.canonicalize_headers(headers, &mut hasher);
+                let hash = hasher.finalize();
+
                 self.inner
                     .verify(
                         PaddingScheme::new_pkcs1v15_sign::<sha1::Sha1>(),
@@ -179,7 +192,10 @@ impl VerifyingKey for Ed25519PublicKey {
             return Err(Error::IncompatibleAlgorithms);
         }
 
-        let hash = canonicalization.hash_headers::<Sha256>(headers);
+        let mut hasher = sha2::Sha256::new();
+        canonicalization.canonicalize_headers(headers, &mut hasher);
+        let hash = hasher.finalize();
+
         self.inner
             .verify_strict(
                 hash.as_ref(),
@@ -220,12 +236,12 @@ impl HashImpl for Sha256 {
 
 impl HashContext for sha1::Sha1 {
     fn complete(self) -> HashOutput {
-        HashOutput::Sha1(self.finalize())
+        HashOutput::RustCryptoSha1(self.finalize())
     }
 }
 
 impl HashContext for sha2::Sha256 {
     fn complete(self) -> HashOutput {
-        HashOutput::Sha256(self.finalize())
+        HashOutput::RustCryptoSha256(self.finalize())
     }
 }

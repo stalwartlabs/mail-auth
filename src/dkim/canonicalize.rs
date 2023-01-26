@@ -8,22 +8,24 @@
  * except according to those terms.
  */
 
-use crate::common::{
-    crypto::{HashContext, HashImpl},
-    headers::{HeaderStream, Writer},
-};
+use crate::common::headers::{HeaderStream, Writable, Writer};
 
 use super::{Canonicalization, Signature};
 
-impl Canonicalization {
-    pub fn canonicalize_body(&self, body: &[u8], hasher: &mut impl Writer) {
+pub struct CanonicalBody<'a> {
+    canonicalization: Canonicalization,
+    body: &'a [u8],
+}
+
+impl Writable for CanonicalBody<'_> {
+    fn write(self, hasher: &mut impl Writer) {
         let mut crlf_seq = 0;
 
-        match self {
+        match self.canonicalization {
             Canonicalization::Relaxed => {
                 let mut last_ch = 0;
 
-                for &ch in body {
+                for &ch in self.body {
                     match ch {
                         b' ' | b'\t' => {
                             while crlf_seq > 0 {
@@ -53,7 +55,7 @@ impl Canonicalization {
                 }
             }
             Canonicalization::Simple => {
-                for &ch in body {
+                for &ch in self.body {
                     match ch {
                         b'\n' => {
                             crlf_seq += 1;
@@ -73,10 +75,12 @@ impl Canonicalization {
 
         hasher.write(b"\r\n");
     }
+}
 
-    pub fn canonicalize_headers<'x>(
+impl Canonicalization {
+    pub fn canonicalize_headers<'a>(
         &self,
-        headers: &mut dyn Iterator<Item = (&'x [u8], &'x [u8])>,
+        headers: impl Iterator<Item = (&'a [u8], &'a [u8])>,
         hasher: &mut impl Writer,
     ) {
         match self {
@@ -87,6 +91,7 @@ impl Canonicalization {
                             hasher.write(&[ch.to_ascii_lowercase()]);
                         }
                     }
+
                     hasher.write(b":");
                     let mut bw = 0;
                     let mut last_ch = 0;
@@ -100,6 +105,7 @@ impl Canonicalization {
                         }
                         last_ch = ch;
                     }
+
                     if last_ch == b'\n' {
                         hasher.write(b"\r\n");
                     }
@@ -115,26 +121,25 @@ impl Canonicalization {
         }
     }
 
-    pub fn hash_headers<'x, T: HashImpl>(
+    pub fn canonical_headers<'a>(
         &self,
-        headers: &mut dyn Iterator<Item = (&'x [u8], &'x [u8])>,
-    ) -> impl AsRef<[u8]> {
-        let mut hasher = T::hasher();
-        self.canonicalize_headers(headers, &mut hasher);
-        hasher.complete()
+        headers: Vec<(&'a [u8], &'a [u8])>,
+    ) -> CanonicalHeaders<'a> {
+        CanonicalHeaders {
+            canonicalization: *self,
+            headers,
+        }
     }
 
-    pub fn hash_body<T: HashImpl>(&self, body: &[u8], l: u64) -> impl AsRef<[u8]> {
-        let mut hasher = T::hasher();
-        self.canonicalize_body(
-            if l == 0 || body.is_empty() {
+    pub fn canonical_body<'a>(&self, body: &'a [u8], l: u64) -> CanonicalBody<'a> {
+        CanonicalBody {
+            canonicalization: *self,
+            body: if l == 0 || body.is_empty() {
                 body
             } else {
                 &body[..std::cmp::min(l as usize, body.len())]
             },
-            &mut hasher,
-        );
-        hasher.complete()
+        }
     }
 
     pub fn serialize_name(&self, writer: &mut impl Writer) {
@@ -146,13 +151,10 @@ impl Canonicalization {
 }
 
 impl Signature {
-    #[allow(clippy::while_let_on_iterator)]
     pub(crate) fn canonicalize<'x>(
         &self,
         mut message: impl HeaderStream<'x>,
-        header_hasher: &mut impl Writer,
-        body_hasher: &mut impl Writer,
-    ) -> (usize, Vec<String>) {
+    ) -> (usize, CanonicalHeaders<'x>, Vec<String>, CanonicalBody<'x>) {
         let mut headers = Vec::with_capacity(self.h.len());
         let mut found_headers = vec![false; self.h.len()];
         let mut signed_headers = Vec::with_capacity(self.h.len());
@@ -171,9 +173,8 @@ impl Signature {
 
         let body = message.body();
         let body_len = body.len();
-        self.ch
-            .canonicalize_headers(&mut headers.into_iter().rev(), header_hasher);
-        self.cb.canonicalize_body(body, body_hasher);
+        let canonical_headers = self.ch.canonical_headers(headers);
+        let canonical_body = self.ch.canonical_body(&body, u64::MAX);
 
         // Add any missing headers
         signed_headers.reverse();
@@ -183,13 +184,29 @@ impl Signature {
             }
         }
 
-        (body_len, signed_headers)
+        (body_len, canonical_headers, signed_headers, canonical_body)
+    }
+}
+
+pub struct CanonicalHeaders<'a> {
+    canonicalization: Canonicalization,
+    headers: Vec<(&'a [u8], &'a [u8])>,
+}
+
+impl<'a> Writable for CanonicalHeaders<'a> {
+    fn write(self, writer: &mut impl Writer) {
+        self.canonicalization
+            .canonicalize_headers(self.headers.into_iter().rev(), writer)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{common::headers::HeaderIterator, dkim::Canonicalization};
+    use super::{CanonicalBody, CanonicalHeaders};
+    use crate::{
+        common::headers::{HeaderIterator, Writable},
+        dkim::Canonicalization,
+    };
 
     #[test]
     #[allow(clippy::needless_collect)]
@@ -253,13 +270,19 @@ mod test {
                 (Canonicalization::Simple, simple_headers, simple_body),
             ] {
                 let mut headers = Vec::new();
-                let mut body = Vec::new();
-
-                canonicalization
-                    .canonicalize_headers(&mut parsed_headers.clone().into_iter(), &mut headers);
-                canonicalization.canonicalize_body(raw_body, &mut body);
-
+                CanonicalHeaders {
+                    canonicalization,
+                    headers: parsed_headers.iter().cloned().rev().collect(),
+                }
+                .write(&mut headers);
                 assert_eq!(expected_headers, String::from_utf8(headers).unwrap());
+
+                let mut body = Vec::new();
+                CanonicalBody {
+                    canonicalization,
+                    body: &raw_body,
+                }
+                .write(&mut body);
                 assert_eq!(expected_body, String::from_utf8(body).unwrap());
             }
         }
