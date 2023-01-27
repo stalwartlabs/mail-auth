@@ -146,7 +146,7 @@ impl PolicyPublished {
         writeln!(xml, "\t<policy_published>").ok();
         writeln!(xml, "\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
         if let Some(vp) = &self.version_published {
-            writeln!(xml, "\t\t<version_published>{}</version_published>", vp).ok();
+            writeln!(xml, "\t\t<version_published>{vp}</version_published>").ok();
         }
         writeln!(xml, "\t\t<adkim>{}</adkim>", &self.adkim).ok();
         writeln!(xml, "\t\t<aspf>{}</aspf>", &self.aspf).ok();
@@ -185,7 +185,7 @@ impl Row {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t<row>").ok();
         if let Some(source_ip) = &self.source_ip {
-            writeln!(xml, "\t\t\t<source_ip>{}</source_ip>", source_ip).ok();
+            writeln!(xml, "\t\t\t<source_ip>{source_ip}</source_ip>").ok();
         }
         writeln!(xml, "\t\t\t<count>{}</count>", self.count).ok();
         self.policy_evaluated.to_xml(xml);

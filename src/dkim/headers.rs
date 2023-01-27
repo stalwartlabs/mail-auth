@@ -80,7 +80,7 @@ impl Signature {
             for &ch in self.i.as_bytes().iter() {
                 match ch {
                     0..=0x20 | b';' | 0x7f..=u8::MAX => {
-                        writer.write_len(format!("={:02X}", ch).as_bytes(), &mut bw);
+                        writer.write_len(format!("={ch:02X}").as_bytes(), &mut bw);
                     }
                     _ => {
                         writer.write_len(&[ch], &mut bw);

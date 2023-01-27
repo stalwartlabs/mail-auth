@@ -138,7 +138,7 @@ mod test {
             )
             .unwrap();
 
-        println!("{}", message);
+        //println!("{message}");
 
         let parsed_report = TlsReport::parse_rfc5322(message.as_bytes()).unwrap();
 

@@ -45,7 +45,7 @@ impl<'x> Feedback<'x> {
         }
         .ok();
         if let Some(ip) = &self.source_ip {
-            write!(&mut text_body, "from IP address {} ", ip).ok();
+            write!(&mut text_body, "from IP address {ip} ").ok();
         }
         let dt = DateTime::from_timestamp(if let Some(ad) = &self.arrival_date {
             *ad
@@ -172,28 +172,28 @@ impl<'x> Feedback<'x> {
                 .ok();
             }
             if let Some(value) = &self.dkim_adsp_dns {
-                write!(&mut arf, "DKIM-ADSP-DNS: {}\r\n", value).ok();
+                write!(&mut arf, "DKIM-ADSP-DNS: {value}\r\n").ok();
             }
             if let Some(value) = &self.dkim_canonicalized_body {
-                write!(&mut arf, "DKIM-Canonicalized-Body: {}\r\n", value).ok();
+                write!(&mut arf, "DKIM-Canonicalized-Body: {value}\r\n").ok();
             }
             if let Some(value) = &self.dkim_canonicalized_header {
-                write!(&mut arf, "DKIM-Canonicalized-Header: {}\r\n", value).ok();
+                write!(&mut arf, "DKIM-Canonicalized-Header: {value}\r\n").ok();
             }
             if let Some(value) = &self.dkim_domain {
-                write!(&mut arf, "DKIM-Domain: {}\r\n", value).ok();
+                write!(&mut arf, "DKIM-Domain: {value}\r\n").ok();
             }
             if let Some(value) = &self.dkim_identity {
-                write!(&mut arf, "DKIM-Identity: {}\r\n", value).ok();
+                write!(&mut arf, "DKIM-Identity: {value}\r\n").ok();
             }
             if let Some(value) = &self.dkim_selector {
-                write!(&mut arf, "DKIM-Selector: {}\r\n", value).ok();
+                write!(&mut arf, "DKIM-Selector: {value}\r\n").ok();
             }
             if let Some(value) = &self.dkim_selector_dns {
-                write!(&mut arf, "DKIM-Selector-DNS: {}\r\n", value).ok();
+                write!(&mut arf, "DKIM-Selector-DNS: {value}\r\n").ok();
             }
             if let Some(value) = &self.spf_dns {
-                write!(&mut arf, "SPF-DNS: {}\r\n", value).ok();
+                write!(&mut arf, "SPF-DNS: {value}\r\n").ok();
             }
             if self.identity_alignment != IdentityAlignment::Unspecified {
                 write!(
@@ -212,37 +212,37 @@ impl<'x> Feedback<'x> {
         }
 
         for value in &self.authentication_results {
-            write!(&mut arf, "Authentication-Results: {}\r\n", value).ok();
+            write!(&mut arf, "Authentication-Results: {value}\r\n").ok();
         }
         if self.incidents > 1 {
             write!(&mut arf, "Incidents: {}\r\n", self.incidents).ok();
         }
         if let Some(value) = &self.original_envelope_id {
-            write!(&mut arf, "Original-Envelope-Id: {}\r\n", value).ok();
+            write!(&mut arf, "Original-Envelope-Id: {value}\r\n").ok();
         }
         if let Some(value) = &self.original_mail_from {
-            write!(&mut arf, "Original-Mail-From: {}\r\n", value).ok();
+            write!(&mut arf, "Original-Mail-From: {value}\r\n").ok();
         }
         if let Some(value) = &self.original_rcpt_to {
-            write!(&mut arf, "Original-Rcpt-To: {}\r\n", value).ok();
+            write!(&mut arf, "Original-Rcpt-To: {value}\r\n").ok();
         }
         for value in &self.reported_domain {
-            write!(&mut arf, "Reported-Domain: {}\r\n", value).ok();
+            write!(&mut arf, "Reported-Domain: {value}\r\n").ok();
         }
         for value in &self.reported_uri {
-            write!(&mut arf, "Reported-URI: {}\r\n", value).ok();
+            write!(&mut arf, "Reported-URI: {value}\r\n").ok();
         }
         if let Some(value) = &self.reporting_mta {
-            write!(&mut arf, "Reporting-MTA: dns;{}\r\n", value).ok();
+            write!(&mut arf, "Reporting-MTA: dns;{value}\r\n").ok();
         }
         if let Some(value) = &self.source_ip {
-            write!(&mut arf, "Source-IP: {}\r\n", value).ok();
+            write!(&mut arf, "Source-IP: {value}\r\n").ok();
         }
         if self.source_port != 0 {
             write!(&mut arf, "Source-Port: {}\r\n", self.source_port).ok();
         }
         if let Some(value) = &self.user_agent {
-            write!(&mut arf, "User-Agent: {}\r\n", value).ok();
+            write!(&mut arf, "User-Agent: {value}\r\n").ok();
         }
 
         arf

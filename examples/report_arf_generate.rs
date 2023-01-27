@@ -47,5 +47,5 @@ fn main() {
         .unwrap();
 
     // Print ARF feedback to stdout
-    println!("{}", feedback);
+    println!("{feedback}");
 }

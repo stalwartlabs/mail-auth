@@ -105,5 +105,5 @@ fn main() {
         .unwrap();
 
     // Print report to stdout
-    println!("{}", report);
+    println!("{report}");
 }

@@ -476,8 +476,8 @@ impl Display for Error {
             Error::ParseError => write!(f, "Parse error"),
             Error::MissingParameters => write!(f, "Missing parameters"),
             Error::NoHeadersFound => write!(f, "No headers found"),
-            Error::CryptoError(err) => write!(f, "Cryptography layer error: {}", err),
-            Error::Io(e) => write!(f, "I/O error: {}", e),
+            Error::CryptoError(err) => write!(f, "Cryptography layer error: {err}"),
+            Error::Io(e) => write!(f, "I/O error: {e}"),
             Error::Base64 => write!(f, "Base64 encode or decode error."),
             Error::UnsupportedVersion => write!(f, "Unsupported version in DKIM Signature"),
             Error::UnsupportedAlgorithm => write!(f, "Unsupported algorithm in DKIM Signature"),
@@ -499,15 +499,15 @@ impl Display for Error {
             Error::SignatureExpired => write!(f, "Signature expired"),
             Error::FailedAuidMatch => write!(f, "AUID does not match domain name"),
             Error::ArcInvalidInstance(i) => {
-                write!(f, "Invalid 'i={}' value found in ARC header", i)
+                write!(f, "Invalid 'i={i}' value found in ARC header")
             }
             Error::ArcInvalidCV => write!(f, "Invalid 'cv=' value found in ARC header"),
             Error::ArcHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal"),
             Error::ArcBrokenChain => write!(f, "Broken or missing ARC chain"),
             Error::ArcChainTooLong => write!(f, "Too many ARC headers"),
             Error::InvalidRecordType => write!(f, "Invalid record"),
-            Error::DnsError(err) => write!(f, "DNS resolution error: {}", err),
-            Error::DnsRecordNotFound(code) => write!(f, "DNS record not found: {}", code),
+            Error::DnsError(err) => write!(f, "DNS resolution error: {err}"),
+            Error::DnsRecordNotFound(code) => write!(f, "DNS record not found: {code}"),
             Error::NotAligned => write!(f, "Policy not aligned"),
         }
     }
@@ -531,9 +531,9 @@ impl Display for IprevResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             IprevResult::Pass => f.write_str("pass"),
-            IprevResult::Fail(err) => write!(f, "fail; {}", err),
-            IprevResult::TempError(err) => write!(f, "temp error; {}", err),
-            IprevResult::PermError(err) => write!(f, "perm error; {}", err),
+            IprevResult::Fail(err) => write!(f, "fail; {err}"),
+            IprevResult::TempError(err) => write!(f, "temp error; {err}"),
+            IprevResult::PermError(err) => write!(f, "perm error; {err}"),
             IprevResult::None => f.write_str("none"),
         }
     }
@@ -543,10 +543,10 @@ impl Display for DkimResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DkimResult::Pass => f.write_str("pass"),
-            DkimResult::Fail(err) => write!(f, "fail; {}", err),
-            DkimResult::Neutral(err) => write!(f, "neutral; {}", err),
-            DkimResult::TempError(err) => write!(f, "temp error; {}", err),
-            DkimResult::PermError(err) => write!(f, "perm error; {}", err),
+            DkimResult::Fail(err) => write!(f, "fail; {err}"),
+            DkimResult::Neutral(err) => write!(f, "neutral; {err}"),
+            DkimResult::TempError(err) => write!(f, "temp error; {err}"),
+            DkimResult::PermError(err) => write!(f, "perm error; {err}"),
             DkimResult::None => f.write_str("none"),
         }
     }
@@ -556,9 +556,9 @@ impl Display for DmarcResult {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DmarcResult::Pass => f.write_str("pass"),
-            DmarcResult::Fail(err) => write!(f, "fail; {}", err),
-            DmarcResult::TempError(err) => write!(f, "temp error; {}", err),
-            DmarcResult::PermError(err) => write!(f, "perm error; {}", err),
+            DmarcResult::Fail(err) => write!(f, "fail; {err}"),
+            DmarcResult::TempError(err) => write!(f, "temp error; {err}"),
+            DmarcResult::PermError(err) => write!(f, "perm error; {err}"),
             DmarcResult::None => f.write_str("none"),
         }
     }

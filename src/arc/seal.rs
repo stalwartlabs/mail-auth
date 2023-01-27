@@ -326,7 +326,7 @@ mod test {
             .selector(s)
             .headers(["From", "To", "Subject", "DKIM-Signature"])
             .seal(&message, &auth_results, &arc_result)
-            .unwrap_or_else(|err| panic!("Got {:?} for {}", err, raw_message));
+            .unwrap_or_else(|err| panic!("Got {err:?} for {raw_message}"));
         format!(
             "{}{}{}",
             arc.to_header(),

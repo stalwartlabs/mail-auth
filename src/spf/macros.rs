@@ -101,7 +101,7 @@ impl<'x> Variables<'x> {
             IpAddr::V6(ip) => {
                 let mut segments = Vec::with_capacity(63);
                 for segment in ip.segments() {
-                    for &p in format!("{:04x}", segment).as_bytes() {
+                    for &p in format!("{segment:04x}").as_bytes() {
                         if !segments.is_empty() {
                             segments.push(b'.');
                         }
@@ -216,7 +216,7 @@ fn add_part(result: &mut Vec<u8>, part: &[u8], pos: usize, escape: bool) {
             if ch.is_ascii_alphanumeric() || [b'-', b'.', b'_', b'~'].contains(ch) {
                 result.push(*ch);
             } else {
-                result.extend_from_slice(format!("%{:02x}", ch).as_bytes());
+                result.extend_from_slice(format!("%{ch:02x}").as_bytes());
             }
         }
     }
@@ -273,7 +273,7 @@ mod test {
             ),
         ] {
             let (m, _) = macro_string.as_bytes().iter().macro_string(false).unwrap();
-            assert_eq!(m.eval(&vars, "", false), expansion, "{:?}", macro_string);
+            assert_eq!(m.eval(&vars, "", false), expansion, "{macro_string:?}");
         }
 
         let mut vars = Variables::new();
@@ -304,7 +304,7 @@ mod test {
             ),
         ] {
             let (m, _) = macro_string.as_bytes().iter().macro_string(true).unwrap();
-            assert_eq!(m.eval(&vars, "", false), expansion, "{:?}", macro_string);
+            assert_eq!(m.eval(&vars, "", false), expansion, "{macro_string:?}");
         }
     }
 }

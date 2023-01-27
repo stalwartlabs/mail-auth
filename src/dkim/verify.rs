@@ -415,7 +415,7 @@ mod test {
         {
             #[cfg(any(test, feature = "test"))]
             resolver.txt_add(
-                format!("{}.", key),
+                format!("{key}."),
                 DomainKey::parse(value).unwrap(),
                 Instant::now() + Duration::new(3200, 0),
             );

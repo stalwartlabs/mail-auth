@@ -67,13 +67,13 @@ impl Resolver {
         let has_dkim_pass = dkim_output.iter().any(|o| o.result == DkimResult::Pass);
         if spf_output.result == SpfResult::Pass || has_dkim_pass {
             // Check SPF alignment
-            let from_subdomain = format!(".{}", from_domain);
+            let from_subdomain = format!(".{from_domain}");
             if spf_output.result == SpfResult::Pass {
                 output.spf_result = if mail_from_domain == from_domain {
                     DmarcResult::Pass
                 } else if dmarc.aspf == Alignment::Relaxed
                     && mail_from_domain.ends_with(&from_subdomain)
-                    || from_domain.ends_with(&format!(".{}", mail_from_domain))
+                    || from_domain.ends_with(&format!(".{mail_from_domain}"))
                 {
                     output.policy = dmarc.sp;
                     DmarcResult::Pass

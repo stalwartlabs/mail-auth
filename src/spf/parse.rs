@@ -1449,11 +1449,9 @@ mod test {
             ),
         ] {
             assert_eq!(
-                Spf::parse(record.as_bytes())
-                    .unwrap_or_else(|err| panic!("{:?} : {:?}", record, err)),
+                Spf::parse(record.as_bytes()).unwrap_or_else(|err| panic!("{record:?} : {err:?}")),
                 expected_result,
-                "{}",
-                record
+                "{record}"
             );
         }
     }
@@ -1481,13 +1479,13 @@ mod test {
             "::13.1.68.3",
             "::FFFF:129.144.52.38",
         ] {
-            for test in [test.to_string(), format!("{} ", test)] {
+            for test in [test.to_string(), format!("{test} ")] {
                 let (ip, stop_char) = test
                     .as_bytes()
                     .iter()
                     .ip6()
-                    .unwrap_or_else(|err| panic!("{:?} : {:?}", test, err));
-                assert_eq!(stop_char, b' ', "{}", test);
+                    .unwrap_or_else(|err| panic!("{test:?} : {err:?}"));
+                assert_eq!(stop_char, b' ', "{test}");
                 assert_eq!(ip, test.trim_end().parse::<Ipv6Addr>().unwrap())
             }
         }
@@ -1511,13 +1509,13 @@ mod test {
     #[test]
     fn parse_ip4() {
         for test in ["0.0.0.0", "255.255.255.255", "13.1.68.3", "129.144.52.38"] {
-            for test in [test.to_string(), format!("{} ", test)] {
+            for test in [test.to_string(), format!("{test} ")] {
                 let (ip, stop_char) = test
                     .as_bytes()
                     .iter()
                     .ip4()
-                    .unwrap_or_else(|err| panic!("{:?} : {:?}", test, err));
-                assert_eq!(stop_char, b' ', "{}", test);
+                    .unwrap_or_else(|err| panic!("{test:?} : {err:?}"));
+                assert_eq!(stop_char, b' ', "{test}");
                 assert_eq!(ip, test.trim_end().parse::<Ipv4Addr>().unwrap());
             }
         }

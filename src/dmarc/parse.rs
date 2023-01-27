@@ -491,10 +491,9 @@ mod test {
         ] {
             assert_eq!(
                 Dmarc::parse(record.as_bytes())
-                    .unwrap_or_else(|err| panic!("{:?} : {:?}", record, err)),
+                    .unwrap_or_else(|err| panic!("{record:?} : {err:?}")),
                 expected_result,
-                "{}",
-                record
+                "{record}"
             );
         }
     }

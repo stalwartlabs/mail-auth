@@ -31,7 +31,7 @@ impl Resolver {
                 helo_domain,
                 helo_domain,
                 host_domain,
-                &format!("postmaster@{}", helo_domain),
+                &format!("postmaster@{helo_domain}"),
             )
             .await
         } else {
@@ -95,7 +95,7 @@ impl Resolver {
         if !sender.is_empty() {
             vars.set_sender(sender.as_bytes());
         } else {
-            vars.set_sender(format!("postmaster@{}", domain).into_bytes());
+            vars.set_sender(format!("postmaster@{domain}").into_bytes());
         }
         vars.set_domain(domain.as_bytes());
         vars.set_host_domain(host_domain.as_bytes());
@@ -257,7 +257,7 @@ impl Resolver {
                         }
 
                         let target_addr = macro_string.eval(&vars, &domain, true).to_lowercase();
-                        let target_sub_addr = format!(".{}", target_addr);
+                        let target_sub_addr = format!(".{target_addr}");
                         let mut matches = false;
 
                         if let Ok(records) = self.ptr_lookup(ip).await {
@@ -490,7 +490,7 @@ impl LookupLimit {
     }
 }
 
-trait HasLabels {
+pub trait HasLabels {
     fn has_labels(&self) -> bool;
 }
 
@@ -611,7 +611,7 @@ mod test {
                             let mut mxs = Vec::new();
                             for (pos, item) in record.split(',').enumerate() {
                                 let ip = item.trim().parse::<IpAddr>().unwrap();
-                                let mx_name = format!("mx.{}.{}", ip, pos);
+                                let mx_name = format!("mx.{ip}.{pos}");
                                 match ip {
                                     IpAddr::V4(ip) => {
                                         resolver.ipv4_add(mx_name.clone(), vec![ip], valid_until)
@@ -646,9 +646,7 @@ mod test {
                             assert_eq!(
                                 output.result(),
                                 result,
-                                "Failed for {:?}, test {}.",
-                                test_name,
-                                test_num,
+                                "Failed for {test_name:?}, test {test_num}.",
                             );
 
                             if !exp.is_empty() {
@@ -656,7 +654,7 @@ mod test {
                             }
                             test_num += 1;
                             if test_name != last_test_name {
-                                println!("Passed test {:?}", test_name);
+                                println!("Passed test {test_name:?}");
                                 last_test_name = test_name;
                             }
                         }

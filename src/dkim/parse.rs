@@ -605,20 +605,20 @@ mod test {
             ),
         ] {
             let result = Signature::parse(signature.as_bytes()).unwrap();
-            assert_eq!(result.v, expected_result.v, "{:?}", signature);
-            assert_eq!(result.a, expected_result.a, "{:?}", signature);
-            assert_eq!(result.d, expected_result.d, "{:?}", signature);
-            assert_eq!(result.s, expected_result.s, "{:?}", signature);
-            assert_eq!(result.i, expected_result.i, "{:?}", signature);
-            assert_eq!(result.b, expected_result.b, "{:?}", signature);
-            assert_eq!(result.bh, expected_result.bh, "{:?}", signature);
-            assert_eq!(result.h, expected_result.h, "{:?}", signature);
-            assert_eq!(result.z, expected_result.z, "{:?}", signature);
-            assert_eq!(result.l, expected_result.l, "{:?}", signature);
-            assert_eq!(result.x, expected_result.x, "{:?}", signature);
-            assert_eq!(result.t, expected_result.t, "{:?}", signature);
-            assert_eq!(result.ch, expected_result.ch, "{:?}", signature);
-            assert_eq!(result.cb, expected_result.cb, "{:?}", signature);
+            assert_eq!(result.v, expected_result.v, "{signature:?}");
+            assert_eq!(result.a, expected_result.a, "{signature:?}");
+            assert_eq!(result.d, expected_result.d, "{signature:?}");
+            assert_eq!(result.s, expected_result.s, "{signature:?}");
+            assert_eq!(result.i, expected_result.i, "{signature:?}");
+            assert_eq!(result.b, expected_result.b, "{signature:?}");
+            assert_eq!(result.bh, expected_result.bh, "{signature:?}");
+            assert_eq!(result.h, expected_result.h, "{signature:?}");
+            assert_eq!(result.z, expected_result.z, "{signature:?}");
+            assert_eq!(result.l, expected_result.l, "{signature:?}");
+            assert_eq!(result.x, expected_result.x, "{signature:?}");
+            assert_eq!(result.t, expected_result.t, "{signature:?}");
+            assert_eq!(result.ch, expected_result.ch, "{signature:?}");
+            assert_eq!(result.cb, expected_result.cb, "{signature:?}");
         }
     }
 

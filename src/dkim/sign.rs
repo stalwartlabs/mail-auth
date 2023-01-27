@@ -461,7 +461,7 @@ mod test {
                 DkimResult::Fail(hdr) | DkimResult::PermError(hdr) | DkimResult::Neutral(hdr),
                 Err(err),
             ) if hdr == err => (),
-            (result, expect) => panic!("Expected {:?} but got {:?}.", expect, result),
+            (result, expect) => panic!("Expected {expect:?} but got {result:?}."),
         }
 
         dkim.into_iter()

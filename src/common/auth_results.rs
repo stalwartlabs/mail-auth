@@ -70,7 +70,7 @@ impl<'x> AuthenticationResults<'x> {
         }
 
         if dkim.is_atps {
-            write!(self.auth_results, " header.from={}", header_from).ok();
+            write!(self.auth_results, " header.from={header_from}").ok();
         }
     }
 
@@ -84,10 +84,10 @@ impl<'x> AuthenticationResults<'x> {
         spf.result.as_spf_result(
             &mut self.auth_results,
             self.hostname,
-            &format!("postmaster@{}", ehlo_domain),
+            &format!("postmaster@{ehlo_domain}"),
             ip_addr,
         );
-        write!(self.auth_results, " smtp.helo={}", ehlo_domain).ok();
+        write!(self.auth_results, " smtp.helo={ehlo_domain}").ok();
         self
     }
 
@@ -101,7 +101,7 @@ impl<'x> AuthenticationResults<'x> {
         let (mail_from, addr) = if !from.is_empty() {
             (Cow::from(from), from)
         } else {
-            (format!("postmaster@{}", ehlo_domain).into(), "<>")
+            (format!("postmaster@{ehlo_domain}").into(), "<>")
         };
         self.auth_results.push_str(";\r\n\tspf=");
         spf.result.as_spf_result(
@@ -110,14 +110,14 @@ impl<'x> AuthenticationResults<'x> {
             mail_from.as_ref(),
             ip_addr,
         );
-        write!(self.auth_results, " smtp.mailfrom={}", addr).ok();
+        write!(self.auth_results, " smtp.mailfrom={addr}").ok();
         self
     }
 
     pub fn with_arc_result(mut self, arc: &ArcOutput, remote_ip: IpAddr) -> Self {
         self.auth_results.push_str(";\r\n\tarc=");
         arc.result.as_auth_result(&mut self.auth_results);
-        write!(self.auth_results, " smtp.remote-ip={}", remote_ip).ok();
+        write!(self.auth_results, " smtp.remote-ip={remote_ip}").ok();
         self
     }
 
@@ -144,7 +144,7 @@ impl<'x> AuthenticationResults<'x> {
     pub fn with_iprev_result(mut self, iprev: &IprevOutput, remote_ip: IpAddr) -> Self {
         self.auth_results.push_str(";\r\n\tiprev=");
         iprev.result.as_auth_result(&mut self.auth_results);
-        write!(self.auth_results, " policy.iprev={}", remote_ip).ok();
+        write!(self.auth_results, " policy.iprev={remote_ip}").ok();
         self
     }
 }
@@ -189,7 +189,7 @@ impl ReceivedSpf {
         let mail_from = if !mail_from.is_empty() {
             Cow::from(mail_from)
         } else {
-            format!("postmaster@{}", helo).into()
+            format!("postmaster@{helo}").into()
         };
 
         spf.result
@@ -197,8 +197,7 @@ impl ReceivedSpf {
 
         write!(
             received_spf,
-            "\r\n\treceiver={}; client-ip={}; envelope-from=\"{}\"; helo={};",
-            hostname, ip_addr, mail_from, helo
+            "\r\n\treceiver={hostname}; client-ip={ip_addr}; envelope-from=\"{mail_from}\"; helo={helo};",
         )
         .ok();
 
@@ -211,38 +210,31 @@ impl SpfResult {
         match &self {
             SpfResult::Pass => write!(
                 header,
-                "pass ({}: domain of {} designates {} as permitted sender)",
-                hostname, mail_from, ip_addr
+                "pass ({hostname}: domain of {mail_from} designates {ip_addr} as permitted sender)",
             ),
             SpfResult::Fail => write!(
                 header,
-                "fail ({}: domain of {} does not designate {} as permitted sender)",
-                hostname, mail_from, ip_addr
+                "fail ({hostname}: domain of {mail_from} does not designate {ip_addr} as permitted sender)",
             ),
             SpfResult::SoftFail => write!(
                 header,
-                "softfail ({}: domain of {} reports soft fail for {})",
-                hostname, mail_from, ip_addr
+                "softfail ({hostname}: domain of {mail_from} reports soft fail for {ip_addr})",
             ),
             SpfResult::Neutral => write!(
                 header,
-                "neutral ({}: domain of {} reports neutral for {})",
-                hostname, mail_from, ip_addr
+                "neutral ({hostname}: domain of {mail_from} reports neutral for {ip_addr})",
             ),
             SpfResult::TempError => write!(
                 header,
-                "temperror ({}: temporary dns error validating {})",
-                hostname, mail_from
+                "temperror ({hostname}: temporary dns error validating {mail_from})",
             ),
             SpfResult::PermError => write!(
                 header,
-                "permerror ({}: unable to verify SPF record for {})",
-                hostname, mail_from,
+                "permerror ({hostname}: unable to verify SPF record for {mail_from})",
             ),
             SpfResult::None => write!(
                 header,
-                "none ({}: no SPF records found for {})",
-                hostname, mail_from
+                "none ({hostname}: no SPF records found for {mail_from})",
             ),
         }
         .ok();
@@ -343,7 +335,7 @@ impl AsAuthResult for Error {
             Error::DnsError(_) => "dns error",
             Error::DnsRecordNotFound(_) => "dns record not found",
             Error::ArcInvalidInstance(i) => {
-                write!(header, "invalid ARC instance {})", i).ok();
+                write!(header, "invalid ARC instance {i})").ok();
                 return;
             }
             Error::ArcInvalidCV => "invalid ARC cv",
