@@ -185,13 +185,16 @@ impl DmarcOutput {
         match &self.record {
             Some(record)
                 if !record.ruf.is_empty()
-                    && (self.dkim_result != DmarcResult::Pass
+                    && ((self.dkim_result != DmarcResult::Pass
                         && matches!(record.fo, Report::Any | Report::Dkim | Report::DkimSpf))
-                    || (self.spf_result != DmarcResult::Pass
-                        && matches!(record.fo, Report::Any | Report::Spf | Report::DkimSpf))
-                    || (self.dkim_result != DmarcResult::Pass
-                        && self.spf_result != DmarcResult::Pass
-                        && record.fo == Report::All) =>
+                        || (self.spf_result != DmarcResult::Pass
+                            && matches!(
+                                record.fo,
+                                Report::Any | Report::Spf | Report::DkimSpf
+                            ))
+                        || (self.dkim_result != DmarcResult::Pass
+                            && self.spf_result != DmarcResult::Pass
+                            && record.fo == Report::All)) =>
             {
                 Some(record.fo.clone())
             }
