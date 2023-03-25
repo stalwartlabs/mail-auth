@@ -110,17 +110,6 @@ impl Resolver {
             let mut headers_copy =
                 message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
-            // for (header_name, header_value) in headers_copy {
-            //     let header_name_str = String::from_utf8_lossy(&header_name);
-            //     let header_value_str = String::from_utf8_lossy(&header_value);
-            //     println!("Headers {}: {}", header_name_str, header_value_str);
-            // }
-
-            let mut data = Vec::with_capacity(256);
-            signature.ch.canonicalize_headers(headers_copy, &mut data);
-
-            println!("Prehash data: {:?}", data);
-
             // Verify signature
             if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
                 output.push(DkimOutput::fail(err).with_signature(signature));
@@ -253,6 +242,40 @@ impl Resolver {
 }
 
 impl<'x> AuthenticatedMessage<'x> {
+    // Function inserted by yush
+    // Excerpted and edited from verify_dkim_
+    pub async fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
+        // Validate DKIM headers
+        let mut data = Vec::with_capacity(256);
+        for header in &self.dkim_headers {
+            // Validate body hash
+            let signature = match &header.header {
+                Ok(signature) => {
+                    if signature.x == 0 || (signature.x > signature.t) {
+                        signature
+                    } else {
+                        continue;
+                    }
+                }
+                Err(err) => {
+                    continue;
+                }
+            };
+
+            // Hash headers
+            let dkim_hdr_value = header.value.strip_signature();
+            let mut headers = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
+            let mut headers_copy = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
+
+            signature.ch.canonicalize_headers(headers_copy, &mut data);
+
+            println!("Prehash data: {:?}", data);
+            return Ok(data);
+        }
+        // Return not ok
+        Err(Error::FailedBodyHashMatch)
+    }
+
     pub fn signed_headers<'z: 'x>(
         &'z self,
         headers: &'x [String],
