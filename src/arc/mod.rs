@@ -34,19 +34,19 @@ pub struct ArcSealer<T: SigningKey<Hasher = Sha256>, State = NeedDomain> {
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Signature {
-    pub i: u32,
-    pub a: Algorithm,
-    pub d: String,
-    pub s: String,
-    pub b: Vec<u8>,
-    pub bh: Vec<u8>,
-    pub h: Vec<String>,
-    pub z: Vec<String>,
-    pub l: u64,
-    pub x: u64,
-    pub t: u64,
-    pub ch: Canonicalization,
-    pub cb: Canonicalization,
+    pub(crate) i: u32,
+    pub(crate) a: Algorithm,
+    pub(crate) d: String,
+    pub(crate) s: String,
+    pub(crate) b: Vec<u8>,
+    pub(crate) bh: Vec<u8>,
+    pub(crate) h: Vec<String>,
+    pub(crate) z: Vec<String>,
+    pub(crate) l: u64,
+    pub(crate) x: u64,
+    pub(crate) t: u64,
+    pub(crate) ch: Canonicalization,
+    pub(crate) cb: Canonicalization,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]

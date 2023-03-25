@@ -107,8 +107,6 @@ impl Resolver {
             // Hash headers
             let dkim_hdr_value = header.value.strip_signature();
             let mut headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
-            let mut headers_copy =
-                message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
             // Verify signature
             if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
@@ -242,9 +240,8 @@ impl Resolver {
 }
 
 impl<'x> AuthenticatedMessage<'x> {
-    // Function inserted by yush
-    // Excerpted and edited from verify_dkim_
     pub async fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
+        // Based on verify_dkim_ function
         // Validate DKIM headers
         let mut data = Vec::with_capacity(256);
         for header in &self.dkim_headers {
@@ -257,19 +254,16 @@ impl<'x> AuthenticatedMessage<'x> {
                         continue;
                     }
                 }
-                Err(err) => {
+                Err(_err) => {
                     continue;
                 }
             };
 
-            // Hash headers
+            // Get pre-hashed but canonically ordered headers, whos hash is signed
             let dkim_hdr_value = header.value.strip_signature();
-            let mut headers = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
-            let mut headers_copy = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
+            let headers = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
+            signature.ch.canonicalize_headers(headers, &mut data);
 
-            signature.ch.canonicalize_headers(headers_copy, &mut data);
-
-            println!("Prehash data: {:?}", data);
             return Ok(data);
         }
         // Return not ok

@@ -44,23 +44,23 @@ pub struct Done;
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Signature {
-    pub v: u32,
-    pub a: Algorithm,
-    pub d: String,
-    pub s: String,
-    pub b: Vec<u8>,
-    pub bh: Vec<u8>,
-    pub h: Vec<String>,
-    pub z: Vec<String>,
-    pub i: String,
-    pub l: u64,
-    pub x: u64,
-    pub t: u64,
-    pub r: bool,                      // RFC 6651
-    pub atps: Option<String>,         // RFC 6541
-    pub atpsh: Option<HashAlgorithm>, // RFC 6541
-    pub ch: Canonicalization,
-    pub cb: Canonicalization,
+    pub(crate) v: u32,
+    pub(crate) a: Algorithm,
+    pub(crate) d: String,
+    pub(crate) s: String,
+    pub(crate) b: Vec<u8>,
+    pub(crate) bh: Vec<u8>,
+    pub(crate) h: Vec<String>,
+    pub(crate) z: Vec<String>,
+    pub(crate) i: String,
+    pub(crate) l: u64,
+    pub(crate) x: u64,
+    pub(crate) t: u64,
+    pub(crate) r: bool,                      // RFC 6651
+    pub(crate) atps: Option<String>,         // RFC 6541
+    pub(crate) atpsh: Option<HashAlgorithm>, // RFC 6541
+    pub(crate) ch: Canonicalization,
+    pub(crate) cb: Canonicalization,
 }
 
 impl Default for Algorithm {
