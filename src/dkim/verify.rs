@@ -113,7 +113,7 @@ impl Resolver {
             for (header_name, header_value) in headers_copy {
                 let header_name_str = String::from_utf8_lossy(&header_name);
                 let header_value_str = String::from_utf8_lossy(&header_value);
-                println!("{}: {}", header_name_str, header_value_str);
+                println!("Headers {}: {}", header_name_str, header_value_str);
             }
             // Verify signature
             if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
