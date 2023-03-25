@@ -108,6 +108,11 @@ impl Resolver {
             let dkim_hdr_value = header.value.strip_signature();
             let mut headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
+            println!(
+                "header.name, &dkim_hdr_value {:?} {:?}\n",
+                header.name, &dkim_hdr_value
+            );
+
             // Verify signature
             if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
                 output.push(DkimOutput::fail(err).with_signature(signature));

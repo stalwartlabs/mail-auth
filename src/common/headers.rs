@@ -60,9 +60,9 @@ pub(crate) enum AuthenticatedHeader<'x> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Header<'x, T> {
-    pub(crate) name: &'x [u8],
-    pub(crate) value: &'x [u8],
-    pub(crate) header: T,
+    pub name: &'x [u8],
+    pub value: &'x [u8],
+    pub header: T,
 }
 
 impl<'x> HeaderParser<'x> {
