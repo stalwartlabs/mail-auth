@@ -115,6 +115,9 @@ impl Resolver {
                 let header_value_str = String::from_utf8_lossy(&header_value);
                 println!("Headers {}: {}", header_name_str, header_value_str);
             }
+
+            println!("Signature: {}", signature);
+
             // Verify signature
             if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
                 output.push(DkimOutput::fail(err).with_signature(signature));
