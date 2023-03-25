@@ -210,6 +210,8 @@ impl VerifyingKey for RsaPublicKey {
         let mut data = Vec::with_capacity(256);
         canonicalization.canonicalize_headers(headers, &mut data);
 
+        println!("Canonicalized data: {:?}", data);
+
         match algorithm {
             Algorithm::RsaSha256 => self
                 .sha2

@@ -110,13 +110,16 @@ impl Resolver {
             let mut headers_copy =
                 message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
-            for (header_name, header_value) in headers_copy {
-                let header_name_str = String::from_utf8_lossy(&header_name);
-                let header_value_str = String::from_utf8_lossy(&header_value);
-                println!("Headers {}: {}", header_name_str, header_value_str);
-            }
+            // for (header_name, header_value) in headers_copy {
+            //     let header_name_str = String::from_utf8_lossy(&header_name);
+            //     let header_value_str = String::from_utf8_lossy(&header_value);
+            //     println!("Headers {}: {}", header_name_str, header_value_str);
+            // }
 
-            println!("Signature: {}", signature);
+            let mut data = Vec::with_capacity(256);
+            signature.ch.canonicalize_headers(headers_copy, &mut data);
+
+            println!("Prehash data: {:?}", data);
 
             // Verify signature
             if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
