@@ -240,7 +240,8 @@ impl Resolver {
 }
 
 impl<'x> AuthenticatedMessage<'x> {
-    pub async fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
+    // Returns a vector representing the canonicalized headers, and the signed + hashed canonicalized headers
+    pub async fn get_canonicalized_header(&self) -> Result<(Vec<u8>, &[u8]), Error> {
         // Based on verify_dkim_ function
         // Validate DKIM headers
         let mut data = Vec::with_capacity(256);
@@ -264,7 +265,7 @@ impl<'x> AuthenticatedMessage<'x> {
             let headers = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
             signature.ch.canonicalize_headers(headers, &mut data);
 
-            return Ok(data);
+            return Ok((data, signature.signature()));
         }
         // Return not ok
         Err(Error::FailedBodyHashMatch)
