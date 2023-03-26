@@ -165,6 +165,10 @@ impl Signature {
     pub fn identity(&self) -> &str {
         &self.i
     }
+
+    pub fn body_hash(&self) -> &[u8] {
+        &self.bh
+    }
 }
 
 impl<'x> DkimOutput<'x> {
