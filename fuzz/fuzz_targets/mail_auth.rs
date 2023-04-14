@@ -14,7 +14,8 @@ use libfuzzer_sys::fuzz_target;
 use mail_auth::{
     arc,
     common::parse::TxtRecordParser,
-    dkim::{self, Atps, DomainKey, DomainKeyReport},
+    common::verify::DomainKey,
+    dkim::{self, Atps, DomainKeyReport},
     dmarc::Dmarc,
     report::{Feedback, Report},
     spf::{Macro, Spf},
