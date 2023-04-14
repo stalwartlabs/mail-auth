@@ -24,8 +24,9 @@ pub mod parse;
 pub mod sign;
 pub mod verify;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Canonicalization {
+    #[default]
     Relaxed,
     Simple,
 }
@@ -61,18 +62,6 @@ pub struct Signature {
     pub(crate) atpsh: Option<HashAlgorithm>, // RFC 6541
     pub(crate) ch: Canonicalization,
     pub(crate) cb: Canonicalization,
-}
-
-impl Default for Algorithm {
-    fn default() -> Self {
-        Algorithm::RsaSha256
-    }
-}
-
-impl Default for Canonicalization {
-    fn default() -> Self {
-        Canonicalization::Relaxed
-    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

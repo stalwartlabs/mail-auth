@@ -32,27 +32,30 @@ pub struct ReportMetadata {
     error: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Alignment {
     Relaxed,
     Strict,
+    #[default]
     Unspecified,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Disposition {
     None,
     Quarantine,
     Reject,
+    #[default]
     Unspecified,
 }
 
-#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ActionDisposition {
     None,
     Pass,
     Quarantine,
     Reject,
+    #[default]
     Unspecified,
 }
 
@@ -70,20 +73,22 @@ pub struct PolicyPublished {
 
 impl Eq for PolicyPublished {}
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DmarcResult {
     Pass,
     Fail,
+    #[default]
     Unspecified,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum PolicyOverride {
     Forwarded,
     SampledOut,
     TrustedForwarder,
     MailingList,
     LocalPolicy,
+    #[default]
     Other,
 }
 
@@ -121,8 +126,9 @@ pub struct Identifier {
     header_from: String,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum DkimResult {
+    #[default]
     None,
     Pass,
     Fail,
@@ -140,15 +146,17 @@ pub struct DKIMAuthResult {
     human_result: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SPFDomainScope {
     Helo,
     MailFrom,
+    #[default]
     Unspecified,
 }
 
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SpfResult {
+    #[default]
     None,
     Neutral,
     Pass,
@@ -190,54 +198,6 @@ pub struct Report {
 }
 
 impl Eq for Report {}
-
-impl Default for Alignment {
-    fn default() -> Self {
-        Alignment::Unspecified
-    }
-}
-
-impl Default for Disposition {
-    fn default() -> Self {
-        Disposition::Unspecified
-    }
-}
-
-impl Default for ActionDisposition {
-    fn default() -> Self {
-        ActionDisposition::None
-    }
-}
-
-impl Default for DmarcResult {
-    fn default() -> Self {
-        DmarcResult::Unspecified
-    }
-}
-
-impl Default for PolicyOverride {
-    fn default() -> Self {
-        PolicyOverride::Other
-    }
-}
-
-impl Default for DkimResult {
-    fn default() -> Self {
-        DkimResult::None
-    }
-}
-
-impl Default for SpfResult {
-    fn default() -> Self {
-        SpfResult::None
-    }
-}
-
-impl Default for SPFDomainScope {
-    fn default() -> Self {
-        SPFDomainScope::Unspecified
-    }
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
@@ -287,7 +247,7 @@ pub struct Feedback<'x> {
     headers: Option<Cow<'x, [u8]>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
 pub enum AuthFailureType {
     Adsp,
     BodyHash,
@@ -295,60 +255,40 @@ pub enum AuthFailureType {
     Signature,
     Spf,
     Dmarc,
+    #[default]
     Unspecified,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
 pub enum IdentityAlignment {
     None,
     Spf,
     Dkim,
     DkimSpf,
+    #[default]
     Unspecified,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
 pub enum DeliveryResult {
     Delivered,
     Spam,
     Policy,
     Reject,
     Other,
+    #[default]
     Unspecified,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
 pub enum FeedbackType {
     Abuse,
     AuthFailure,
     Fraud,
     NotSpam,
+    #[default]
     Other,
     Virus,
-}
-
-impl Default for AuthFailureType {
-    fn default() -> Self {
-        AuthFailureType::Unspecified
-    }
-}
-
-impl Default for IdentityAlignment {
-    fn default() -> Self {
-        IdentityAlignment::Unspecified
-    }
-}
-
-impl Default for DeliveryResult {
-    fn default() -> Self {
-        DeliveryResult::Unspecified
-    }
-}
-
-impl Default for FeedbackType {
-    fn default() -> Self {
-        FeedbackType::Other
-    }
 }
 
 impl From<&crate::DkimResult> for AuthFailureType {

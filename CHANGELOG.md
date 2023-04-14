@@ -1,3 +1,7 @@
+mail-auth 0.3.1
+================================
+- Fix:  Avoid panicking on invalid RSA key input (#17)
+
 mail-auth 0.3.0
 ================================
 - ``ring`` backend support.

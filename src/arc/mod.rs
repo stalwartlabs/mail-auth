@@ -79,17 +79,12 @@ pub struct Set<'x> {
     pub(crate) results: Header<'x, &'x Results>,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub(crate) enum ChainValidation {
+    #[default]
     None,
     Fail,
     Pass,
-}
-
-impl Default for ChainValidation {
-    fn default() -> Self {
-        ChainValidation::None
-    }
 }
 
 impl VerifySignature for Signature {
