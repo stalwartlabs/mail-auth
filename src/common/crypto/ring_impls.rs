@@ -139,7 +139,7 @@ impl RsaPublicKey {
     pub(crate) fn verifying_key_from_bytes(
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
-        let key = try_strip_rsa_prefix(bytes);
+        let key = try_strip_rsa_prefix(bytes).unwrap_or(bytes);
         Ok(Box::new(Self {
             sha1: UnparsedPublicKey::new(
                 &RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
@@ -156,43 +156,45 @@ impl RsaPublicKey {
 /// Try to strip an ASN.1 DER-encoded RSA public key prefix
 ///
 /// Returns the original slice if the prefix is not found.
-fn try_strip_rsa_prefix(bytes: &[u8]) -> &[u8] {
-    let orig = bytes;
-    if bytes[0] != DER_SEQUENCE_TAG {
-        return orig;
+fn try_strip_rsa_prefix(bytes: &[u8]) -> Option<&[u8]> {
+    if *bytes.first()? != DER_SEQUENCE_TAG {
+        return None;
     }
 
-    let (_, bytes) = decode_multi_byte_len(&bytes[1..]);
-    if bytes[0] != DER_SEQUENCE_TAG {
-        return orig;
+    let (_, bytes) = decode_multi_byte_len(&bytes[1..])?;
+    if *bytes.first()? != DER_SEQUENCE_TAG {
+        return None;
     }
 
-    let (byte_len, bytes) = decode_multi_byte_len(&bytes[1..]);
-    if bytes[0] != DER_OBJECT_ID_TAG || byte_len != 13 {
-        return orig;
+    let (byte_len, bytes) = decode_multi_byte_len(&bytes[1..])?;
+    if *bytes.first()? != DER_OBJECT_ID_TAG || byte_len != 13 {
+        return None;
     }
 
-    let bytes = &bytes[13..]; // skip the RSA encryption OID
-    if bytes[0] != DER_BIT_STRING_TAG {
-        return orig;
+    let bytes = bytes.get(13..)?; // skip the RSA encryption OID
+    if *bytes.first()? != DER_BIT_STRING_TAG {
+        return None;
     }
 
-    let (_, bytes) = decode_multi_byte_len(&bytes[1..]);
-    &bytes[1..] // skip the unused bits byte
+    decode_multi_byte_len(&bytes[1..]).and_then(|(_, bytes)| bytes.get(1..)) // skip the unused bits byte
 }
 
-fn decode_multi_byte_len(bytes: &[u8]) -> (usize, &[u8]) {
-    if bytes[0] & 0x80 == 0 {
-        return (bytes[0] as usize, &bytes[1..]);
+fn decode_multi_byte_len(bytes: &[u8]) -> Option<(usize, &[u8])> {
+    if bytes.first()? & 0x80 == 0 {
+        return Some((bytes[0] as usize, &bytes[1..]));
     }
 
     let len_len = (bytes[0] & 0x7f) as usize;
+    if bytes.len() < len_len + 1 {
+        return None;
+    }
+
     let mut len = 0;
     for i in 0..len_len {
         len = (len << 8) | bytes[1 + i] as usize;
     }
 
-    (len, &bytes[len_len + 1..])
+    Some((len, &bytes[len_len + 1..]))
 }
 
 const DER_OBJECT_ID_TAG: u8 = 0x06;
