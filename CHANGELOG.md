@@ -1,6 +1,11 @@
+mail-auth 0.3.2
+================================
+- Bump `mail-builder` dependency to 0.3
+- Bump `quick-xml` dependency to 0.28
+
 mail-auth 0.3.1
 ================================
-- Fix:  Avoid panicking on invalid RSA key input (#17)
+- Fix: Avoid panicking on invalid RSA key input (#17)
 
 mail-auth 0.3.0
 ================================

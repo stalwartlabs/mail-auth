@@ -67,7 +67,7 @@ impl Report {
                 submitter,
                 self.report_id()
             ))
-            .binary_attachment(
+            .attachment(
                 "application/gzip",
                 format!(
                     "{}!{}!{}!{}.xml.gz",
