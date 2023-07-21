@@ -198,8 +198,20 @@ impl<'x> AuthenticatedMessage<'x> {
         self.date_header_present
     }
 
+    pub fn raw_message(&self) -> &[u8] {
+        self.raw_message
+    }
+
     pub fn raw_headers(&self) -> &[u8] {
         self.raw_message.get(..self.body_offset).unwrap_or_default()
+    }
+
+    pub fn raw_parsed_headers(&self) -> &[(&[u8], &[u8])] {
+        &self.headers
+    }
+
+    pub fn raw_body(&self) -> &[u8] {
+        self.raw_message.get(self.body_offset..).unwrap_or_default()
     }
 
     pub fn body_offset(&self) -> usize {
