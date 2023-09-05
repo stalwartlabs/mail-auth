@@ -11,7 +11,7 @@
 use std::io::{Cursor, Read};
 
 use flate2::read::GzDecoder;
-use mail_parser::{Message, MimeHeaders, PartType};
+use mail_parser::{MessageParser, MimeHeaders, PartType};
 use zip::ZipArchive;
 
 use crate::report::Error;
@@ -24,7 +24,9 @@ impl TlsReport {
     }
 
     pub fn parse_rfc5322(report: &[u8]) -> Result<Self, Error> {
-        let message = Message::parse(report).ok_or(Error::MailParseError)?;
+        let message = MessageParser::new()
+            .parse(report)
+            .ok_or(Error::MailParseError)?;
         let mut error = Error::NoReportsFound;
 
         for part in &message.parts {

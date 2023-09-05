@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use mail_parser::{parsers::MessageStream, HeaderValue};
+use mail_parser::{parsers::MessageStream, Address, HeaderValue};
 
 use crate::{arc, common::crypto::HashAlgorithm, dkim, AuthenticatedMessage};
 
@@ -96,26 +96,13 @@ impl<'x> AuthenticatedMessage<'x> {
                 }
                 AuthenticatedHeader::From(name) => {
                     match MessageStream::new(value).parse_address() {
-                        HeaderValue::Address(addr) => {
-                            if let Some(addr) = addr.address {
-                                message.from.push(addr.to_lowercase());
-                            }
-                        }
-                        HeaderValue::AddressList(list) => {
+                        HeaderValue::Address(Address::List(list)) => {
                             message.from.extend(
                                 list.into_iter()
                                     .filter_map(|a| a.address.map(|a| a.to_lowercase())),
                             );
                         }
-                        HeaderValue::Group(group) => {
-                            message.from.extend(
-                                group
-                                    .addresses
-                                    .into_iter()
-                                    .filter_map(|a| a.address.map(|a| a.to_lowercase())),
-                            );
-                        }
-                        HeaderValue::GroupList(group_list) => {
+                        HeaderValue::Address(Address::Group(group_list)) => {
                             message
                                 .from
                                 .extend(group_list.into_iter().flat_map(|group| {

@@ -72,7 +72,7 @@ impl Resolver {
         capacity: usize,
     ) -> Result<Self, ResolveError> {
         Ok(Self {
-            resolver: AsyncResolver::tokio(config, options)?,
+            resolver: AsyncResolver::tokio(config, options),
             cache_txt: LruCache::with_capacity(capacity),
             cache_mx: LruCache::with_capacity(capacity),
             cache_ipv4: LruCache::with_capacity(capacity),
@@ -91,7 +91,7 @@ impl Resolver {
         ptr_capacity: usize,
     ) -> Result<Self, ResolveError> {
         Ok(Self {
-            resolver: AsyncResolver::tokio(config, options)?,
+            resolver: AsyncResolver::tokio(config, options),
             cache_txt: LruCache::with_capacity(txt_capacity),
             cache_mx: LruCache::with_capacity(mx_capacity),
             cache_ipv4: LruCache::with_capacity(ipv4_capacity),
@@ -196,10 +196,10 @@ impl Resolver {
         }
 
         let ipv4_lookup = self.resolver.ipv4_lookup(key.as_ref()).await?;
-        let ips = ipv4_lookup
+        let ips: Vec<Ipv4Addr> = ipv4_lookup
             .as_lookup()
             .record_iter()
-            .filter_map(|r| (*r.data()?.as_a()?).into())
+            .filter_map(|r| r.data()?.as_a()?.0.into())
             .collect::<Vec<_>>();
 
         Ok(self
@@ -225,7 +225,7 @@ impl Resolver {
         let ips = ipv6_lookup
             .as_lookup()
             .record_iter()
-            .filter_map(|r| (*r.data()?.as_aaaa()?).into())
+            .filter_map(|r| r.data()?.as_aaaa()?.0.into())
             .collect::<Vec<_>>();
 
         Ok(self
@@ -325,7 +325,7 @@ impl Resolver {
         match self.resolver.lookup_ip(key.as_ref()).await {
             Ok(result) => Ok(result.as_lookup().record_iter().any(|r| {
                 r.data().map_or(false, |d| {
-                    matches!(d.to_record_type(), RecordType::A | RecordType::AAAA)
+                    matches!(d.record_type(), RecordType::A | RecordType::AAAA)
                 })
             })),
             Err(err) => {

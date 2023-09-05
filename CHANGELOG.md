@@ -1,3 +1,8 @@
+mail-auth 0.3.3
+================================
+- Bump `mail-parser` dependency to 0.9
+- Bump `trust-dns-resolver` dependency to 0.23
+
 mail-auth 0.3.2
 ================================
 - Bump `mail-builder` dependency to 0.3

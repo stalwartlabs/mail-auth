@@ -10,7 +10,7 @@
 
 use std::borrow::Cow;
 
-use mail_parser::{parsers::MessageStream, HeaderValue, Message, MimeHeaders, PartType};
+use mail_parser::{parsers::MessageStream, HeaderValue, MessageParser, MimeHeaders, PartType};
 
 use crate::{
     common::headers::HeaderIterator,
@@ -19,7 +19,9 @@ use crate::{
 
 impl<'x> Feedback<'x> {
     pub fn parse_rfc5322(message: &'x [u8]) -> Result<Self, Error> {
-        let message = Message::parse(message).ok_or(Error::MailParseError)?;
+        let message = MessageParser::new()
+            .parse(message)
+            .ok_or(Error::MailParseError)?;
         let mut feedback = None;
         let mut included_message = None;
         let mut included_headers = None;

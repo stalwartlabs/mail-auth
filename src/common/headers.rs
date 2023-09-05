@@ -539,7 +539,7 @@ mod test {
 
     #[test]
     fn chained_header_iterator() {
-        let parts = vec![
+        let parts = [
             &b"From: a\nTo: b\nEmpty:\nMulti: 1\n 2\n"[..],
             &b"Subject: c\nReceived: d\n\nhey"[..],
         ];
