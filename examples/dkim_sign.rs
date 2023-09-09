@@ -64,11 +64,8 @@ fn main() {
 
     // Sign an e-mail message using ED25519-SHA256
     #[cfg(feature = "rust-crypto")]
-    let pk_ed = Ed25519Key::from_bytes(
-        &base64_decode(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
-        &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
-    )
-    .unwrap();
+    let pk_ed =
+        Ed25519Key::from_bytes(&base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap()).unwrap();
     #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
     let pk_ed = Ed25519Key::from_seed_and_public_key(
         &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),

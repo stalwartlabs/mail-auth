@@ -1,3 +1,4 @@
+use std::array::TryFromSliceError;
 use std::marker::PhantomData;
 
 use ed25519_dalek::Signer;
@@ -79,19 +80,18 @@ impl SigningKey for RsaKey<Sha256> {
 }
 
 pub struct Ed25519Key {
-    inner: ed25519_dalek::Keypair,
+    inner: ed25519_dalek::SigningKey,
 }
 
 impl Ed25519Key {
     /// Creates an Ed25519 private key
-    pub fn from_bytes(public_key_bytes: &[u8], private_key_bytes: &[u8]) -> crate::Result<Self> {
+    pub fn from_bytes(private_key_bytes: &[u8]) -> crate::Result<Self> {
         Ok(Self {
-            inner: ed25519_dalek::Keypair {
-                public: ed25519_dalek::PublicKey::from_bytes(public_key_bytes)
-                    .map_err(|err| Error::CryptoError(err.to_string()))?,
-                secret: ed25519_dalek::SecretKey::from_bytes(private_key_bytes)
-                    .map_err(|err| Error::CryptoError(err.to_string()))?,
-            },
+            inner: ed25519_dalek::SigningKey::from_bytes(
+                private_key_bytes
+                    .try_into()
+                    .map_err(|err: TryFromSliceError| Error::CryptoError(err.to_string()))?,
+            ),
         })
     }
 }
@@ -166,7 +166,7 @@ impl VerifyingKey for RsaPublicKey {
 }
 
 pub(crate) struct Ed25519PublicKey {
-    inner: ed25519_dalek::PublicKey,
+    inner: ed25519_dalek::VerifyingKey,
 }
 
 impl Ed25519PublicKey {
@@ -174,8 +174,12 @@ impl Ed25519PublicKey {
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
         Ok(Box::new(Ed25519PublicKey {
-            inner: ed25519_dalek::PublicKey::from_bytes(bytes)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
+            inner: ed25519_dalek::VerifyingKey::from_bytes(
+                bytes
+                    .try_into()
+                    .map_err(|err: TryFromSliceError| Error::CryptoError(err.to_string()))?,
+            )
+            .map_err(|err| Error::CryptoError(err.to_string()))?,
         }))
     }
 }
@@ -199,8 +203,11 @@ impl VerifyingKey for Ed25519PublicKey {
         self.inner
             .verify_strict(
                 hash.as_ref(),
-                &ed25519_dalek::Signature::from_bytes(signature)
-                    .map_err(|err| Error::CryptoError(err.to_string()))?,
+                &ed25519_dalek::Signature::from_bytes(
+                    signature
+                        .try_into()
+                        .map_err(|err: TryFromSliceError| Error::CryptoError(err.to_string()))?,
+                ),
             )
             .map_err(|_| Error::FailedVerification)
     }

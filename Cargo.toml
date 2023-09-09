@@ -22,7 +22,7 @@ test = []
 
 [dependencies]
 ahash = "0.8.0"
-ed25519-dalek = { version = "1.0", optional = true }
+ed25519-dalek = { version = "2.0", optional = true }
 flate2 = "1.0.25"
 lru-cache = "0.1.2"
 mail-parser = { version = "0.9", git = "https://github.com/stalwartlabs/mail-parser", features = ["ludicrous_mode", "full_encoding"] }
