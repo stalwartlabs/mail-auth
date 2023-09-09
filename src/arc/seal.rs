@@ -293,7 +293,7 @@ mod test {
                 "scamorza.org",
                 "ed",
                 #[cfg(feature = "rust-crypto")]
-                Ed25519Key::from_bytes(&pk_ed_public, &pk_ed_private).unwrap(),
+                Ed25519Key::from_bytes(&pk_ed_private).unwrap(),
                 #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
                 Ed25519Key::from_seed_and_public_key(&pk_ed_private, &pk_ed_public).unwrap(),
             )

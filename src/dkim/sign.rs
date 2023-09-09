@@ -215,11 +215,8 @@ mod test {
 
         // Create private keys
         #[cfg(feature = "rust-crypto")]
-        let pk_ed = Ed25519Key::from_bytes(
-            &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
-            &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
-        )
-        .unwrap();
+        let pk_ed = Ed25519Key::from_bytes(&base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap())
+            .unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_ed = Ed25519Key::from_seed_and_public_key(
             &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
