@@ -77,7 +77,7 @@ impl SigningKey for RsaKey<Sha256> {
         let mut data = Vec::with_capacity(256);
         input.write(&mut data);
 
-        let mut signature = vec![0; self.inner.public_modulus_len()];
+        let mut signature = vec![0; self.inner.public().modulus_len()];
         self.inner
             .sign(&RSA_PKCS1_SHA256, &self.rng, &data, &mut signature)
             .map_err(|err| Error::CryptoError(err.to_string()))?;
