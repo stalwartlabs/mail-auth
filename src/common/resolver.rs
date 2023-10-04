@@ -100,6 +100,25 @@ impl Resolver {
         })
     }
 
+    pub async fn txt_raw_lookup(&self, key: impl IntoFqdn<'_>) -> crate::Result<Vec<u8>> {
+        let mut result = vec![];
+        for record in self
+            .resolver
+            .txt_lookup(key.into_fqdn().as_ref())
+            .await?
+            .as_lookup()
+            .record_iter()
+        {
+            if let Some(txt_data) = record.data().and_then(|r| r.as_txt()) {
+                for item in txt_data.txt_data() {
+                    result.extend_from_slice(item);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+
     pub async fn txt_lookup<'x, T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
         &self,
         key: impl IntoFqdn<'x>,
@@ -574,6 +593,41 @@ impl<'x> IntoFqdn<'x> for &String {
     }
 }
 
+pub trait ToReverseName {
+    fn to_reverse_name(&self) -> String;
+}
+
+impl ToReverseName for IpAddr {
+    fn to_reverse_name(&self) -> String {
+        use std::fmt::Write;
+
+        match self {
+            IpAddr::V4(ip) => {
+                let mut segments = String::with_capacity(15);
+                for octet in ip.octets().iter().rev() {
+                    if !segments.is_empty() {
+                        segments.push('.');
+                    }
+                    let _ = write!(&mut segments, "{}", octet);
+                }
+                segments
+            }
+            IpAddr::V6(ip) => {
+                let mut segments = String::with_capacity(63);
+                for segment in ip.segments().iter().rev() {
+                    for &p in format!("{segment:04x}").as_bytes().iter().rev() {
+                        if !segments.is_empty() {
+                            segments.push('.');
+                        }
+                        segments.push(char::from(p));
+                    }
+                }
+                segments
+            }
+        }
+    }
+}
+
 #[cfg(any(test, feature = "test"))]
 pub fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     Err(if domain.contains("_parse_error.") {
@@ -585,4 +639,28 @@ pub fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     } else {
         Error::DnsRecordNotFound(trust_dns_resolver::proto::op::ResponseCode::NXDomain)
     })
+}
+
+#[cfg(test)]
+mod test {
+    use std::net::IpAddr;
+
+    use crate::common::resolver::ToReverseName;
+
+    #[test]
+    fn reverse_lookup_addr() {
+        for (addr, expected) in [
+            ("1.2.3.4", "4.3.2.1"),
+            (
+                "2001:db8::cb01",
+                "1.0.b.c.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.8.b.d.0.1.0.0.2",
+            ),
+            (
+                "2a01:4f9:c011:b43c::1",
+                "1.0.0.0.0.0.0.0.0.0.0.0.0.0.0.0.c.3.4.b.1.1.0.c.9.f.4.0.1.0.a.2",
+            ),
+        ] {
+            assert_eq!(addr.parse::<IpAddr>().unwrap().to_reverse_name(), expected);
+        }
+    }
 }
