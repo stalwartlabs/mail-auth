@@ -1,8 +1,11 @@
+mail-auth 0.3.5
+================================
+- Bump `ring` dependency to 0.17.
+
 mail-auth 0.3.4
 ================================
 - Added `to_reverse_name` method to `IpAddr` to convert an IP address to a reverse DNS domain name.
 - Added `txt_raw_lookup` method to `Resolver` to perform a raw TXT lookup.
-- Bump `ring` dependency to 0.17.
 
 mail-auth 0.3.3
 ================================
