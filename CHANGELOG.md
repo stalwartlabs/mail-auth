@@ -1,3 +1,7 @@
+mail-auth 0.3.6
+================================
+- Bump `hickory-resolver` dependency to 0.24.
+
 mail-auth 0.3.5
 ================================
 - Bump `ring` dependency to 0.17.

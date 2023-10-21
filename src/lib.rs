@@ -270,9 +270,9 @@ use arc::Set;
 use common::{crypto::HashAlgorithm, headers::Header, lru::LruCache, verify::DomainKey};
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
+use hickory_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
 use mta_sts::{MtaSts, TlsRpt};
 use spf::{Macro, Spf};
-use trust_dns_resolver::{proto::op::ResponseCode, TokioAsyncResolver};
 
 pub mod arc;
 pub mod common;
@@ -283,7 +283,7 @@ pub mod report;
 pub mod spf;
 
 pub use flate2;
-pub use trust_dns_resolver;
+pub use hickory_resolver;
 pub use zip;
 
 pub struct Resolver {

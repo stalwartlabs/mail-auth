@@ -14,7 +14,7 @@ use std::{
     sync::Arc,
 };
 
-use trust_dns_resolver::{
+use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     error::{ResolveError, ResolveErrorKind},
     proto::rr::RecordType,
@@ -637,7 +637,7 @@ pub fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     } else if domain.contains("_dns_error.") {
         Error::DnsError("".to_string())
     } else {
-        Error::DnsRecordNotFound(trust_dns_resolver::proto::op::ResponseCode::NXDomain)
+        Error::DnsRecordNotFound(hickory_resolver::proto::op::ResponseCode::NXDomain)
     })
 }
 

@@ -108,8 +108,8 @@ impl<'a> Writable for SignableMessage<'a> {
 mod test {
     use std::time::{Duration, Instant};
 
+    use hickory_resolver::proto::op::ResponseCode;
     use mail_parser::decoders::base64::base64_decode;
-    use trust_dns_resolver::proto::op::ResponseCode;
 
     use crate::{
         common::{
