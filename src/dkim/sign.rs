@@ -199,6 +199,13 @@ mod test {
             "I'm going to need those TPS reports ASAP. ",
             "So, if you could do that, that'd be great.\r\n"
         );
+        let empty_message = concat!(
+            "From: bill@example.com\r\n",
+            "To: jdoe@example.com\r\n",
+            "Subject: Empty TPS Report\r\n",
+            "\r\n",
+            "\r\n"
+        );
         let message_multiheader = concat!(
             "X-Duplicate-Header: 4\r\n",
             "From: bill@example.com\r\n",
@@ -274,6 +281,46 @@ mod test {
                 .sign(message.as_bytes())
                 .unwrap(),
             message,
+            Ok(()),
+        )
+        .await;
+
+        dbg!("Test RSA-SHA256 relaxed/relaxed with an empty message");
+        #[cfg(feature = "rust-crypto")]
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        verify(
+            &resolver,
+            DkimSigner::from_key(pk_rsa)
+                .domain("example.com")
+                .selector("default")
+                .headers(["From", "To", "Subject"])
+                .agent_user_identifier("\"John Doe\" <jdoe@example.com>")
+                .sign(empty_message.as_bytes())
+                .unwrap(),
+            empty_message,
+            Ok(()),
+        )
+        .await;
+
+        dbg!("Test RSA-SHA256 simple/simple with an empty message");
+        #[cfg(feature = "rust-crypto")]
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        verify(
+            &resolver,
+            DkimSigner::from_key(pk_rsa)
+                .domain("example.com")
+                .selector("default")
+                .headers(["From", "To", "Subject"])
+                .header_canonicalization(Canonicalization::Simple)
+                .body_canonicalization(Canonicalization::Simple)
+                .agent_user_identifier("\"John Doe\" <jdoe@example.com>")
+                .sign(empty_message.as_bytes())
+                .unwrap(),
+            empty_message,
             Ok(()),
         )
         .await;

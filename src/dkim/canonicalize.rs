@@ -24,6 +24,7 @@ impl Writable for CanonicalBody<'_> {
         match self.canonicalization {
             Canonicalization::Relaxed => {
                 let mut last_ch = 0;
+                let mut is_empty = true;
 
                 for &ch in self.body {
                     match ch {
@@ -32,6 +33,7 @@ impl Writable for CanonicalBody<'_> {
                                 hasher.write(b"\r\n");
                                 crlf_seq -= 1;
                             }
+                            is_empty = false;
                         }
                         b'\n' => {
                             crlf_seq += 1;
@@ -48,10 +50,15 @@ impl Writable for CanonicalBody<'_> {
                             }
 
                             hasher.write(&[ch]);
+                            is_empty = false;
                         }
                     }
 
                     last_ch = ch;
+                }
+
+                if !is_empty {
+                    hasher.write(b"\r\n");
                 }
             }
             Canonicalization::Simple => {
@@ -70,10 +77,10 @@ impl Writable for CanonicalBody<'_> {
                         }
                     }
                 }
+
+                hasher.write(b"\r\n");
             }
         }
-
-        hasher.write(b"\r\n");
     }
 }
 
@@ -202,9 +209,14 @@ impl<'a> Writable for CanonicalHeaders<'a> {
 
 #[cfg(test)]
 mod test {
+    use mail_builder::encoders::base64::base64_encode;
+
     use super::{CanonicalBody, CanonicalHeaders};
     use crate::{
-        common::headers::{HeaderIterator, Writable},
+        common::{
+            crypto::{HashImpl, Sha256},
+            headers::{HeaderIterator, Writable},
+        },
         dkim::Canonicalization,
     };
 
@@ -249,13 +261,18 @@ mod test {
             ),
             (
                 concat!("H: value\t\r\n\r\n",),
-                (concat!("h:value\r\n"), concat!("\r\n")),
+                (concat!("h:value\r\n"), concat!("")),
                 (concat!("H: value\t\r\n"), concat!("\r\n")),
             ),
             (
                 concat!("\tx\t: \t\t\tz\r\n\r\nabc",),
                 (concat!("x:z\r\n"), concat!("abc\r\n")),
                 ("\tx\t: \t\t\tz\r\n", concat!("abc\r\n")),
+            ),
+            (
+                concat!("Subject: hello\r\n\r\n\r\n",),
+                (concat!("subject:hello\r\n"), ""),
+                ("Subject: hello\r\n", concat!("\r\n")),
             ),
         ] {
             let mut header_iterator = HeaderIterator::new(message.as_bytes());
@@ -284,6 +301,32 @@ mod test {
                 }
                 .write(&mut body);
                 assert_eq!(expected_body, String::from_utf8(body).unwrap());
+            }
+        }
+
+        // Test empty body hashes
+        for (canonicalization, hash) in [
+            (
+                Canonicalization::Relaxed,
+                "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+            ),
+            (
+                Canonicalization::Simple,
+                "frcCV1k9oG9oKj3dpUqdJg1PxRT2RSN/XKdLCPjaYaY=",
+            ),
+        ] {
+            for body in ["\r\n", ""] {
+                let mut hasher = Sha256::hasher();
+                CanonicalBody {
+                    canonicalization,
+                    body: body.as_bytes(),
+                }
+                .write(&mut hasher);
+
+                assert_eq!(
+                    String::from_utf8(base64_encode(hasher.finish().as_ref()).unwrap()).unwrap(),
+                    hash,
+                );
             }
         }
     }

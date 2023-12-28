@@ -30,11 +30,11 @@ impl<T: HashImpl> RsaKey<T> {
             .map_err(|err| Error::CryptoError(err.to_string()))?;
 
         let pkcs8_der = match item {
-            Some(rustls_pemfile::Item::PKCS8Key(key)) => key,
+            Some(rustls_pemfile::Item::Pkcs8Key(key)) => key,
             _ => return Err(Error::CryptoError("No PKCS8 key found in PEM".to_string())),
         };
 
-        Self::from_pkcs8_der(&pkcs8_der)
+        Self::from_pkcs8_der(pkcs8_der.secret_pkcs8_der())
     }
 
     /// Creates a new RSA private key from PKCS8 DER-encoded bytes.
@@ -53,11 +53,11 @@ impl<T: HashImpl> RsaKey<T> {
             .map_err(|err| Error::CryptoError(err.to_string()))?;
 
         let rsa_der = match item {
-            Some(rustls_pemfile::Item::RSAKey(key)) => key,
+            Some(rustls_pemfile::Item::Pkcs1Key(key)) => key,
             _ => return Err(Error::CryptoError("No RSA key found in PEM".to_string())),
         };
 
-        Self::from_der(&rsa_der)
+        Self::from_der(rsa_der.secret_pkcs1_der())
     }
 
     /// Creates a new RSA private key from a PKCS1 binary slice.

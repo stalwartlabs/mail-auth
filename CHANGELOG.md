@@ -1,3 +1,8 @@
+mail-auth 0.3.7
+================================
+- Fix: Incorrect body hash when content is empty (#22)
+- Bump to `rustls-pemfile` dependency to 2.
+
 mail-auth 0.3.6
 ================================
 - Bump `hickory-resolver` dependency to 0.24.
