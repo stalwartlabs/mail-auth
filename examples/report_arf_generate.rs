@@ -38,7 +38,7 @@ fn main() {
         .with_dkim_selector_dns("v=dkim1;")
         .with_spf_dns("v=spf1")
         .with_identity_alignment(IdentityAlignment::DkimSpf)
-        .with_message(&b"From: hello@world.org\r\nTo: ciao@mundo.org\r\n\r\n"[..])
+        .with_message("From: hello@world.org\r\nTo: ciao@mondo.org\r\n\r\n")
         .to_rfc5322(
             ("DMARC Reports", "no-reply@example.org"),
             "ruf@otherdomain.com",

@@ -1,3 +1,8 @@
+mail-auth 0.3.8
+================================
+- Made `pct` field accessible.
+- ARF Feedback storage of messages of headers as strings.
+
 mail-auth 0.3.7
 ================================
 - Fix: Incorrect body hash when content is empty (#22)

@@ -68,23 +68,15 @@ impl<'x> Feedback<'x> {
                 BodyPart::Text(arf.into()),
             ),
         ];
-        if let Some(message) = self
-            .message
-            .as_ref()
-            .and_then(|v| std::str::from_utf8(v.as_ref()).ok())
-        {
+        if let Some(message) = self.message.as_ref() {
             parts.push(MimePart::new(
                 ContentType::new("message/rfc822"),
-                BodyPart::Text(message.into()),
+                BodyPart::Text(message.as_ref().into()),
             ));
-        } else if let Some(headers) = self
-            .headers
-            .as_ref()
-            .and_then(|v| std::str::from_utf8(v.as_ref()).ok())
-        {
+        } else if let Some(headers) = self.headers.as_ref() {
             parts.push(MimePart::new(
                 ContentType::new("text/rfc822-headers"),
-                BodyPart::Text(headers.into()),
+                BodyPart::Text(headers.as_ref().into()),
             ));
         }
 
@@ -281,7 +273,7 @@ mod test {
             .with_dkim_selector_dns("v=dkim1;")
             .with_spf_dns("v=spf1")
             .with_identity_alignment(IdentityAlignment::DkimSpf)
-            .with_message(&b"From: hello@world.org\r\nTo: ciao@mundo.org\r\n\r\n"[..]);
+            .with_message("From: hello@world.org\r\nTo: ciao@mondo.org\r\n\r\n");
 
         let message = feedback
             .to_rfc5322(

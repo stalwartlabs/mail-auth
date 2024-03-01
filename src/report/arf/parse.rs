@@ -71,8 +71,24 @@ impl<'x> Feedback<'x> {
         }
 
         if let Some(mut feedback) = feedback {
-            feedback.message = included_message;
-            feedback.headers = included_headers;
+            for (feedback, included) in [
+                (&mut feedback.message, included_message),
+                (&mut feedback.headers, included_headers),
+            ] {
+                if let Some(included) = included {
+                    *feedback = match included {
+                        Cow::Borrowed(bytes) => Some(String::from_utf8_lossy(bytes)),
+                        Cow::Owned(bytes) => Some(
+                            String::from_utf8(bytes)
+                                .unwrap_or_else(|err| {
+                                    String::from_utf8_lossy(err.as_bytes()).into_owned()
+                                })
+                                .into(),
+                        ),
+                    };
+                }
+            }
+
             Ok(feedback)
         } else {
             Err(Error::NoReportsFound)

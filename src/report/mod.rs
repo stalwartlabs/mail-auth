@@ -243,8 +243,8 @@ pub struct Feedback<'x> {
     spf_dns: Option<Cow<'x, str>>,
     identity_alignment: IdentityAlignment,
 
-    message: Option<Cow<'x, [u8]>>,
-    headers: Option<Cow<'x, [u8]>>,
+    message: Option<Cow<'x, str>>,
+    headers: Option<Cow<'x, str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]

@@ -155,20 +155,20 @@ impl<'x> Feedback<'x> {
         self
     }
 
-    pub fn message(&self) -> Option<&[u8]> {
+    pub fn message(&self) -> Option<&str> {
         self.message.as_deref()
     }
 
-    pub fn with_message(mut self, value: impl Into<Cow<'x, [u8]>>) -> Self {
+    pub fn with_message(mut self, value: impl Into<Cow<'x, str>>) -> Self {
         self.message = Some(value.into());
         self
     }
 
-    pub fn headers(&self) -> Option<&[u8]> {
+    pub fn headers(&self) -> Option<&str> {
         self.message.as_deref()
     }
 
-    pub fn with_headers(mut self, value: impl Into<Cow<'x, [u8]>>) -> Self {
+    pub fn with_headers(mut self, value: impl Into<Cow<'x, str>>) -> Self {
         self.headers = Some(value.into());
         self
     }

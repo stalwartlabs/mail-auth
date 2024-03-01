@@ -17,6 +17,7 @@ use crate::{Error, Resolver, SpfOutput, SpfResult};
 
 use super::{Macro, Mechanism, Qualifier, Spf, Variables};
 
+#[allow(clippy::iter_skip_zero)]
 impl Resolver {
     /// Verifies the SPF EHLO identity
     pub async fn verify_spf_helo(
