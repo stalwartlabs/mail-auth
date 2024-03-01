@@ -204,6 +204,10 @@ impl DmarcOutput {
 }
 
 impl Dmarc {
+    pub fn pct(&self) -> u8 {
+        self.pct
+    }
+
     pub fn ruf(&self) -> &[URI] {
         &self.ruf
     }
