@@ -158,7 +158,7 @@ impl Canonicalization {
 }
 
 impl Signature {
-    pub(crate) fn canonicalize<'x>(
+    pub fn canonicalize<'x>(
         &self,
         mut message: impl HeaderStream<'x>,
     ) -> (usize, CanonicalHeaders<'x>, Vec<String>, CanonicalBody<'x>) {

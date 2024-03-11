@@ -240,6 +240,36 @@ impl Resolver {
 }
 
 impl<'x> AuthenticatedMessage<'x> {
+    pub async fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
+        // Based on verify_dkim_ function
+        // Iterate through possible DKIM headers
+        let mut data = Vec::with_capacity(256);
+        for header in &self.dkim_headers {
+            // Ensure signature is not obviously invalid
+            let signature = match &header.header {
+                Ok(signature) => {
+                    if signature.x == 0 || (signature.x > signature.t) {
+                        signature
+                    } else {
+                        continue;
+                    }
+                }
+                Err(_err) => {
+                    continue;
+                }
+            };
+
+            // Get pre-hashed but canonically ordered headers, who's hash is signed
+            let dkim_hdr_value = header.value.strip_signature();
+            let headers = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
+            signature.ch.canonicalize_headers(headers, &mut data);
+
+            return Ok(data);
+        }
+        // Return not ok
+        Err(Error::FailedBodyHashMatch)
+    }
+
     pub fn signed_headers<'z: 'x>(
         &'z self,
         headers: &'x [String],
