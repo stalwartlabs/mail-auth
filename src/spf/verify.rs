@@ -259,7 +259,7 @@ impl Resolver {
                         }
 
                         let target_addr = macro_string.eval(&vars, &domain, true).to_lowercase();
-                        let target_sub_addr = format!(".{target_addr}");
+                        let target_sub_addr = format!(".{target_addr}.");
                         let mut matches = false;
 
                         if let Ok(records) = self.ptr_lookup(ip).await {
