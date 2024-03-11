@@ -1,3 +1,7 @@
+mail-auth 0.3.9
+================================
+- Use relaxed parsing for DNS names (#25)
+
 mail-auth 0.3.8
 ================================
 - Made `pct` field accessible.

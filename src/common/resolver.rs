@@ -19,7 +19,7 @@ use hickory_resolver::{
     error::{ResolveError, ResolveErrorKind},
     proto::rr::RecordType,
     system_conf::read_system_conf,
-    AsyncResolver,
+    AsyncResolver, Name,
 };
 
 use crate::{
@@ -104,7 +104,7 @@ impl Resolver {
         let mut result = vec![];
         for record in self
             .resolver
-            .txt_lookup(key.into_fqdn().as_ref())
+            .txt_lookup(Name::from_str_relaxed(key.into_fqdn().as_ref())?)
             .await?
             .as_lookup()
             .record_iter()
@@ -133,7 +133,10 @@ impl Resolver {
             return mock_resolve(key.as_ref());
         }
 
-        let txt_lookup = self.resolver.txt_lookup(key.as_ref()).await?;
+        let txt_lookup = self
+            .resolver
+            .txt_lookup(Name::from_str_relaxed(key.as_ref())?)
+            .await?;
         let mut result = Err(Error::InvalidRecordType);
         let records = txt_lookup.as_lookup().record_iter().filter_map(|r| {
             let txt_data = r.data()?.as_txt()?.txt_data();
@@ -174,7 +177,10 @@ impl Resolver {
             return mock_resolve(key.as_ref());
         }
 
-        let mx_lookup = self.resolver.mx_lookup(key.as_ref()).await?;
+        let mx_lookup = self
+            .resolver
+            .mx_lookup(Name::from_str_relaxed(key.as_ref())?)
+            .await?;
         let mx_records = mx_lookup.as_lookup().records();
         let mut records: Vec<MX> = Vec::with_capacity(mx_records.len());
         for mx_record in mx_records {
@@ -214,7 +220,10 @@ impl Resolver {
             return mock_resolve(key.as_ref());
         }
 
-        let ipv4_lookup = self.resolver.ipv4_lookup(key.as_ref()).await?;
+        let ipv4_lookup = self
+            .resolver
+            .ipv4_lookup(Name::from_str_relaxed(key.as_ref())?)
+            .await?;
         let ips: Vec<Ipv4Addr> = ipv4_lookup
             .as_lookup()
             .record_iter()
@@ -240,7 +249,10 @@ impl Resolver {
             return mock_resolve(key.as_ref());
         }
 
-        let ipv6_lookup = self.resolver.ipv6_lookup(key.as_ref()).await?;
+        let ipv6_lookup = self
+            .resolver
+            .ipv6_lookup(Name::from_str_relaxed(key.as_ref())?)
+            .await?;
         let ips = ipv6_lookup
             .as_lookup()
             .record_iter()
@@ -341,7 +353,11 @@ impl Resolver {
         }
 
         let key = key.into_fqdn();
-        match self.resolver.lookup_ip(key.as_ref()).await {
+        match self
+            .resolver
+            .lookup_ip(Name::from_str_relaxed(key.as_ref())?)
+            .await
+        {
             Ok(result) => Ok(result.as_lookup().record_iter().any(|r| {
                 r.data().map_or(false, |d| {
                     matches!(d.record_type(), RecordType::A | RecordType::AAAA)
