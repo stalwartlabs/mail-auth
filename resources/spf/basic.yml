@@ -95,8 +95,8 @@ records:
   spf: mx.test.org v=spf1 mx -all
   spf: ptr.test.org v=spf1 ptr:test.org -all
   mx: mx.test.org 10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7,10.0.0.8,10.0.0.9,10.0.0.10,10.0.0.11
-  ptr: 10.0.0.1 h1.test.org
-  ptr: 10.0.0.11 h1.test.org, h2.test.org, h3.test.org, h4.test.org, h5.test.org, h6.test.org, h7.test.org, h8.test.org, h9.test.org, h10.test.org, h11.test.org
+  ptr: 10.0.0.1 h1.test.org.
+  ptr: 10.0.0.11 h1.test.org., h2.test.org., h3.test.org., h4.test.org., h5.test.org., h6.test.org., h7.test.org., h8.test.org., h9.test.org., h10.test.org., h11.test.org.
   a: h1.test.org 10.0.0.1
   a: h11.test.org 10.0.0.11
 tests:

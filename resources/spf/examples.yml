@@ -10,14 +10,14 @@ records:
   a: example.com 192.0.2.10, 192.0.2.11
   a: mail-c.example.org 192.0.2.140
   mx: example.org 192.0.2.140
-  ptr: 192.0.2.10 example.com
-  ptr: 192.0.2.11 example.com
-  ptr: 192.0.2.65 amy.example.com
-  ptr: 192.0.2.66 bob.example.com
-  ptr: 192.0.2.129 mail-a.example.com
-  ptr: 192.0.2.130 mail-b.example.com
-  ptr: 192.0.2.140 mail-c.example.org
-  ptr: 10.0.0.4 bob.example.com
+  ptr: 192.0.2.10 example.com.
+  ptr: 192.0.2.11 example.com.
+  ptr: 192.0.2.65 amy.example.com.
+  ptr: 192.0.2.66 bob.example.com.
+  ptr: 192.0.2.129 mail-a.example.com.
+  ptr: 192.0.2.130 mail-b.example.com.
+  ptr: 192.0.2.140 mail-c.example.org.
+  ptr: 10.0.0.4 bob.example.com.
 tests:
   - sender: user@example.com
     domain: example.com
