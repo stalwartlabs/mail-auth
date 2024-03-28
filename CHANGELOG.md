@@ -1,3 +1,7 @@
+mail-auth 0.3.10
+================================
+- Make `Resolver` cloneable.
+
 mail-auth 0.3.9
 ================================
 - Use relaxed parsing for DNS names (#25)

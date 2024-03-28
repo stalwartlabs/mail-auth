@@ -275,6 +275,7 @@ use hickory_resolver::{
     TokioAsyncResolver,
 };
 use mta_sts::{MtaSts, TlsRpt};
+use parking_lot::Mutex;
 use spf::{Macro, Spf};
 
 pub mod arc;
@@ -604,7 +605,7 @@ impl Default for SpfOutput {
     }
 }
 
-thread_local!(static COUNTER: Cell<u64>  = Cell::new(0));
+thread_local!(static COUNTER: Cell<u64>  = const { Cell::new(0) });
 
 /// Generates a random value between 0 and 100.
 /// Returns true if the generated value is within the requested
@@ -620,4 +621,17 @@ pub(crate) fn is_within_pct(pct: u8) -> bool {
                 .wrapping_mul(11400714819323198485u64)
         }) % 100
             < pct as u64
+}
+
+impl Clone for Resolver {
+    fn clone(&self) -> Self {
+        Self {
+            resolver: self.resolver.clone(),
+            cache_txt: Mutex::new(self.cache_txt.lock().clone()),
+            cache_mx: Mutex::new(self.cache_mx.lock().clone()),
+            cache_ipv4: Mutex::new(self.cache_ipv4.lock().clone()),
+            cache_ipv6: Mutex::new(self.cache_ipv6.lock().clone()),
+            cache_ptr: Mutex::new(self.cache_ptr.lock().clone()),
+        }
+    }
 }
