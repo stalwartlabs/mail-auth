@@ -105,7 +105,7 @@ impl<'a> Writable for SignableMessage<'a> {
 
 #[cfg(test)]
 #[allow(unused)]
-mod test {
+pub mod test {
     use std::time::{Duration, Instant};
 
     use hickory_resolver::proto::op::ResponseCode;
@@ -486,7 +486,7 @@ mod test {
         .await;
     }
 
-    async fn verify<'x>(
+    pub async fn verify<'x>(
         resolver: &Resolver,
         signature: Signature,
         message_: &'x str,

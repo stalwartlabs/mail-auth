@@ -1,3 +1,8 @@
+mail-auth 0.3.11
+================================
+- Added: DKIM keypair generation for both RSA and Ed25519.
+- Fix:  Check PTR against FQDN (including dot at the end) #28 
+
 mail-auth 0.3.10
 ================================
 - Make `Resolver` cloneable.

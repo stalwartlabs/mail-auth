@@ -19,6 +19,8 @@ use crate::{
 
 pub mod builder;
 pub mod canonicalize;
+#[cfg(feature = "generate")]
+pub mod generate;
 pub mod headers;
 pub mod parse;
 pub mod sign;

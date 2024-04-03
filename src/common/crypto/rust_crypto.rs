@@ -2,7 +2,7 @@ use std::array::TryFromSliceError;
 use std::marker::PhantomData;
 
 use ed25519_dalek::Signer;
-use rsa::{pkcs1::DecodeRsaPrivateKey, PaddingScheme, PublicKey as _, RsaPrivateKey};
+use rsa::{pkcs1::DecodeRsaPrivateKey, Pkcs1v15Sign, RsaPrivateKey};
 use sha2::digest::Digest;
 
 use crate::{
@@ -50,7 +50,7 @@ impl SigningKey for RsaKey<Sha1> {
         let hash = self.hash(input);
         self.inner
             .sign(
-                PaddingScheme::new_pkcs1v15_sign::<<Self::Hasher as HashImpl>::Context>(),
+                Pkcs1v15Sign::new::<<Self::Hasher as HashImpl>::Context>(),
                 hash.as_ref(),
             )
             .map_err(|err| Error::CryptoError(err.to_string()))
@@ -68,7 +68,7 @@ impl SigningKey for RsaKey<Sha256> {
         let hash = self.hash(input);
         self.inner
             .sign(
-                PaddingScheme::new_pkcs1v15_sign::<<Self::Hasher as HashImpl>::Context>(),
+                Pkcs1v15Sign::new::<<Self::Hasher as HashImpl>::Context>(),
                 hash.as_ref(),
             )
             .map_err(|err| Error::CryptoError(err.to_string()))
@@ -141,7 +141,7 @@ impl VerifyingKey for RsaPublicKey {
 
                 self.inner
                     .verify(
-                        PaddingScheme::new_pkcs1v15_sign::<sha2::Sha256>(),
+                        Pkcs1v15Sign::new::<sha2::Sha256>(),
                         hash.as_ref(),
                         signature,
                     )
@@ -153,11 +153,7 @@ impl VerifyingKey for RsaPublicKey {
                 let hash = hasher.finalize();
 
                 self.inner
-                    .verify(
-                        PaddingScheme::new_pkcs1v15_sign::<sha1::Sha1>(),
-                        hash.as_ref(),
-                        signature,
-                    )
+                    .verify(Pkcs1v15Sign::new::<sha1::Sha1>(), hash.as_ref(), signature)
                     .map_err(|_| Error::FailedVerification)
             }
             Algorithm::Ed25519Sha256 => Err(Error::IncompatibleAlgorithms),

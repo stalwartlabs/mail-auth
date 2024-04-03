@@ -14,6 +14,7 @@ Features:
   - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 signing and verification.
   - DKIM Authorized Third-Party Signatures.
   - DKIM failure reporting using the Abuse Reporting Format.
+  - Key-pair generation for both RSA and Ed25519 (enabled by the `generate` feature).
 - **Authenticated Received Chain (ARC)**:
   - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 chain verification.
   - ARC sealing.

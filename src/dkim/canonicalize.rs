@@ -323,6 +323,17 @@ mod test {
                 }
                 .write(&mut hasher);
 
+                #[cfg(feature = "sha1")]
+                {
+                    use sha1::Digest;
+                    assert_eq!(
+                        String::from_utf8(base64_encode(hasher.finalize().as_ref()).unwrap())
+                            .unwrap(),
+                        hash,
+                    );
+                }
+
+                #[cfg(all(feature = "ring", not(feature = "sha1")))]
                 assert_eq!(
                     String::from_utf8(base64_encode(hasher.finish().as_ref()).unwrap()).unwrap(),
                     hash,

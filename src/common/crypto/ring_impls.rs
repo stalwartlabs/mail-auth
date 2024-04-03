@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{
-    Ed25519KeyPair, RsaKeyPair, UnparsedPublicKey, ED25519,
+    Ed25519KeyPair, KeyPair, RsaKeyPair, UnparsedPublicKey, ED25519,
     RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY, RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
     RSA_PKCS1_SHA256,
 };
@@ -68,6 +68,11 @@ impl<T: HashImpl> RsaKey<T> {
             padding: PhantomData,
         })
     }
+
+    /// Returns the public key of the RSA key pair.
+    pub fn public_key(&self) -> Vec<u8> {
+        self.inner.public().as_ref().to_vec()
+    }
 }
 
 impl SigningKey for RsaKey<Sha256> {
@@ -94,6 +99,13 @@ pub struct Ed25519Key {
 }
 
 impl Ed25519Key {
+    pub fn generate_pkcs8() -> Result<Vec<u8>> {
+        Ok(Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
+            .map_err(|err| Error::CryptoError(err.to_string()))?
+            .as_ref()
+            .to_vec())
+    }
+
     pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self> {
         Ok(Self {
             inner: Ed25519KeyPair::from_pkcs8(pkcs8_der)
@@ -113,6 +125,11 @@ impl Ed25519Key {
             inner: Ed25519KeyPair::from_seed_and_public_key(seed, public_key)
                 .map_err(|err| Error::CryptoError(err.to_string()))?,
         })
+    }
+
+    // Returns the public key of the Ed25519 key pair.
+    pub fn public_key(&self) -> Vec<u8> {
+        self.inner.public_key().as_ref().to_vec()
     }
 }
 
