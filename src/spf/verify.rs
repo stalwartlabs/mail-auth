@@ -269,7 +269,10 @@ impl Resolver {
                                         self.ip_matches(record, ip, u32::MAX, u128::MAX).await
                                     {
                                         matches = record == &target_addr
-                                            || record.ends_with(&target_sub_addr);
+                                            || record
+                                                .strip_suffix('.')
+                                                .unwrap_or(record.as_str())
+                                                .ends_with(&target_sub_addr);
                                         if matches {
                                             break;
                                         }
