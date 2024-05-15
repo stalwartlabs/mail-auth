@@ -27,7 +27,7 @@ use crate::{is_within_pct, SpfOutput, SpfResult, Version};
 */
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Qualifier {
+pub enum Qualifier {
     Pass,
     Fail,
     SoftFail,
@@ -39,7 +39,7 @@ pub(crate) enum Qualifier {
                       / a / mx / ptr / ip4 / ip6 / exists )
 */
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) enum Mechanism {
+pub enum Mechanism {
     All,
     Include {
         macro_string: Macro,
@@ -74,9 +74,9 @@ pub(crate) enum Mechanism {
     directive        = [ qualifier ] mechanism
 */
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct Directive {
-    pub(crate) qualifier: Qualifier,
-    pub(crate) mechanism: Mechanism,
+pub struct Directive {
+    pub qualifier: Qualifier,
+    pub mechanism: Mechanism,
 }
 
 /*
@@ -132,13 +132,13 @@ pub enum Macro {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Spf {
-    version: Version,
-    directives: Vec<Directive>,
-    exp: Option<Macro>,
-    redirect: Option<Macro>,
-    ra: Option<Vec<u8>>,
-    rp: u8,
-    rr: u8,
+    pub version: Version,
+    pub directives: Vec<Directive>,
+    pub exp: Option<Macro>,
+    pub redirect: Option<Macro>,
+    pub ra: Option<Vec<u8>>,
+    pub rp: u8,
+    pub rr: u8,
 }
 
 pub(crate) const RR_TEMP_PERM_ERROR: u8 = 0x01;

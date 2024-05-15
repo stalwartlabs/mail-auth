@@ -439,7 +439,7 @@ pub enum IprevResult {
 }
 
 #[derive(Debug, Hash, PartialEq, Eq, Clone)]
-pub(crate) enum Version {
+pub enum Version {
     V1,
 }
 

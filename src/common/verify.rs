@@ -15,8 +15,8 @@ use crate::{dkim::Canonicalization, Error, IprevOutput, IprevResult, Resolver};
 use super::crypto::{Algorithm, VerifyingKey};
 
 pub struct DomainKey {
-    pub(crate) p: Box<dyn VerifyingKey + Send + Sync>,
-    pub(crate) f: u64,
+    pub p: Box<dyn VerifyingKey + Send + Sync>,
+    pub f: u64,
 }
 
 impl Resolver {
