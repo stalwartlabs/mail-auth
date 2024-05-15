@@ -335,18 +335,18 @@ pub struct MX {
 
 #[derive(Debug, Clone)]
 pub struct AuthenticatedMessage<'x> {
-    pub(crate) headers: Vec<(&'x [u8], &'x [u8])>,
-    pub(crate) from: Vec<String>,
-    pub(crate) raw_message: &'x [u8],
-    pub(crate) body_offset: usize,
-    pub(crate) body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
-    pub(crate) dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature>>>,
-    pub(crate) ams_headers: Vec<Header<'x, crate::Result<arc::Signature>>>,
-    pub(crate) as_headers: Vec<Header<'x, crate::Result<arc::Seal>>>,
-    pub(crate) aar_headers: Vec<Header<'x, crate::Result<arc::Results>>>,
-    pub(crate) received_headers_count: usize,
-    pub(crate) date_header_present: bool,
-    pub(crate) message_id_header_present: bool,
+    pub headers: Vec<(&'x [u8], &'x [u8])>,
+    pub from: Vec<String>,
+    pub raw_message: &'x [u8],
+    pub body_offset: usize,
+    pub body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
+    pub dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature>>>,
+    pub ams_headers: Vec<Header<'x, crate::Result<arc::Signature>>>,
+    pub as_headers: Vec<Header<'x, crate::Result<arc::Seal>>>,
+    pub aar_headers: Vec<Header<'x, crate::Result<arc::Results>>>,
+    pub received_headers_count: usize,
+    pub date_header_present: bool,
+    pub message_id_header_present: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

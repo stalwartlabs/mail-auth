@@ -36,8 +36,8 @@ pub enum Canonicalization {
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct DkimSigner<T: SigningKey, State = NeedDomain> {
     _state: std::marker::PhantomData<State>,
-    pub(crate) key: T,
-    pub(crate) template: Signature,
+    pub key: T,
+    pub template: Signature,
 }
 
 pub struct NeedDomain;
