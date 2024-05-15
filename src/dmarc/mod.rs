@@ -19,20 +19,20 @@ pub mod verify;
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub struct Dmarc {
-    pub(crate) v: Version,
-    pub(crate) adkim: Alignment,
-    pub(crate) aspf: Alignment,
-    pub(crate) fo: Report,
-    pub(crate) np: Policy,
-    pub(crate) p: Policy,
-    pub(crate) psd: Psd,
-    pub(crate) pct: u8,
-    pub(crate) rf: u8,
-    pub(crate) ri: u32,
-    pub(crate) rua: Vec<URI>,
-    pub(crate) ruf: Vec<URI>,
-    pub(crate) sp: Policy,
-    pub(crate) t: bool,
+    pub v: Version,
+    pub adkim: Alignment,
+    pub aspf: Alignment,
+    pub fo: Report,
+    pub np: Policy,
+    pub p: Policy,
+    pub psd: Psd,
+    pub pct: u8,
+    pub rf: u8,
+    pub ri: u32,
+    pub rua: Vec<URI>,
+    pub ruf: Vec<URI>,
+    pub sp: Policy,
+    pub t: bool,
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,13 +43,13 @@ pub struct URI {
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
-pub(crate) enum Alignment {
+pub enum Alignment {
     Relaxed,
     Strict,
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
-pub(crate) enum Psd {
+pub enum Psd {
     Yes,
     No,
     Default,
