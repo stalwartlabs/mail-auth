@@ -16,6 +16,10 @@ use super::headers::{AuthenticatedHeader, Header, HeaderParser};
 
 impl<'x> AuthenticatedMessage<'x> {
     pub fn parse(raw_message: &'x [u8]) -> Option<Self> {
+        Self::parse_with_opts(raw_message, true)
+    }
+
+    pub fn parse_with_opts(raw_message: &'x [u8], strict: bool) -> Option<Self> {
         let mut message = AuthenticatedMessage {
             headers: Vec::new(),
             from: Vec::new(),
@@ -35,90 +39,103 @@ impl<'x> AuthenticatedMessage<'x> {
         let mut has_arc_errors = false;
 
         for (header, value) in &mut headers {
-            let name = match header {
-                AuthenticatedHeader::Ds(name) => {
-                    let signature = dkim::Signature::parse(value);
-                    if let Ok(signature) = &signature {
-                        let ha = HashAlgorithm::from(signature.a);
-                        if !message
-                            .body_hashes
-                            .iter()
-                            .any(|(c, h, l, _)| c == &signature.cb && h == &ha && l == &signature.l)
-                        {
-                            message
-                                .body_hashes
-                                .push((signature.cb, ha, signature.l, Vec::new()));
-                        }
-                    }
-                    message
-                        .dkim_headers
-                        .push(Header::new(name, value, signature));
-                    name
-                }
-                AuthenticatedHeader::Aar(name) => {
-                    let results = arc::Results::parse(value);
-                    if !has_arc_errors {
-                        has_arc_errors = results.is_err();
-                    }
-                    message.aar_headers.push(Header::new(name, value, results));
-                    name
-                }
-                AuthenticatedHeader::Ams(name) => {
-                    let signature = arc::Signature::parse(value);
+            let name =
+                match header {
+                    AuthenticatedHeader::Ds(name) => {
+                        let signature = match dkim::Signature::parse(value) {
+                            Ok(signature) if signature.l == 0 || !strict => {
+                                let ha = HashAlgorithm::from(signature.a);
+                                if !message.body_hashes.iter().any(|(c, h, l, _)| {
+                                    c == &signature.cb && h == &ha && l == &signature.l
+                                }) {
+                                    message.body_hashes.push((
+                                        signature.cb,
+                                        ha,
+                                        signature.l,
+                                        Vec::new(),
+                                    ));
+                                }
+                                Ok(signature)
+                            }
+                            Ok(_) => Err(crate::Error::SignatureLength),
+                            Err(err) => Err(err),
+                        };
 
-                    if let Ok(signature) = &signature {
-                        let ha = HashAlgorithm::from(signature.a);
-                        if !message
-                            .body_hashes
-                            .iter()
-                            .any(|(c, h, l, _)| c == &signature.cb && h == &ha && l == &signature.l)
-                        {
-                            message
-                                .body_hashes
-                                .push((signature.cb, ha, signature.l, Vec::new()));
-                        }
-                    } else {
-                        has_arc_errors = true;
+                        message
+                            .dkim_headers
+                            .push(Header::new(name, value, signature));
+                        name
                     }
+                    AuthenticatedHeader::Aar(name) => {
+                        let results = arc::Results::parse(value);
+                        if !has_arc_errors {
+                            has_arc_errors = results.is_err();
+                        }
+                        message.aar_headers.push(Header::new(name, value, results));
+                        name
+                    }
+                    AuthenticatedHeader::Ams(name) => {
+                        let signature = match arc::Signature::parse(value) {
+                            Ok(signature) if signature.l == 0 || !strict => {
+                                let ha = HashAlgorithm::from(signature.a);
+                                if !message.body_hashes.iter().any(|(c, h, l, _)| {
+                                    c == &signature.cb && h == &ha && l == &signature.l
+                                }) {
+                                    message.body_hashes.push((
+                                        signature.cb,
+                                        ha,
+                                        signature.l,
+                                        Vec::new(),
+                                    ));
+                                }
+                                Ok(signature)
+                            }
+                            Ok(_) => {
+                                has_arc_errors = true;
+                                Err(crate::Error::SignatureLength)
+                            }
+                            Err(err) => {
+                                has_arc_errors = true;
+                                Err(err)
+                            }
+                        };
 
-                    message
-                        .ams_headers
-                        .push(Header::new(name, value, signature));
-                    name
-                }
-                AuthenticatedHeader::As(name) => {
-                    let seal = arc::Seal::parse(value);
-                    if !has_arc_errors {
-                        has_arc_errors = seal.is_err();
+                        message
+                            .ams_headers
+                            .push(Header::new(name, value, signature));
+                        name
                     }
-                    message.as_headers.push(Header::new(name, value, seal));
-                    name
-                }
-                AuthenticatedHeader::From(name) => {
-                    match MessageStream::new(value).parse_address() {
-                        HeaderValue::Address(Address::List(list)) => {
-                            message.from.extend(
-                                list.into_iter()
-                                    .filter_map(|a| a.address.map(|a| a.to_lowercase())),
-                            );
+                    AuthenticatedHeader::As(name) => {
+                        let seal = arc::Seal::parse(value);
+                        if !has_arc_errors {
+                            has_arc_errors = seal.is_err();
                         }
-                        HeaderValue::Address(Address::Group(group_list)) => {
-                            message
+                        message.as_headers.push(Header::new(name, value, seal));
+                        name
+                    }
+                    AuthenticatedHeader::From(name) => {
+                        match MessageStream::new(value).parse_address() {
+                            HeaderValue::Address(Address::List(list)) => {
+                                message.from.extend(
+                                    list.into_iter()
+                                        .filter_map(|a| a.address.map(|a| a.to_lowercase())),
+                                );
+                            }
+                            HeaderValue::Address(Address::Group(group_list)) => message
                                 .from
                                 .extend(group_list.into_iter().flat_map(|group| {
                                     group
                                         .addresses
                                         .into_iter()
                                         .filter_map(|a| a.address.map(|a| a.to_lowercase()))
-                                }))
+                                })),
+                            _ => (),
                         }
-                        _ => (),
-                    }
 
-                    name
-                }
-                AuthenticatedHeader::Other(name) => name,
-            };
+                        name
+                    }
+                    AuthenticatedHeader::Other(name) => name,
+                };
 
             message.headers.push((name, value));
         }

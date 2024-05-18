@@ -344,6 +344,7 @@ impl AsAuthResult for Error {
             Error::ArcBrokenChain => "broken ARC chain",
             Error::NotAligned => "policy not aligned",
             Error::InvalidRecordType => "invalid dns record type",
+            Error::SignatureLength => "signature length ignored due to security risk",
         });
         header.push(')');
     }

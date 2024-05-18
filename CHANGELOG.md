@@ -1,3 +1,8 @@
+mail-auth 0.4.0
+================================
+- DKIM verification defaults to `strict` mode and ignores signatures with a `l=` tag to avoid exploits (see https://stalw.art/blog/dkim-exploit). Use `AuthenticatedMessage::parse_with_opts(&message, false)` to enable `relaxed` mode.
+- Parsed fields are now public.
+
 mail-auth 0.3.11
 ================================
 - Added: DKIM keypair generation for both RSA and Ed25519.

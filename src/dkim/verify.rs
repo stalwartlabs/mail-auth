@@ -221,6 +221,7 @@ impl Resolver {
                             | Error::ArcInvalidCV
                             | Error::ArcHasHeaderTag
                             | Error::ArcBrokenChain
+                            | Error::SignatureLength
                             | Error::NotAligned => (record.rr & RR_OTHER) != 0,
                         };
 

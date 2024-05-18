@@ -106,6 +106,7 @@ impl<'a> Writable for SignableMessage<'a> {
 #[cfg(test)]
 #[allow(unused)]
 pub mod test {
+    use core::str;
     use std::time::{Duration, Instant};
 
     use hickory_resolver::proto::op::ResponseCode;
@@ -351,12 +352,12 @@ pub mod test {
         )
         .await;
 
-        dbg!("Test RSA-SHA256 simple/relaxed with fixed body length");
+        dbg!("Test RSA-SHA256 simple/relaxed with fixed body length (relaxed)");
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
-        verify(
+        verify_with_opts(
             &resolver,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
@@ -368,6 +369,28 @@ pub mod test {
                 .unwrap(),
             &(message.to_string() + "\r\n----- Mailing list"),
             Ok(()),
+            false,
+        )
+        .await;
+
+        dbg!("Test RSA-SHA256 simple/relaxed with fixed body length (strict)");
+        #[cfg(feature = "rust-crypto")]
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        verify_with_opts(
+            &resolver,
+            DkimSigner::from_key(pk_rsa)
+                .domain("example.com")
+                .selector("default")
+                .headers(["From", "To", "Subject"])
+                .header_canonicalization(Canonicalization::Simple)
+                .body_length(true)
+                .sign(message.as_bytes())
+                .unwrap(),
+            &(message.to_string() + "\r\n----- Mailing list"),
+            Err(super::Error::SignatureLength),
+            true,
         )
         .await;
 
@@ -486,17 +509,18 @@ pub mod test {
         .await;
     }
 
-    pub async fn verify<'x>(
+    pub async fn verify_with_opts<'x>(
         resolver: &Resolver,
         signature: Signature,
         message_: &'x str,
         expect: Result<(), super::Error>,
+        strict: bool,
     ) -> Vec<DkimOutput<'x>> {
         let mut message = Vec::with_capacity(message_.len() + 100);
         signature.write(&mut message, true);
         message.extend_from_slice(message_.as_bytes());
 
-        let message = AuthenticatedMessage::parse(&message).unwrap();
+        let message = AuthenticatedMessage::parse_with_opts(&message, strict).unwrap();
         let dkim = resolver.verify_dkim(&message).await;
 
         match (dkim.last().unwrap().result(), &expect) {
@@ -516,5 +540,14 @@ pub mod test {
                 is_atps: d.is_atps,
             })
             .collect()
+    }
+
+    pub async fn verify<'x>(
+        resolver: &Resolver,
+        signature: Signature,
+        message_: &'x str,
+        expect: Result<(), super::Error>,
+    ) -> Vec<DkimOutput<'x>> {
+        verify_with_opts(resolver, signature, message_, expect, true).await
     }
 }

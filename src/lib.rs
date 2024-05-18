@@ -461,6 +461,7 @@ pub enum Error {
     RevokedPublicKey,
     IncompatibleAlgorithms,
     SignatureExpired,
+    SignatureLength,
     DnsError(String),
     DnsRecordNotFound(ResponseCode),
     ArcChainTooLong,
@@ -501,6 +502,7 @@ impl Display for Error {
             ),
             Error::FailedVerification => write!(f, "Signature verification failed"),
             Error::SignatureExpired => write!(f, "Signature expired"),
+            Error::SignatureLength => write!(f, "Insecure 'l=' tag found in Signature"),
             Error::FailedAuidMatch => write!(f, "AUID does not match domain name"),
             Error::ArcInvalidInstance(i) => {
                 write!(f, "Invalid 'i={i}' value found in ARC header")
