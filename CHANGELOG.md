@@ -1,3 +1,7 @@
+mail-auth 0.4.1
+================================
+- Bump `zip` dependency to 2.1.1.
+
 mail-auth 0.4.0
 ================================
 - DKIM verification defaults to `strict` mode and ignores signatures with a `l=` tag to avoid exploits (see https://stalw.art/blog/dkim-exploit). Use `AuthenticatedMessage::parse_with_opts(&message, false)` to enable `relaxed` mode.
