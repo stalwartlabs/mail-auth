@@ -528,7 +528,7 @@ impl SPFParser for Iter<'_, u8> {
             }
         }
         if zero_group_pos != usize::MAX && zero_group_pos < ip_pos {
-            if ip_pos < 7 {
+            if ip_pos <= 7 {
                 ip.copy_within(zero_group_pos..ip_pos, zero_group_pos + 8 - ip_pos);
                 ip[zero_group_pos..zero_group_pos + 8 - ip_pos].fill(0);
             } else {
@@ -1447,6 +1447,27 @@ mod test {
                     ],
                 },
             ),
+            (
+                concat!("v=spf1 ip6:fe80:0000:0000::0000:0000:0000:1 -all"),
+                Spf {
+                    version: Version::V1,
+                    ra: None,
+                    rp: 100,
+                    rr: u8::MAX,
+                    exp: None,
+                    redirect: None,
+                    directives: vec![
+                        Directive::new(
+                            Qualifier::Pass,
+                            Mechanism::Ip6 {
+                                addr: "fe80:0000:0000::0000:0000:0000:1".parse().unwrap(),
+                                mask: u128::MAX,
+                            },
+                        ),
+                        Directive::new(Qualifier::Fail, Mechanism::All),
+                    ],
+                },
+            ),
         ] {
             assert_eq!(
                 Spf::parse(record.as_bytes()).unwrap_or_else(|err| panic!("{record:?} : {err:?}")),
@@ -1478,6 +1499,14 @@ mod test {
             "0:0:0:0:0:FFFF:129.144.52.38",
             "::13.1.68.3",
             "::FFFF:129.144.52.38",
+            "fe80::1",
+            "fe80::0000:1",
+            "fe80:0000::0000:1",
+            "fe80:0000:0000:0000::1",
+            "fe80:0000:0000:0000::0000:1",
+            "fe80:0000:0000::0000:0000:0000:1",
+            "fe80::0000:0000:0000:0000:0000:1",
+            "fe80:0000:0000:0000:0000:0000:0000:1",
         ] {
             for test in [test.to_string(), format!("{test} ")] {
                 let (ip, stop_char) = test

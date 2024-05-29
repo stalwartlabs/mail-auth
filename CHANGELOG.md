@@ -1,3 +1,7 @@
+mail-auth 0.4.2
+================================
+- Fix: IPv6 parsing bug in SPF parser (#32)
+
 mail-auth 0.4.1
 ================================
 - Bump `zip` dependency to 2.1.1.
