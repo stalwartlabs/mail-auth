@@ -26,7 +26,7 @@ impl Resolver {
         helo_domain: &str,
         host_domain: &str,
     ) -> SpfOutput {
-        if helo_domain.has_labels() {
+        if helo_domain.has_valid_labels() {
             self.check_host(
                 ip,
                 helo_domain,
@@ -88,7 +88,7 @@ impl Resolver {
         sender: &str,
     ) -> SpfOutput {
         let output = SpfOutput::new(domain.to_string());
-        if domain.is_empty() || domain.len() > 255 || !domain.has_labels() {
+        if domain.is_empty() || domain.len() > 255 || !domain.has_valid_labels() {
             return output.with_result(SpfResult::None);
         }
         let mut vars = Variables::new();
@@ -495,23 +495,31 @@ impl LookupLimit {
     }
 }
 
-pub trait HasLabels {
-    fn has_labels(&self) -> bool;
+pub trait HasValidLabels {
+    fn has_valid_labels(&self) -> bool;
 }
 
-impl HasLabels for &str {
-    fn has_labels(&self) -> bool {
+impl HasValidLabels for &str {
+    fn has_valid_labels(&self) -> bool {
         let mut has_dots = false;
         let mut has_chars = false;
+        let mut label_len = 0;
         for ch in self.chars() {
+            label_len += 1;
+
             if ch.is_alphanumeric() {
                 has_chars = true;
             } else if ch == '.' {
                 has_dots = true;
+                label_len = 0;
             }
-            if has_chars && has_dots {
-                return true;
+
+            if label_len > 63 {
+                return false;
             }
+        }
+        if has_chars && has_dots {
+            return true;
         }
         false
     }
