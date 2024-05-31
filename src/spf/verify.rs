@@ -88,7 +88,7 @@ impl Resolver {
         sender: &str,
     ) -> SpfOutput {
         let output = SpfOutput::new(domain.to_string());
-        if domain.is_empty() || domain.len() > 63 || !domain.has_labels() {
+        if domain.is_empty() || domain.len() > 255 || !domain.has_labels() {
             return output.with_result(SpfResult::None);
         }
         let mut vars = Variables::new();

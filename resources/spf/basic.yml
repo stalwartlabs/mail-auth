@@ -1,4 +1,4 @@
-# If the <domain> is malformed (e.g., label longer than 63 characters,
+# If the <domain> is malformed (e.g., total length longer than 255 characters,
 # zero-length label not at the end, etc.) or is not a multi-label
 # domain name, or if the DNS lookup returns "Name Error" (RCODE 3, also
 # known as "NXDOMAIN" [RFC2308]), check_host() immediately returns the
@@ -6,12 +6,12 @@
 
 name: Malformed Domains
 records:
-  spf: extremely.ridiculously.long.domain.name.that.should.fail.immediately.com v=spf1 +all
+  spf: this.domain.name.is.extremely.long.because.we.want.to.explicitly.show.that.the.maximum.length.of.a.domain.name.is.255.characters.so.this.one.will.definitely.fail.immediately.due.to.its.excessive.length.and.ridiculously.large.number.of.characters.which.makes.it.invalid.com v=spf1 +all
   spf: nolabels v=spf1 +all
   spf: none.test.org v=something-else not=spf for=sure
 tests:
-  - domain: extremely.ridiculously.long.domain.name.that.should.fail.immediately.com
-    sender: sender@extremely.ridiculously.long.domain.name.that.should.fail.immediately.com
+  - domain: this.domain.name.is.extremely.long.because.we.want.to.explicitly.show.that.the.maximum.length.of.a.domain.name.is.255.characters.so.this.one.will.definitely.fail.immediately.due.to.its.excessive.length.and.ridiculously.large.number.of.characters.which.makes.it.invalid.com
+    sender: sender@this.domain.name.is.extremely.long.because.we.want.to.explicitly.show.that.the.maximum.length.of.a.domain.name.is.255.characters.so.this.one.will.definitely.fail.immediately.due.to.its.excessive.length.and.ridiculously.large.number.of.characters.which.makes.it.invalid.com
     ip: 172.168.0.1
     expect: none
   - domain: nolabels
