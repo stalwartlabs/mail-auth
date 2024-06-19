@@ -183,8 +183,12 @@ impl Resolver {
                             .await
                         {
                             Ok(records) => {
-                                for exchange in records.iter().flat_map(|mx| mx.exchanges.iter()) {
-                                    if !lookup_limit.can_lookup() {
+                                for (mx_num, exchange) in records
+                                    .iter()
+                                    .flat_map(|mx| mx.exchanges.iter())
+                                    .enumerate()
+                                {
+                                    if mx_num > 9 {
                                         return output
                                             .with_result(SpfResult::PermError)
                                             .with_report(&spf_record);
