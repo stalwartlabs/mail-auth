@@ -1,3 +1,10 @@
+mail-auth 0.4.3
+================================
+- Fix: Domain name length check in SPF verification (#34)
+- Fix: DNS lookup limit being hit too early during SPF verification (#35)
+- Make `TlsReport` clonable.
+- Bump `quick-xml` dependency to 0.3.2.
+
 mail-auth 0.4.2
 ================================
 - Fix: IPv6 parsing bug in SPF parser (#32)

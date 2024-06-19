@@ -143,7 +143,7 @@ impl Report {
         let mut extensions = Vec::new();
 
         let mut reader = Reader::from_reader(report);
-        reader.trim_text(true);
+        reader.config_mut().trim_text(true);
 
         let mut buf = Vec::with_capacity(128);
         let mut found_feedback = false;

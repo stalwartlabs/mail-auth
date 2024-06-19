@@ -22,10 +22,10 @@ pub struct LruItem<V> {
 
 pub trait DnsCache<K, V>: Sized {
     fn with_capacity(capacity: usize) -> Self;
-    fn get<Q: ?Sized>(&self, name: &Q) -> Option<V>
+    fn get<Q>(&self, name: &Q) -> Option<V>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq;
+        Q: Hash + Eq + ?Sized;
     fn insert(&self, name: K, value: V, valid_until: Instant) -> V;
 }
 
@@ -37,10 +37,10 @@ impl<K: Hash + Eq, V: Clone> DnsCache<K, V> for LruCache<K, V> {
         ))
     }
 
-    fn get<Q: ?Sized>(&self, name: &Q) -> Option<V>
+    fn get<Q>(&self, name: &Q) -> Option<V>
     where
         K: Borrow<Q>,
-        Q: Hash + Eq,
+        Q: Hash + Eq + ?Sized,
     {
         let mut cache = self.lock();
         let entry = cache.get_mut(name)?;

@@ -16,7 +16,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub mod generate;
 pub mod parse;
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct TlsReport {
     #[serde(rename = "organization-name")]
     #[serde(default)]
@@ -38,7 +38,7 @@ pub struct TlsReport {
     pub policies: Vec<Policy>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct Policy {
     #[serde(rename = "policy")]
     pub policy: PolicyDetails,
@@ -51,7 +51,7 @@ pub struct Policy {
     pub failure_details: Vec<FailureDetails>,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct PolicyDetails {
     #[serde(rename = "policy-type")]
     pub policy_type: PolicyType,
@@ -69,7 +69,7 @@ pub struct PolicyDetails {
     pub mx_host: Vec<String>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct Summary {
     #[serde(rename = "total-successful-session-count")]
     #[serde(default)]
@@ -80,7 +80,7 @@ pub struct Summary {
     pub total_failure: u32,
 }
 
-#[derive(Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct FailureDetails {
     #[serde(rename = "result-type")]
     pub result_type: ResultType,
@@ -108,7 +108,7 @@ pub struct FailureDetails {
     pub failure_reason_code: Option<String>,
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
 pub struct DateRange {
     #[serde(rename = "start-datetime")]
     #[serde(serialize_with = "serialize_datetime")]
@@ -120,7 +120,7 @@ pub struct DateRange {
     pub end_datetime: DateTime,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone, Copy)]
 pub enum PolicyType {
     #[serde(rename = "tlsa")]
     Tlsa,
