@@ -29,7 +29,7 @@ lru-cache = "0.1.2"
 mail-parser = { version = "0.9", features = ["ludicrous_mode", "full_encoding"] }
 mail-builder = { version = "0.3", features = ["ludicrous_mode"] }
 parking_lot = "0.12.0"
-quick-xml = "0.32"
+quick-xml = "0.34"
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.6", optional = true }
 rustls-pemfile = { version = "2", optional = true }
