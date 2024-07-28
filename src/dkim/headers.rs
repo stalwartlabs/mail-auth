@@ -15,7 +15,7 @@ use crate::common::headers::{HeaderWriter, Writer};
 use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
 
 impl Signature {
-    pub(crate) fn write(&self, writer: &mut impl Writer, as_header: bool) {
+    pub fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"dkim-signature:"[..], &b" "[..]),
             _ => (&b"DKIM-Signature: "[..], &b"\r\n\t"[..]),
@@ -141,6 +141,6 @@ impl Display for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::new();
         self.write(&mut buf, false);
-        f.write_str(&String::from_utf8(buf).map_err(|_| std::fmt::Error)?)
+        f.write_str(&String::from_utf8_lossy(&buf))
     }
 }
