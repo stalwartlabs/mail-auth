@@ -1,7 +1,7 @@
 [package]
 name = "mail-auth"
 description = "DKIM, ARC, SPF and DMARC library for Rust"
-version = "0.4.3"
+version = "0.5.0"
 edition = "2021"
 authors = [ "Stalwart Labs <hello@stalw.art>"]
 license = "Apache-2.0 OR MIT"
@@ -29,7 +29,7 @@ lru-cache = "0.1.2"
 mail-parser = { version = "0.9", features = ["ludicrous_mode", "full_encoding"] }
 mail-builder = { version = "0.3", features = ["ludicrous_mode"] }
 parking_lot = "0.12.0"
-quick-xml = "0.34"
+quick-xml = "0.36"
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.6", optional = true }
 rustls-pemfile = { version = "2", optional = true }
@@ -44,3 +44,4 @@ rand = { version = "0.8.5", optional = true }
 [dev-dependencies]
 tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
 rustls-pemfile = "2"
+psl = "2.1.55"

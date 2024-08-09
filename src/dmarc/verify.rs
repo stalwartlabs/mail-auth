@@ -18,39 +18,40 @@ use crate::{
 use super::{Alignment, Dmarc, URI};
 
 impl Resolver {
-    /// Verifies the DMARC policy of an RFC5322.From domain
+    /// Verifies the DMARC policy of an RFC5321.MailFrom domain
     pub async fn verify_dmarc(
         &self,
         message: &AuthenticatedMessage<'_>,
         dkim_output: &[DkimOutput<'_>],
-        mail_from_domain: &str,
+        rfc5321_mail_from_domain: &str,
         spf_output: &SpfOutput,
+        domain_suffix_fn: impl Fn(&str) -> &str,
     ) -> DmarcOutput {
-        // Extract RFC5322.From
-        let mut from_domain = "";
+        // Extract RFC5322.From domain
+        let mut rfc5322_from_domain = "";
         for from in &message.from {
             if let Some((_, domain)) = from.rsplit_once('@') {
-                if from_domain.is_empty() {
-                    from_domain = domain;
-                } else if from_domain != domain {
+                if rfc5322_from_domain.is_empty() {
+                    rfc5322_from_domain = domain;
+                } else if rfc5322_from_domain != domain {
                     // Multi-valued RFC5322.From header fields with multiple
                     // domains MUST be exempt from DMARC checking.
                     return DmarcOutput::default();
                 }
             }
         }
-        if from_domain.is_empty() {
+        if rfc5322_from_domain.is_empty() {
             return DmarcOutput::default();
         }
 
         // Obtain DMARC policy
-        let dmarc = match self.dmarc_tree_walk(from_domain).await {
+        let dmarc = match self.dmarc_tree_walk(rfc5322_from_domain).await {
             Ok(Some(dmarc)) => dmarc,
-            Ok(None) => return DmarcOutput::default().with_domain(from_domain),
+            Ok(None) => return DmarcOutput::default().with_domain(rfc5322_from_domain),
             Err(err) => {
                 let err = DmarcResult::from(err);
                 return DmarcOutput::default()
-                    .with_domain(from_domain)
+                    .with_domain(rfc5322_from_domain)
                     .with_dkim_result(err.clone())
                     .with_spf_result(err);
             }
@@ -59,7 +60,7 @@ impl Resolver {
         let mut output = DmarcOutput {
             spf_result: DmarcResult::None,
             dkim_result: DmarcResult::None,
-            domain: from_domain.to_string(),
+            domain: rfc5322_from_domain.to_string(),
             policy: dmarc.p,
             record: None,
         };
@@ -67,13 +68,14 @@ impl Resolver {
         let has_dkim_pass = dkim_output.iter().any(|o| o.result == DkimResult::Pass);
         if spf_output.result == SpfResult::Pass || has_dkim_pass {
             // Check SPF alignment
-            let from_subdomain = format!(".{from_domain}");
+            let from_subdomain = format!(".{}", domain_suffix_fn(rfc5322_from_domain));
             if spf_output.result == SpfResult::Pass {
-                output.spf_result = if mail_from_domain == from_domain {
+                output.spf_result = if rfc5321_mail_from_domain == rfc5322_from_domain {
                     DmarcResult::Pass
                 } else if dmarc.aspf == Alignment::Relaxed
-                    && mail_from_domain.ends_with(&from_subdomain)
-                    || from_domain.ends_with(&format!(".{mail_from_domain}"))
+                    && rfc5321_mail_from_domain.ends_with(&from_subdomain)
+                    || rfc5322_from_domain
+                        .ends_with(&format!(".{}", domain_suffix_fn(rfc5321_mail_from_domain)))
                 {
                     output.policy = dmarc.sp;
                     DmarcResult::Pass
@@ -85,15 +87,18 @@ impl Resolver {
             // Check DKIM alignment
             if has_dkim_pass {
                 output.dkim_result = if dkim_output.iter().any(|o| {
-                    o.result == DkimResult::Pass && o.signature.as_ref().unwrap().d.eq(from_domain)
+                    o.result == DkimResult::Pass
+                        && o.signature.as_ref().unwrap().d.eq(rfc5322_from_domain)
                 }) {
                     DmarcResult::Pass
                 } else if dmarc.adkim == Alignment::Relaxed
                     && dkim_output.iter().any(|o| {
                         o.result == DkimResult::Pass
                             && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
-                                || from_domain
-                                    .ends_with(&format!(".{}", o.signature.as_ref().unwrap().d)))
+                                || rfc5322_from_domain.ends_with(&format!(
+                                    ".{}",
+                                    domain_suffix_fn(&o.signature.as_ref().unwrap().d)
+                                )))
                     })
                 {
                     output.policy = dmarc.sp;
@@ -102,8 +107,10 @@ impl Resolver {
                     if dkim_output.iter().any(|o| {
                         o.result == DkimResult::Pass
                             && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
-                                || from_domain
-                                    .ends_with(&format!(".{}", o.signature.as_ref().unwrap().d)))
+                                || rfc5322_from_domain.ends_with(&format!(
+                                    ".{}",
+                                    domain_suffix_fn(&o.signature.as_ref().unwrap().d)
+                                )))
                     }) {
                         output.policy = dmarc.sp;
                     }
@@ -208,7 +215,7 @@ mod test {
             dmarc_dns,
             dmarc,
             message,
-            mail_from_domain,
+            rfc5321_mail_from_domain,
             signature_domain,
             dkim,
             spf,
@@ -296,6 +303,22 @@ mod test {
                 DmarcResult::Pass,
                 Policy::Quarantine,
             ),
+            // Relaxed - Pass with tree walk and different subdomains
+            (
+                "_dmarc.c.example.org.",
+                concat!(
+                    "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=r; adkim=r; fo=1;",
+                    "rua=mailto:dmarc-feedback@example.org"
+                ),
+                "From: hello@a.b.c.example.org\r\n\r\n",
+                "z.example.org",
+                "z.example.org",
+                DkimResult::Pass,
+                SpfResult::Pass,
+                DmarcResult::Pass,
+                DmarcResult::Pass,
+                Policy::Quarantine,
+            ),
             // Failed mechanisms
             (
                 "_dmarc.example.org.",
@@ -333,12 +356,18 @@ mod test {
             };
             let spf = SpfOutput {
                 result: spf,
-                domain: mail_from_domain.to_string(),
+                domain: rfc5321_mail_from_domain.to_string(),
                 report: None,
                 explanation: None,
             };
             let result = resolver
-                .verify_dmarc(&auth_message, &[dkim], mail_from_domain, &spf)
+                .verify_dmarc(
+                    &auth_message,
+                    &[dkim],
+                    rfc5321_mail_from_domain,
+                    &spf,
+                    |d| psl::domain_str(d).unwrap_or(d),
+                )
                 .await;
             assert_eq!(result.dkim_result, expect_dkim);
             assert_eq!(result.spf_result, expect_spf);

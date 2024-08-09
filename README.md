@@ -175,6 +175,7 @@ Features:
             &dkim_result,
             "example.org",
             &spf_result,
+            |domain| psl::domain_str(domain).unwrap_or(domain),
         )
         .await;
     assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);
