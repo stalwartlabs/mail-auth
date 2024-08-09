@@ -68,14 +68,12 @@ impl Resolver {
         let has_dkim_pass = dkim_output.iter().any(|o| o.result == DkimResult::Pass);
         if spf_output.result == SpfResult::Pass || has_dkim_pass {
             // Check SPF alignment
-            let from_subdomain = format!(".{}", domain_suffix_fn(rfc5322_from_domain));
+            let rfc5322_from_subdomain = domain_suffix_fn(rfc5322_from_domain);
             if spf_output.result == SpfResult::Pass {
                 output.spf_result = if rfc5321_mail_from_domain == rfc5322_from_domain {
                     DmarcResult::Pass
                 } else if dmarc.aspf == Alignment::Relaxed
-                    && rfc5321_mail_from_domain.ends_with(&from_subdomain)
-                    || rfc5322_from_domain
-                        .ends_with(&format!(".{}", domain_suffix_fn(rfc5321_mail_from_domain)))
+                    && domain_suffix_fn(rfc5321_mail_from_domain) == rfc5322_from_subdomain
                 {
                     output.policy = dmarc.sp;
                     DmarcResult::Pass
@@ -94,11 +92,8 @@ impl Resolver {
                 } else if dmarc.adkim == Alignment::Relaxed
                     && dkim_output.iter().any(|o| {
                         o.result == DkimResult::Pass
-                            && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
-                                || rfc5322_from_domain.ends_with(&format!(
-                                    ".{}",
-                                    domain_suffix_fn(&o.signature.as_ref().unwrap().d)
-                                )))
+                            && domain_suffix_fn(&o.signature.as_ref().unwrap().d)
+                                == rfc5322_from_subdomain
                     })
                 {
                     output.policy = dmarc.sp;
@@ -106,11 +101,8 @@ impl Resolver {
                 } else {
                     if dkim_output.iter().any(|o| {
                         o.result == DkimResult::Pass
-                            && (o.signature.as_ref().unwrap().d.ends_with(&from_subdomain)
-                                || rfc5322_from_domain.ends_with(&format!(
-                                    ".{}",
-                                    domain_suffix_fn(&o.signature.as_ref().unwrap().d)
-                                )))
+                            && domain_suffix_fn(&o.signature.as_ref().unwrap().d)
+                                == rfc5322_from_subdomain
                     }) {
                         output.policy = dmarc.sp;
                     }
