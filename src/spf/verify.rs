@@ -490,7 +490,7 @@ impl LookupLimit {
 
     #[inline(always)]
     fn can_lookup(&mut self) -> bool {
-        if self.num_lookups < 10 && self.timer.elapsed().as_secs() < 20 {
+        if self.num_lookups <= 10 && self.timer.elapsed().as_secs() < 20 {
             self.num_lookups += 1;
             true
         } else {
@@ -663,7 +663,7 @@ mod test {
                             assert_eq!(
                                 output.result(),
                                 result,
-                                "Failed for {test_name:?}, test {test_num}.",
+                                "Failed for {test_name:?}, test {test_num}, ehlo: {helo}, mail-from: {mail_from}.",
                             );
 
                             if !exp.is_empty() {

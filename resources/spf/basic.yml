@@ -84,8 +84,8 @@ tests:
 
 name: DNS Lookup Limits
 records:
-  spf: ok.test.org v=spf1 a:t1.org a:t2.org a:t3.org a:t4.org a:t5.org a:t6.org a:t7.org a:t8.org a:t9.org ~all
-  spf: err.test.org v=spf1 a:t1.org a:t2.org a:t3.org a:t4.org a:t5.org a:t6.org a:t7.org a:t8.org a:t9.org a:t10.org ~all
+  spf: ok.test.org v=spf1 a:t1.org a:t2.org a:t3.org a:t4.org a:t5.org a:t6.org a:t7.org a:t8.org a:t9.org a:t10.org ~all
+  spf: err.test.org v=spf1 a:t1.org a:t2.org a:t3.org a:t4.org a:t5.org a:t6.org a:t7.org a:t8.org a:t9.org a:t10.org a:t11.org ~all
   spf: inc1.org v=spf1 include:inc2.org ~all
   spf: inc2.org v=spf1 include:inc3.org ~all
   spf: inc3.org v=spf1 include:inc4.org ~all
@@ -96,7 +96,8 @@ records:
   spf: inc8.org v=spf1 include:inc9.org ~all
   spf: inc9.org v=spf1 include:inc10.org ~all
   spf: inc10.org v=spf1 include:inc11.org ~all
-  spf: inc11.org v=spf1 ~all
+  spf: inc11.org v=spf1 include:inc12.org ~all
+  spf: inc12.org v=spf1 ~all
   spf: mx.test.org v=spf1 mx -all
   spf: ptr.test.org v=spf1 ptr:test.org -all
   mx: mx.test.org 10.0.0.1,10.0.0.2,10.0.0.3,10.0.0.4,10.0.0.5,10.0.0.6,10.0.0.7,10.0.0.8,10.0.0.9,10.0.0.10,10.0.0.11
