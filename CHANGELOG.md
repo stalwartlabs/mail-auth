@@ -1,6 +1,7 @@
 mail-auth 0.5.0
 ================================
 - Fix: Use public suffix list for DMARC relaxed alignment verification (#37)
+- Fix: Increase DNS lookup limit to 10 during SPF verification (#35)
 
 mail-auth 0.4.3
 ================================
