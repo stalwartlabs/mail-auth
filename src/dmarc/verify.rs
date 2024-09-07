@@ -11,13 +11,14 @@
 use std::sync::Arc;
 
 use crate::{
-    AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, Resolver,
+    AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
     SpfOutput, SpfResult,
 };
 
 use super::{Alignment, Dmarc, URI};
 
-impl Resolver {
+#[cfg(feature = "resolver")]
+impl crate::Resolver {
     /// Verifies the DMARC policy of an RFC5321.MailFrom domain
     pub async fn verify_dmarc(
         &self,

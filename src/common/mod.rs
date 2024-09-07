@@ -17,6 +17,7 @@ pub mod headers;
 pub mod lru;
 pub mod message;
 pub mod parse;
+#[cfg(feature = "resolver")]
 pub mod resolver;
 pub mod verify;
 

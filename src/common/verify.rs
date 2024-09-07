@@ -10,7 +10,7 @@
 
 use std::net::IpAddr;
 
-use crate::{dkim::Canonicalization, Error, IprevOutput, IprevResult, Resolver};
+use crate::{dkim::Canonicalization, Error, IprevOutput, IprevResult};
 
 use super::crypto::{Algorithm, VerifyingKey};
 
@@ -19,7 +19,8 @@ pub struct DomainKey {
     pub f: u64,
 }
 
-impl Resolver {
+#[cfg(feature = "resolver")]
+impl crate::Resolver {
     pub async fn verify_iprev(&self, addr: IpAddr) -> IprevOutput {
         match self.ptr_lookup(addr).await {
             Ok(ptr) => {

@@ -23,6 +23,7 @@ use arc::Set;
 use common::{crypto::HashAlgorithm, headers::Header, lru::LruCache, verify::DomainKey};
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
+#[cfg(feature = "resolver")]
 use hickory_resolver::{
     proto::{error::ProtoError, op::ResponseCode},
     TokioAsyncResolver,
@@ -40,9 +41,11 @@ pub mod report;
 pub mod spf;
 
 pub use flate2;
+#[cfg(feature = "resolver")]
 pub use hickory_resolver;
 pub use zip;
 
+#[cfg(feature = "resolver")]
 pub struct Resolver {
     pub(crate) resolver: TokioAsyncResolver,
     pub(crate) cache_txt: LruCache<String, Txt>,
@@ -216,6 +219,7 @@ pub enum Error {
     SignatureExpired,
     SignatureLength,
     DnsError(String),
+    #[cfg(feature = "resolver")]
     DnsRecordNotFound(ResponseCode),
     ArcChainTooLong,
     ArcInvalidInstance(u32),
@@ -268,6 +272,7 @@ impl Display for Error {
             Error::ArcChainTooLong => write!(f, "Too many ARC headers"),
             Error::InvalidRecordType => write!(f, "Invalid record"),
             Error::DnsError(err) => write!(f, "DNS resolution error: {err}"),
+            #[cfg(feature = "resolver")]
             Error::DnsRecordNotFound(code) => write!(f, "DNS record not found: {code}"),
             Error::NotAligned => write!(f, "Policy not aligned"),
         }
@@ -331,6 +336,7 @@ impl From<io::Error> for Error {
     }
 }
 
+#[cfg(feature = "resolver")]
 impl From<ProtoError> for Error {
     fn from(err: ProtoError) -> Self {
         Error::DnsError(err.to_string())
@@ -380,6 +386,7 @@ pub(crate) fn is_within_pct(pct: u8) -> bool {
             < pct as u64
 }
 
+#[cfg(feature = "resolver")]
 impl Clone for Resolver {
     fn clone(&self) -> Self {
         Self {
