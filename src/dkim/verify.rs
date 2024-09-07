@@ -16,7 +16,7 @@ use crate::{
         headers::Writer,
         verify::{DomainKey, VerifySignature},
     },
-    is_within_pct, AuthenticatedMessage, DkimOutput, DkimResult, Error, Resolver,
+    is_within_pct, AuthenticatedMessage, DkimOutput, DkimResult, Error,
 };
 
 use super::{
@@ -24,7 +24,8 @@ use super::{
     RR_SIGNATURE, RR_VERIFICATION,
 };
 
-impl Resolver {
+#[cfg(feature = "resolver")]
+impl crate::Resolver {
     /// Verifies DKIM headers of an RFC5322 message.
     #[inline(always)]
     pub async fn verify_dkim<'x>(
@@ -241,7 +242,7 @@ impl Resolver {
 }
 
 impl<'x> AuthenticatedMessage<'x> {
-    pub async fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
+    pub fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
         // Based on verify_dkim_ function
         // Iterate through possible DKIM headers
         let mut data = Vec::with_capacity(256);

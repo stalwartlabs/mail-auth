@@ -19,6 +19,7 @@ doctest = false
 default = ["ring", "rustls-pemfile"]
 rust-crypto = ["ed25519-dalek", "rsa", "sha1", "sha2"]
 generate = ["rsa", "rand"]
+resolver = ["hickory-resolver"]
 test = []
 
 [dependencies]
@@ -27,7 +28,7 @@ ed25519-dalek = { version = "2.0", optional = true }
 flate2 = "1.0.25"
 lru-cache = "0.1.2"
 mail-parser = { version = "0.9", features = ["ludicrous_mode", "full_encoding"] }
-mail-builder = { version = "0.3", features = ["ludicrous_mode"] }
+mail-builder = { version = "0.3", features = ["ludicrous_mode"], default-features = false }
 parking_lot = "0.12.0"
 quick-xml = "0.36"
 ring = { version = "0.17", optional = true }
@@ -37,8 +38,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha1 = { version = "0.10", features = ["oid"], optional = true }
 sha2 = { version = "0.10.6", features = ["oid"], optional = true }
-hickory-resolver = { version = "0.24", features = ["dns-over-rustls", "dnssec-ring"] }
-zip = "2.1.1"
+hickory-resolver = { version = "0.24", features = ["dns-over-rustls", "dnssec-ring"], optional = true }
+zip = { version = "2.1.1", default-features = false }
 rand = { version = "0.8.5", optional = true }
 
 [dev-dependencies]

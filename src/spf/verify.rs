@@ -13,12 +13,13 @@ use std::{
     time::Instant,
 };
 
-use crate::{Error, Resolver, SpfOutput, SpfResult};
+use crate::{Error, SpfOutput, SpfResult};
 
 use super::{Macro, Mechanism, Qualifier, Spf, Variables};
 
 #[allow(clippy::iter_skip_zero)]
-impl Resolver {
+#[cfg(feature = "resolver")]
+impl crate::Resolver {
     /// Verifies the SPF EHLO identity
     pub async fn verify_spf_helo(
         &self,
@@ -468,6 +469,7 @@ impl From<&Qualifier> for SpfResult {
 impl From<Error> for SpfResult {
     fn from(err: Error) -> Self {
         match err {
+            #[cfg(feature = "resolver")]
             Error::DnsRecordNotFound(_) | Error::InvalidRecordType => SpfResult::None,
             Error::ParseError => SpfResult::PermError,
             _ => SpfResult::TempError,

@@ -17,12 +17,13 @@ use crate::{
         verify::{DomainKey, VerifySignature},
     },
     dkim::{verify::Verifier, Canonicalization},
-    ArcOutput, AuthenticatedMessage, DkimResult, Error, Resolver,
+    ArcOutput, AuthenticatedMessage, DkimResult, Error,
 };
 
 use super::{ChainValidation, Set};
 
-impl Resolver {
+#[cfg(feature = "resolver")]
+impl crate::Resolver {
     /// Verifies ARC headers of an RFC5322 message.
     pub async fn verify_arc<'x>(&self, message: &'x AuthenticatedMessage<'x>) -> ArcOutput<'x> {
         let arc_headers = message.ams_headers.len();

@@ -333,6 +333,7 @@ impl AsAuthResult for Error {
             Error::IncompatibleAlgorithms => "incompatible record/signature algorithms",
             Error::SignatureExpired => "signature error",
             Error::DnsError(_) => "dns error",
+            #[cfg(feature = "resolver")]
             Error::DnsRecordNotFound(_) => "dns record not found",
             Error::ArcInvalidInstance(i) => {
                 write!(header, "invalid ARC instance {i})").ok();
