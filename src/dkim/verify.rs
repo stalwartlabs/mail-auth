@@ -242,7 +242,7 @@ impl crate::Resolver {
 }
 
 impl<'x> AuthenticatedMessage<'x> {
-    pub async fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
+    pub fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
         // Based on verify_dkim_ function
         // Iterate through possible DKIM headers
         let mut data = Vec::with_capacity(256);
