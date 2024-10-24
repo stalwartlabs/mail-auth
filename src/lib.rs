@@ -36,6 +36,7 @@ pub mod common;
 pub mod dkim;
 pub mod dmarc;
 pub mod mta_sts;
+#[cfg(feature = "report")]
 pub mod report;
 pub mod spf;
 

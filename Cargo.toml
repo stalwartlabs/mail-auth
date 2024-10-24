@@ -16,9 +16,10 @@ resolver = "2"
 doctest = false
 
 [features]
-default = ["ring", "rustls-pemfile"]
+default = ["ring", "rustls-pemfile", "report"]
 rust-crypto = ["ed25519-dalek", "rsa", "sha1", "sha2"]
 generate = ["rsa", "rand"]
+report = ["quick-xml"]
 test = []
 
 [dependencies]
@@ -29,7 +30,7 @@ lru-cache = "0.1.2"
 mail-parser = { version = "0.9", features = ["ludicrous_mode", "full_encoding"] }
 mail-builder = { version = "0.3", features = ["ludicrous_mode"] }
 parking_lot = "0.12.0"
-quick-xml = "0.36"
+quick-xml = { version = "0.36", optional = true }
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.6", optional = true }
 rustls-pemfile = { version = "2", optional = true }
