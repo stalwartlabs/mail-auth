@@ -124,7 +124,7 @@ struct SignableSet<'a> {
     headers: CanonicalHeaders<'a>,
 }
 
-impl<'a> Writable for SignableSet<'a> {
+impl Writable for SignableSet<'_> {
     fn write(self, writer: &mut impl Writer) {
         self.headers.write(writer);
         self.set.signature.write(writer, false);
@@ -136,7 +136,7 @@ struct SignableChain<'a> {
     set: &'a ArcSet<'a>,
 }
 
-impl<'a> Writable for SignableChain<'a> {
+impl Writable for SignableChain<'_> {
     fn write(self, writer: &mut impl Writer) {
         if !self.arc_output.set.is_empty() {
             Canonicalization::Relaxed.canonicalize_headers(

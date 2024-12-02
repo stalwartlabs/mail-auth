@@ -152,7 +152,7 @@ impl Seal {
     }
 }
 
-impl<'x> AuthenticationResults<'x> {
+impl AuthenticationResults<'_> {
     pub(crate) fn write(&self, writer: &mut impl Writer, i: u32, as_header: bool) {
         writer.write(if !as_header {
             b"arc-authentication-results:"
@@ -168,7 +168,7 @@ impl<'x> AuthenticationResults<'x> {
             for &ch in self.auth_results.as_bytes() {
                 if !ch.is_ascii_whitespace() {
                     if last_is_space {
-                        writer.write(&[b' ']);
+                        writer.write(b" ");
                         last_is_space = false;
                     }
                     writer.write(&[ch]);
@@ -183,7 +183,7 @@ impl<'x> AuthenticationResults<'x> {
     }
 }
 
-impl<'x> HeaderWriter for ArcSet<'x> {
+impl HeaderWriter for ArcSet<'_> {
     fn write_header(&self, writer: &mut impl Writer) {
         self.seal.write(writer, true);
         self.signature.write(writer, true);

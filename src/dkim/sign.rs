@@ -96,7 +96,7 @@ pub(super) struct SignableMessage<'a> {
     signature: &'a Signature,
 }
 
-impl<'a> Writable for SignableMessage<'a> {
+impl Writable for SignableMessage<'_> {
     fn write(self, writer: &mut impl Writer) {
         self.headers.write(writer);
         self.signature.write(writer, false);

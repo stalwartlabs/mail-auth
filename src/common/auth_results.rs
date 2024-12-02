@@ -149,14 +149,14 @@ impl<'x> AuthenticationResults<'x> {
     }
 }
 
-impl<'x> Display for AuthenticationResults<'x> {
+impl Display for AuthenticationResults<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(self.hostname)?;
         f.write_str(&self.auth_results)
     }
 }
 
-impl<'x> HeaderWriter for AuthenticationResults<'x> {
+impl HeaderWriter for AuthenticationResults<'_> {
     fn write_header(&self, writer: &mut impl Writer) {
         writer.write(b"Authentication-Results: ");
         writer.write(self.hostname.as_bytes());

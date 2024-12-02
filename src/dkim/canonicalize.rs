@@ -200,7 +200,7 @@ pub struct CanonicalHeaders<'a> {
     headers: Vec<(&'a [u8], &'a [u8])>,
 }
 
-impl<'a> Writable for CanonicalHeaders<'a> {
+impl Writable for CanonicalHeaders<'_> {
     fn write(self, writer: &mut impl Writer) {
         self.canonicalization
             .canonicalize_headers(self.headers.into_iter().rev(), writer)

@@ -123,7 +123,7 @@ impl VerifySignature for Seal {
     }
 }
 
-impl<'x> ArcOutput<'x> {
+impl ArcOutput<'_> {
     pub(crate) fn with_result(mut self, result: DkimResult) -> Self {
         self.result = result;
         self
@@ -134,7 +134,7 @@ impl<'x> ArcOutput<'x> {
     }
 }
 
-impl<'x> Default for ArcOutput<'x> {
+impl Default for ArcOutput<'_> {
     fn default() -> Self {
         Self {
             result: DkimResult::None,

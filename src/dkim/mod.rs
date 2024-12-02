@@ -235,7 +235,7 @@ impl<'x> DkimOutput<'x> {
     }
 }
 
-impl<'x> ArcOutput<'x> {
+impl ArcOutput<'_> {
     pub fn result(&self) -> &DkimResult {
         &self.result
     }
