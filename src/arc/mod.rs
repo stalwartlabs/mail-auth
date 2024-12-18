@@ -34,53 +34,53 @@ pub struct ArcSealer<T: SigningKey<Hasher = Sha256>, State = NeedDomain> {
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Signature {
-    pub(crate) i: u32,
-    pub(crate) a: Algorithm,
-    pub(crate) d: String,
-    pub(crate) s: String,
-    pub(crate) b: Vec<u8>,
-    pub(crate) bh: Vec<u8>,
-    pub(crate) h: Vec<String>,
-    pub(crate) z: Vec<String>,
-    pub(crate) l: u64,
-    pub(crate) x: u64,
-    pub(crate) t: u64,
-    pub(crate) ch: Canonicalization,
-    pub(crate) cb: Canonicalization,
+    pub i: u32,
+    pub a: Algorithm,
+    pub d: String,
+    pub s: String,
+    pub b: Vec<u8>,
+    pub bh: Vec<u8>,
+    pub h: Vec<String>,
+    pub z: Vec<String>,
+    pub l: u64,
+    pub x: u64,
+    pub t: u64,
+    pub ch: Canonicalization,
+    pub cb: Canonicalization,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Seal {
-    pub(crate) i: u32,
-    pub(crate) a: Algorithm,
-    pub(crate) b: Vec<u8>,
-    pub(crate) d: String,
-    pub(crate) s: String,
-    pub(crate) t: u64,
-    pub(crate) cv: ChainValidation,
+    pub i: u32,
+    pub a: Algorithm,
+    pub b: Vec<u8>,
+    pub d: String,
+    pub s: String,
+    pub t: u64,
+    pub cv: ChainValidation,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Results {
-    pub(crate) i: u32,
+    pub i: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArcSet<'x> {
-    pub(crate) signature: Signature,
-    pub(crate) seal: Seal,
-    pub(crate) results: &'x AuthenticationResults<'x>,
+    pub signature: Signature,
+    pub seal: Seal,
+    pub results: &'x AuthenticationResults<'x>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Set<'x> {
-    pub(crate) signature: Header<'x, &'x Signature>,
-    pub(crate) seal: Header<'x, &'x Seal>,
-    pub(crate) results: Header<'x, &'x Results>,
+    pub signature: Header<'x, &'x Signature>,
+    pub seal: Header<'x, &'x Seal>,
+    pub results: Header<'x, &'x Results>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub(crate) enum ChainValidation {
+pub enum ChainValidation {
     #[default]
     None,
     Fail,
@@ -123,9 +123,14 @@ impl VerifySignature for Seal {
     }
 }
 
-impl ArcOutput<'_> {
-    pub(crate) fn with_result(mut self, result: DkimResult) -> Self {
+impl<'x> ArcOutput<'x> {
+    pub fn with_result(mut self, result: DkimResult) -> Self {
         self.result = result;
+        self
+    }
+
+    pub fn with_set(mut self, set: Set<'x>) -> Self {
+        self.set.push(set);
         self
     }
 

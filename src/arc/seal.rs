@@ -198,7 +198,7 @@ impl Signature {
 mod test {
     use std::time::{Duration, Instant};
 
-    use mail_parser::decoders::base64::base64_decode;
+    use mail_parser::{decoders::base64::base64_decode, MessageParser};
 
     use crate::{
         arc::ArcSealer,
@@ -313,6 +313,13 @@ mod test {
         pk: impl SigningKey<Hasher = Sha256>,
     ) -> String {
         let message = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
+        assert_eq!(
+            message,
+            AuthenticatedMessage::from_parsed(
+                &MessageParser::new().parse(raw_message).unwrap(),
+                true
+            )
+        );
         let dkim_result = resolver.verify_dkim(&message).await;
         let arc_result = resolver.verify_arc(&message).await;
         assert!(

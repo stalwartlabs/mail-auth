@@ -125,22 +125,29 @@ impl Default for DmarcOutput {
 }
 
 impl DmarcOutput {
-    pub(crate) fn with_domain(mut self, domain: &str) -> Self {
+    pub fn new(domain: String) -> Self {
+        DmarcOutput {
+            domain,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_domain(mut self, domain: &str) -> Self {
         self.domain = domain.to_string();
         self
     }
 
-    pub(crate) fn with_spf_result(mut self, result: DmarcResult) -> Self {
+    pub fn with_spf_result(mut self, result: DmarcResult) -> Self {
         self.spf_result = result;
         self
     }
 
-    pub(crate) fn with_dkim_result(mut self, result: DmarcResult) -> Self {
+    pub fn with_dkim_result(mut self, result: DmarcResult) -> Self {
         self.dkim_result = result;
         self
     }
 
-    pub(crate) fn with_record(mut self, record: Arc<Dmarc>) -> Self {
+    pub fn with_record(mut self, record: Arc<Dmarc>) -> Self {
         self.record = record.into();
         self
     }

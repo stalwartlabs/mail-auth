@@ -110,7 +110,7 @@ pub mod test {
     use std::time::{Duration, Instant};
 
     use hickory_resolver::proto::op::ResponseCode;
-    use mail_parser::decoders::base64::base64_decode;
+    use mail_parser::{decoders::base64::base64_decode, MessageParser};
 
     use crate::{
         common::{
@@ -516,11 +516,18 @@ pub mod test {
         expect: Result<(), super::Error>,
         strict: bool,
     ) -> Vec<DkimOutput<'x>> {
-        let mut message = Vec::with_capacity(message_.len() + 100);
-        signature.write(&mut message, true);
-        message.extend_from_slice(message_.as_bytes());
+        let mut raw_message = Vec::with_capacity(message_.len() + 100);
+        signature.write(&mut raw_message, true);
+        raw_message.extend_from_slice(message_.as_bytes());
 
-        let message = AuthenticatedMessage::parse_with_opts(&message, strict).unwrap();
+        let message = AuthenticatedMessage::parse_with_opts(&raw_message, strict).unwrap();
+        assert_eq!(
+            message,
+            AuthenticatedMessage::from_parsed(
+                &MessageParser::new().parse(&raw_message).unwrap(),
+                strict
+            )
+        );
         let dkim = resolver.verify_dkim(&message).await;
 
         match (dkim.last().unwrap().result(), &expect) {

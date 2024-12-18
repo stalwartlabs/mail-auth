@@ -87,7 +87,7 @@ pub struct MX {
     pub preference: u16,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AuthenticatedMessage<'x> {
     pub headers: Vec<(&'x [u8], &'x [u8])>,
     pub from: Vec<String>,
@@ -101,6 +101,7 @@ pub struct AuthenticatedMessage<'x> {
     pub received_headers_count: usize,
     pub date_header_present: bool,
     pub message_id_header_present: bool,
+    pub has_arc_errors: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

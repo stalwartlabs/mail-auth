@@ -203,7 +203,7 @@ impl TryFrom<String> for SpfResult {
 }
 
 impl SpfOutput {
-    pub(crate) fn new(domain: String) -> Self {
+    pub fn new(domain: String) -> Self {
         SpfOutput {
             result: SpfResult::None,
             report: None,
@@ -212,12 +212,12 @@ impl SpfOutput {
         }
     }
 
-    pub(crate) fn with_result(mut self, result: SpfResult) -> Self {
+    pub fn with_result(mut self, result: SpfResult) -> Self {
         self.result = result;
         self
     }
 
-    pub(crate) fn with_report(mut self, spf: &Spf) -> Self {
+    pub fn with_report(mut self, spf: &Spf) -> Self {
         match &spf.ra {
             Some(ra) if is_within_pct(spf.rp) => {
                 if match self.result {
@@ -237,7 +237,7 @@ impl SpfOutput {
         self
     }
 
-    pub(crate) fn with_explanation(mut self, explanation: String) -> Self {
+    pub fn with_explanation(mut self, explanation: String) -> Self {
         self.explanation = explanation.into();
         self
     }

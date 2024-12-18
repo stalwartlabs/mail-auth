@@ -159,7 +159,7 @@ impl Signature {
 }
 
 impl<'x> DkimOutput<'x> {
-    pub(crate) fn pass() -> Self {
+    pub fn pass() -> Self {
         DkimOutput {
             result: DkimResult::Pass,
             signature: None,
@@ -168,7 +168,7 @@ impl<'x> DkimOutput<'x> {
         }
     }
 
-    pub(crate) fn perm_err(err: Error) -> Self {
+    pub fn perm_err(err: Error) -> Self {
         DkimOutput {
             result: DkimResult::PermError(err),
             signature: None,
@@ -177,7 +177,7 @@ impl<'x> DkimOutput<'x> {
         }
     }
 
-    pub(crate) fn temp_err(err: Error) -> Self {
+    pub fn temp_err(err: Error) -> Self {
         DkimOutput {
             result: DkimResult::TempError(err),
             signature: None,
@@ -186,7 +186,7 @@ impl<'x> DkimOutput<'x> {
         }
     }
 
-    pub(crate) fn fail(err: Error) -> Self {
+    pub fn fail(err: Error) -> Self {
         DkimOutput {
             result: DkimResult::Fail(err),
             signature: None,
@@ -195,7 +195,7 @@ impl<'x> DkimOutput<'x> {
         }
     }
 
-    pub(crate) fn neutral(err: Error) -> Self {
+    pub fn neutral(err: Error) -> Self {
         DkimOutput {
             result: DkimResult::Neutral(err),
             signature: None,
@@ -204,7 +204,7 @@ impl<'x> DkimOutput<'x> {
         }
     }
 
-    pub(crate) fn dns_error(err: Error) -> Self {
+    pub fn dns_error(err: Error) -> Self {
         if matches!(&err, Error::DnsError(_)) {
             DkimOutput::temp_err(err)
         } else {
@@ -212,12 +212,17 @@ impl<'x> DkimOutput<'x> {
         }
     }
 
-    pub(crate) fn with_signature(mut self, signature: &'x Signature) -> Self {
+    pub fn with_signature(mut self, signature: &'x Signature) -> Self {
         self.signature = signature.into();
         self
     }
 
-    pub(crate) fn with_atps(mut self) -> Self {
+    pub fn with_report(mut self, report: String) -> Self {
+        self.report = Some(report);
+        self
+    }
+
+    pub fn with_atps(mut self) -> Self {
         self.is_atps = true;
         self
     }

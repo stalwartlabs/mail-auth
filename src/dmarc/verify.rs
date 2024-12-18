@@ -191,6 +191,8 @@ impl Resolver {
 mod test {
     use std::time::{Duration, Instant};
 
+    use mail_parser::MessageParser;
+
     use crate::{
         common::parse::TxtRecordParser,
         dkim::Signature,
@@ -336,6 +338,13 @@ mod test {
             );
 
             let auth_message = AuthenticatedMessage::parse(message.as_bytes()).unwrap();
+            assert_eq!(
+                auth_message,
+                AuthenticatedMessage::from_parsed(
+                    &MessageParser::new().parse(message).unwrap(),
+                    true
+                )
+            );
             let signature = Signature {
                 d: signature_domain.into(),
                 ..Default::default()

@@ -1,3 +1,7 @@
+mail-auth 0.5.1
+================================
+- Build `AuthenticatedMessage` from `mail-parser::Message`.
+
 mail-auth 0.5.0
 ================================
 - Fix: Use public suffix list for DMARC relaxed alignment verification (#37)

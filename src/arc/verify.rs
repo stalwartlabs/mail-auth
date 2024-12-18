@@ -183,6 +183,8 @@ mod test {
         time::{Duration, Instant},
     };
 
+    use mail_parser::MessageParser;
+
     use crate::{
         common::{parse::TxtRecordParser, verify::DomainKey},
         AuthenticatedMessage, DkimResult, Resolver,
@@ -206,6 +208,13 @@ mod test {
             let resolver = new_resolver(dns_records);
             let raw_message = raw_message.replace('\n', "\r\n");
             let message = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
+            assert_eq!(
+                message,
+                AuthenticatedMessage::from_parsed(
+                    &MessageParser::new().parse(&raw_message).unwrap(),
+                    true
+                )
+            );
 
             let arc = resolver.verify_arc(&message).await;
             assert_eq!(arc.result(), &DkimResult::Pass);
