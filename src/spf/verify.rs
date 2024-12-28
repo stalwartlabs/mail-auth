@@ -10,83 +10,96 @@
 
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
     time::Instant,
 };
 
-use crate::{Error, Resolver, SpfOutput, SpfResult};
+use crate::{
+    common::cache::NoCache, Error, MessageAuthenticator, Parameters, ResolverCache, SpfOutput,
+    SpfResult, Txt, MX,
+};
 
 use super::{Macro, Mechanism, Qualifier, Spf, Variables};
 
+pub struct SpfParameters<'x> {
+    ip: IpAddr,
+    domain: &'x str,
+    helo_domain: &'x str,
+    host_domain: &'x str,
+    sender: Sender<'x>,
+}
+
+enum Sender<'x> {
+    Ehlo(String),
+    MailFrom(&'x str),
+    Full(&'x str),
+}
+
 #[allow(clippy::iter_skip_zero)]
-impl Resolver {
-    /// Verifies the SPF EHLO identity
-    pub async fn verify_spf_helo(
+impl MessageAuthenticator {
+    /// Verifies the SPF record of a domain
+    pub async fn verify_spf<'x, TXT, MXX, IPV4, IPV6, PTR>(
         &self,
-        ip: IpAddr,
-        helo_domain: &str,
-        host_domain: &str,
-    ) -> SpfOutput {
-        if helo_domain.has_valid_labels() {
-            self.check_host(
-                ip,
-                helo_domain,
-                helo_domain,
-                host_domain,
-                &format!("postmaster@{helo_domain}"),
-            )
-            .await
-        } else {
-            SpfOutput::new(helo_domain.to_string()).with_result(SpfResult::None)
-        }
-    }
-
-    /// Verifies the SPF MAIL FROM identity
-    pub async fn verify_spf_sender(
-        &self,
-        ip: IpAddr,
-        helo_domain: &str,
-        host_domain: &str,
-        sender: &str,
-    ) -> SpfOutput {
-        self.check_host(
-            ip,
-            sender.rsplit_once('@').map_or(helo_domain, |(_, d)| d),
-            helo_domain,
-            host_domain,
-            sender,
-        )
-        .await
-    }
-
-    /// Verifies both the SPF EHLO and MAIL FROM identities
-    pub async fn verify_spf(
-        &self,
-        ip: IpAddr,
-        helo_domain: &str,
-        host_domain: &str,
-        mail_from: &str,
-    ) -> SpfOutput {
-        // Verify HELO identity
-        let output = self.verify_spf_helo(ip, helo_domain, host_domain).await;
-        if matches!(output.result(), SpfResult::Pass) {
-            // Verify MAIL FROM identity
-            self.verify_spf_sender(ip, helo_domain, host_domain, mail_from)
-                .await
-        } else {
-            output
+        params: impl Into<Parameters<'x, SpfParameters<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
+    ) -> SpfOutput
+    where
+        TXT: ResolverCache<String, Txt> + 'x,
+        MXX: ResolverCache<String, Arc<Vec<MX>>> + 'x,
+        IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>> + 'x,
+        IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>> + 'x,
+        PTR: ResolverCache<IpAddr, Arc<Vec<String>>> + 'x,
+    {
+        let params = params.into();
+        match &params.params.sender {
+            Sender::Full(sender) => {
+                // Verify HELO identity
+                let output = self
+                    .check_host(params.clone_with(SpfParameters::verify_ehlo(
+                        params.params.ip,
+                        params.params.helo_domain,
+                        params.params.host_domain,
+                    )))
+                    .await;
+                if matches!(output.result(), SpfResult::Pass) {
+                    // Verify MAIL FROM identity
+                    self.check_host(params.clone_with(SpfParameters::verify_mail_from(
+                        params.params.ip,
+                        params.params.helo_domain,
+                        params.params.host_domain,
+                        sender,
+                    )))
+                    .await
+                } else {
+                    output
+                }
+            }
+            _ => self.check_host(params).await,
         }
     }
 
     #[allow(clippy::while_let_on_iterator)]
     #[allow(clippy::iter_skip_zero)]
-    pub async fn check_host(
+    pub async fn check_host<'x, TXT, MXX, IPV4, IPV6, PTR>(
         &self,
-        ip: IpAddr,
-        domain: &str,
-        helo_domain: &str,
-        host_domain: &str,
-        sender: &str,
-    ) -> SpfOutput {
+        params: Parameters<'x, SpfParameters<'x>, TXT, MXX, IPV4, IPV6, PTR>,
+    ) -> SpfOutput
+    where
+        TXT: ResolverCache<String, Txt>,
+        MXX: ResolverCache<String, Arc<Vec<MX>>>,
+        IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>>,
+        IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>>,
+        PTR: ResolverCache<IpAddr, Arc<Vec<String>>>,
+    {
+        let domain = params.params.domain;
+        let ip = params.params.ip;
+        let helo_domain = params.params.helo_domain;
+        let host_domain = params.params.host_domain;
+        let sender = match &params.params.sender {
+            Sender::Ehlo(sender) => sender.as_str(),
+            Sender::MailFrom(sender) => sender,
+            Sender::Full(sender) => sender,
+        };
+
         let output = SpfOutput::new(domain.to_string());
         if domain.is_empty() || domain.len() > 255 || !domain.has_valid_labels() {
             return output.with_result(SpfResult::None);
@@ -104,7 +117,7 @@ impl Resolver {
         vars.set_helo_domain(helo_domain.as_bytes());
 
         let mut lookup_limit = LookupLimit::new();
-        let mut spf_record = match self.txt_lookup::<Spf>(domain).await {
+        let mut spf_record = match self.txt_lookup::<Spf>(domain, params.cache_txt).await {
             Ok(spf_record) => spf_record,
             Err(err) => return output.with_result(err.into()),
         };
@@ -124,7 +137,7 @@ impl Resolver {
                             .with_report(&spf_record);
                     }
                     if let Some(ptr) = self
-                        .ptr_lookup(ip)
+                        .ptr_lookup(ip, params.cache_ptr)
                         .await
                         .ok()
                         .and_then(|ptrs| ptrs.first().map(|ptr| ptr.as_bytes().to_vec()))
@@ -154,6 +167,8 @@ impl Resolver {
                                 ip,
                                 *ip4_mask,
                                 *ip6_mask,
+                                params.cache_ipv4,
+                                params.cache_ipv6,
                             )
                             .await
                         {
@@ -179,7 +194,10 @@ impl Resolver {
 
                         let mut matches = false;
                         match self
-                            .mx_lookup(macro_string.eval(&vars, &domain, true).as_ref())
+                            .mx_lookup(
+                                macro_string.eval(&vars, &domain, true).as_ref(),
+                                params.cache_mx,
+                            )
                             .await
                         {
                             Ok(records) => {
@@ -194,7 +212,16 @@ impl Resolver {
                                             .with_report(&spf_record);
                                     }
 
-                                    match self.ip_matches(exchange, ip, *ip4_mask, *ip6_mask).await
+                                    match self
+                                        .ip_matches(
+                                            exchange,
+                                            ip,
+                                            *ip4_mask,
+                                            *ip6_mask,
+                                            params.cache_ipv4,
+                                            params.cache_ipv6,
+                                        )
+                                        .await
                                     {
                                         Ok(true) => {
                                             matches = true;
@@ -226,7 +253,10 @@ impl Resolver {
                         }
 
                         let target_name = macro_string.eval(&vars, &domain, true);
-                        match self.txt_lookup::<Spf>(target_name.as_ref()).await {
+                        match self
+                            .txt_lookup::<Spf>(target_name.as_ref(), params.cache_txt)
+                            .await
+                        {
                             Ok(included_spf) => {
                                 let new_domain = target_name.to_string();
                                 include_stack.push((
@@ -266,11 +296,19 @@ impl Resolver {
                         let target_sub_addr = format!(".{target_addr}");
                         let mut matches = false;
 
-                        if let Ok(records) = self.ptr_lookup(ip).await {
+                        if let Ok(records) = self.ptr_lookup(ip, params.cache_ptr).await {
                             for record in records.iter() {
                                 if lookup_limit.can_lookup() {
-                                    if let Ok(true) =
-                                        self.ip_matches(record, ip, u32::MAX, u128::MAX).await
+                                    if let Ok(true) = self
+                                        .ip_matches(
+                                            record,
+                                            ip,
+                                            u32::MAX,
+                                            u128::MAX,
+                                            params.cache_ipv4,
+                                            params.cache_ipv6,
+                                        )
+                                        .await
                                     {
                                         matches = record == &target_addr
                                             || record
@@ -294,7 +332,11 @@ impl Resolver {
                         }
 
                         if let Ok(result) = self
-                            .exists(macro_string.eval(&vars, &domain, true).as_ref())
+                            .exists(
+                                macro_string.eval(&vars, &domain, true).as_ref(),
+                                params.cache_ipv4,
+                                params.cache_ipv6,
+                            )
                             .await
                         {
                             result
@@ -335,7 +377,10 @@ impl Resolver {
                     }
 
                     let target_name = macro_string.eval(&vars, &domain, true);
-                    match self.txt_lookup::<Spf>(target_name.as_ref()).await {
+                    match self
+                        .txt_lookup::<Spf>(target_name.as_ref(), params.cache_txt)
+                        .await
+                    {
                         Ok(redirect_spf) => {
                             let new_domain = target_name.to_string();
                             spf_record = redirect_spf;
@@ -368,7 +413,10 @@ impl Resolver {
         // Evaluate explain
         if let (Some(macro_string), Some(SpfResult::Fail { .. })) = (&spf_record.exp, &result) {
             if let Ok(macro_string) = self
-                .txt_lookup::<Macro>(macro_string.eval(&vars, &domain, true).to_string())
+                .txt_lookup::<Macro>(
+                    macro_string.eval(&vars, &domain, true).to_string(),
+                    params.cache_txt,
+                )
                 .await
             {
                 return output
@@ -389,19 +437,102 @@ impl Resolver {
         ip: IpAddr,
         ip4_mask: u32,
         ip6_mask: u128,
+        cache_ipv4: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
+        cache_ipv6: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
     ) -> crate::Result<bool> {
         Ok(match ip {
             IpAddr::V4(ip) => self
-                .ipv4_lookup(target_name)
+                .ipv4_lookup(target_name, cache_ipv4)
                 .await?
                 .iter()
                 .any(|addr| ip.matches_ipv4_mask(addr, ip4_mask)),
             IpAddr::V6(ip) => self
-                .ipv6_lookup(target_name)
+                .ipv6_lookup(target_name, cache_ipv6)
                 .await?
                 .iter()
                 .any(|addr| ip.matches_ipv6_mask(addr, ip6_mask)),
         })
+    }
+}
+
+impl<'x> SpfParameters<'x> {
+    /// Verifies the SPF EHLO identity
+    pub fn verify_ehlo(
+        ip: IpAddr,
+        helo_domain: &'x str,
+        host_domain: &'x str,
+    ) -> SpfParameters<'x> {
+        SpfParameters {
+            ip,
+            domain: helo_domain,
+            helo_domain,
+            host_domain,
+            sender: Sender::Ehlo(format!("postmaster@{helo_domain}")),
+        }
+    }
+
+    /// Verifies the SPF MAIL FROM identity
+    pub fn verify_mail_from(
+        ip: IpAddr,
+        helo_domain: &'x str,
+        host_domain: &'x str,
+        sender: &'x str,
+    ) -> SpfParameters<'x> {
+        SpfParameters {
+            ip,
+            domain: sender.rsplit_once('@').map_or(helo_domain, |(_, d)| d),
+            helo_domain,
+            host_domain,
+            sender: Sender::MailFrom(sender),
+        }
+    }
+
+    /// Verifies both the SPF EHLO and MAIL FROM identities
+    pub fn verify(
+        ip: IpAddr,
+        helo_domain: &'x str,
+        host_domain: &'x str,
+        sender: &'x str,
+    ) -> SpfParameters<'x> {
+        SpfParameters {
+            ip,
+            domain: sender.rsplit_once('@').map_or(helo_domain, |(_, d)| d),
+            helo_domain,
+            host_domain,
+            sender: Sender::Full(sender),
+        }
+    }
+
+    pub fn new(
+        ip: IpAddr,
+        domain: &'x str,
+        helo_domain: &'x str,
+        host_domain: &'x str,
+        sender: &'x str,
+    ) -> Self {
+        SpfParameters {
+            ip,
+            domain,
+            helo_domain,
+            host_domain,
+            sender: Sender::Full(sender),
+        }
+    }
+}
+
+impl<'x> From<SpfParameters<'x>>
+    for Parameters<
+        'x,
+        SpfParameters<'x>,
+        NoCache<String, Txt>,
+        NoCache<String, Arc<Vec<MX>>>,
+        NoCache<String, Arc<Vec<Ipv4Addr>>>,
+        NoCache<String, Arc<Vec<Ipv6Addr>>>,
+        NoCache<IpAddr, Arc<Vec<String>>>,
+    >
+{
+    fn from(params: SpfParameters<'x>) -> Self {
+        Parameters::new(params)
     }
 }
 
@@ -541,13 +672,16 @@ mod test {
     };
 
     use crate::{
-        common::parse::TxtRecordParser,
+        common::{cache::test::DummyCaches, parse::TxtRecordParser},
         spf::{Macro, Spf},
-        Resolver, SpfResult, MX,
+        MessageAuthenticator, SpfResult, MX,
     };
+
+    use super::SpfParameters;
 
     #[tokio::test]
     async fn spf_verify() {
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
         let valid_until = Instant::now() + Duration::from_secs(30);
         let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         test_dir.push("resources");
@@ -557,9 +691,9 @@ mod test {
             let file_name = file_name.unwrap().path();
             println!("===== {} =====", file_name.display());
             let test_suite = String::from_utf8(fs::read(&file_name).unwrap()).unwrap();
+            let caches = DummyCaches::new();
 
             for test in test_suite.split("---\n") {
-                let resolver = Resolver::new_system_conf().unwrap();
                 let mut test_name = "";
                 let mut last_test_name = "";
                 let mut helo = "";
@@ -575,105 +709,107 @@ mod test {
                         line
                     };
 
-                    #[cfg(any(test, feature = "test"))]
-                    {
-                        if let Some(name) = line.strip_prefix("name:") {
-                            test_name = name.trim();
-                        } else if let Some(record) = line.strip_prefix("spf:") {
-                            let (name, record) = record.trim().split_once(' ').unwrap();
-                            resolver.txt_add(
-                                name.trim().to_string(),
-                                Spf::parse(record.as_bytes()),
-                                valid_until,
-                            );
-                        } else if let Some(record) = line.strip_prefix("exp:") {
-                            let (name, record) = record.trim().split_once(' ').unwrap();
-                            resolver.txt_add(
-                                name.trim().to_string(),
-                                Macro::parse(record.as_bytes()),
-                                valid_until,
-                            );
-                        } else if let Some(record) = line.strip_prefix("a:") {
-                            let (name, record) = record.trim().split_once(' ').unwrap();
-                            resolver.ipv4_add(
-                                name.trim().to_string(),
-                                record
-                                    .split(',')
-                                    .map(|item| item.trim().parse::<Ipv4Addr>().unwrap())
-                                    .collect(),
-                                valid_until,
-                            );
-                        } else if let Some(record) = line.strip_prefix("aaaa:") {
-                            let (name, record) = record.trim().split_once(' ').unwrap();
-                            resolver.ipv6_add(
-                                name.trim().to_string(),
-                                record
-                                    .split(',')
-                                    .map(|item| item.trim().parse::<Ipv6Addr>().unwrap())
-                                    .collect(),
-                                valid_until,
-                            );
-                        } else if let Some(record) = line.strip_prefix("ptr:") {
-                            let (name, record) = record.trim().split_once(' ').unwrap();
-                            resolver.ptr_add(
-                                name.trim().parse::<IpAddr>().unwrap(),
-                                record
-                                    .split(',')
-                                    .map(|item| item.trim().to_string())
-                                    .collect(),
-                                valid_until,
-                            );
-                        } else if let Some(record) = line.strip_prefix("mx:") {
-                            let (name, record) = record.trim().split_once(' ').unwrap();
-                            let mut mxs = Vec::new();
-                            for (pos, item) in record.split(',').enumerate() {
-                                let ip = item.trim().parse::<IpAddr>().unwrap();
-                                let mx_name = format!("mx.{ip}.{pos}");
-                                match ip {
-                                    IpAddr::V4(ip) => {
-                                        resolver.ipv4_add(mx_name.clone(), vec![ip], valid_until)
-                                    }
-                                    IpAddr::V6(ip) => {
-                                        resolver.ipv6_add(mx_name.clone(), vec![ip], valid_until)
-                                    }
+                    if let Some(name) = line.strip_prefix("name:") {
+                        test_name = name.trim();
+                    } else if let Some(record) = line.strip_prefix("spf:") {
+                        let (name, record) = record.trim().split_once(' ').unwrap();
+                        caches.txt_add(
+                            name.trim().to_string(),
+                            Spf::parse(record.as_bytes()),
+                            valid_until,
+                        );
+                    } else if let Some(record) = line.strip_prefix("exp:") {
+                        let (name, record) = record.trim().split_once(' ').unwrap();
+                        caches.txt_add(
+                            name.trim().to_string(),
+                            Macro::parse(record.as_bytes()),
+                            valid_until,
+                        );
+                    } else if let Some(record) = line.strip_prefix("a:") {
+                        let (name, record) = record.trim().split_once(' ').unwrap();
+                        caches.ipv4_add(
+                            name.trim().to_string(),
+                            record
+                                .split(',')
+                                .map(|item| item.trim().parse::<Ipv4Addr>().unwrap())
+                                .collect(),
+                            valid_until,
+                        );
+                    } else if let Some(record) = line.strip_prefix("aaaa:") {
+                        let (name, record) = record.trim().split_once(' ').unwrap();
+                        caches.ipv6_add(
+                            name.trim().to_string(),
+                            record
+                                .split(',')
+                                .map(|item| item.trim().parse::<Ipv6Addr>().unwrap())
+                                .collect(),
+                            valid_until,
+                        );
+                    } else if let Some(record) = line.strip_prefix("ptr:") {
+                        let (name, record) = record.trim().split_once(' ').unwrap();
+                        caches.ptr_add(
+                            name.trim().parse::<IpAddr>().unwrap(),
+                            record
+                                .split(',')
+                                .map(|item| item.trim().to_string())
+                                .collect(),
+                            valid_until,
+                        );
+                    } else if let Some(record) = line.strip_prefix("mx:") {
+                        let (name, record) = record.trim().split_once(' ').unwrap();
+                        let mut mxs = Vec::new();
+                        for (pos, item) in record.split(',').enumerate() {
+                            let ip = item.trim().parse::<IpAddr>().unwrap();
+                            let mx_name = format!("mx.{ip}.{pos}");
+                            match ip {
+                                IpAddr::V4(ip) => {
+                                    caches.ipv4_add(mx_name.clone(), vec![ip], valid_until)
                                 }
-                                mxs.push(MX {
-                                    exchanges: vec![mx_name],
-                                    preference: (pos + 1) as u16,
-                                });
+                                IpAddr::V6(ip) => {
+                                    caches.ipv6_add(mx_name.clone(), vec![ip], valid_until)
+                                }
                             }
-                            resolver.mx_add(name.trim().to_string(), mxs, valid_until);
-                        } else if let Some(value) = line.strip_prefix("domain:") {
-                            helo = value.trim();
-                        } else if let Some(value) = line.strip_prefix("sender:") {
-                            mail_from = value.trim();
-                        } else if let Some(value) = line.strip_prefix("ip:") {
-                            client_ip = value.trim().parse().unwrap();
-                        } else if let Some(value) = line.strip_prefix("expect:") {
-                            let value = value.trim();
-                            let (result, exp): (SpfResult, &str) =
-                                if let Some((result, exp)) = value.split_once(' ') {
-                                    (result.trim().try_into().unwrap(), exp.trim())
-                                } else {
-                                    (value.try_into().unwrap(), "")
-                                };
-                            let output = resolver
-                                .verify_spf(client_ip, helo, "localdomain.org", mail_from)
-                                .await;
-                            assert_eq!(
+                            mxs.push(MX {
+                                exchanges: vec![mx_name],
+                                preference: (pos + 1) as u16,
+                            });
+                        }
+                        caches.mx_add(name.trim().to_string(), mxs, valid_until);
+                    } else if let Some(value) = line.strip_prefix("domain:") {
+                        helo = value.trim();
+                    } else if let Some(value) = line.strip_prefix("sender:") {
+                        mail_from = value.trim();
+                    } else if let Some(value) = line.strip_prefix("ip:") {
+                        client_ip = value.trim().parse().unwrap();
+                    } else if let Some(value) = line.strip_prefix("expect:") {
+                        let value = value.trim();
+                        let (result, exp): (SpfResult, &str) =
+                            if let Some((result, exp)) = value.split_once(' ') {
+                                (result.trim().try_into().unwrap(), exp.trim())
+                            } else {
+                                (value.try_into().unwrap(), "")
+                            };
+                        let output = resolver
+                            .verify_spf(caches.parameters(SpfParameters::verify(
+                                client_ip,
+                                helo,
+                                "localdomain.org",
+                                mail_from,
+                            )))
+                            .await;
+                        assert_eq!(
                                 output.result(),
                                 result,
                                 "Failed for {test_name:?}, test {test_num}, ehlo: {helo}, mail-from: {mail_from}.",
                             );
 
-                            if !exp.is_empty() {
-                                assert_eq!(Some(exp.to_string()).as_deref(), output.explanation());
-                            }
-                            test_num += 1;
-                            if test_name != last_test_name {
-                                println!("Passed test {test_name:?}");
-                                last_test_name = test_name;
-                            }
+                        if !exp.is_empty() {
+                            assert_eq!(Some(exp.to_string()).as_deref(), output.explanation());
+                        }
+                        test_num += 1;
+                        if test_name != last_test_name {
+                            println!("Passed test {test_name:?}");
+                            last_test_name = test_name;
                         }
                     }
                 }

@@ -8,7 +8,11 @@
  * except according to those terms.
  */
 
-use std::time::SystemTime;
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+    time::SystemTime,
+};
 
 use crate::{
     common::{
@@ -17,14 +21,27 @@ use crate::{
         verify::{DomainKey, VerifySignature},
     },
     dkim::{verify::Verifier, Canonicalization},
-    ArcOutput, AuthenticatedMessage, DkimResult, Error, Resolver,
+    ArcOutput, AuthenticatedMessage, DkimResult, Error, MessageAuthenticator, Parameters,
+    ResolverCache, Txt, MX,
 };
 
 use super::{ChainValidation, Set};
 
-impl Resolver {
+impl MessageAuthenticator {
     /// Verifies ARC headers of an RFC5322 message.
-    pub async fn verify_arc<'x>(&self, message: &'x AuthenticatedMessage<'x>) -> ArcOutput<'x> {
+    pub async fn verify_arc<'x, TXT, MXX, IPV4, IPV6, PTR>(
+        &self,
+        params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
+    ) -> ArcOutput<'x>
+    where
+        TXT: ResolverCache<String, Txt> + 'x,
+        MXX: ResolverCache<String, Arc<Vec<MX>>> + 'x,
+        IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>> + 'x,
+        IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>> + 'x,
+        PTR: ResolverCache<IpAddr, Arc<Vec<String>>> + 'x,
+    {
+        let params = params.into();
+        let message = params.params;
         let arc_headers = message.ams_headers.len();
         if arc_headers == 0 {
             return ArcOutput::default();
@@ -120,7 +137,10 @@ impl Resolver {
         let mut headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
         // Obtain record
-        let record = match self.txt_lookup::<DomainKey>(signature.domain_key()).await {
+        let record = match self
+            .txt_lookup::<DomainKey>(signature.domain_key(), params.cache_txt)
+            .await
+        {
             Ok(record) => record,
             Err(err) => {
                 return output.with_result(err.into());
@@ -137,7 +157,10 @@ impl Resolver {
             // Obtain record
             let header = &set.seal;
             let seal = &header.header;
-            let record = match self.txt_lookup::<DomainKey>(seal.domain_key()).await {
+            let record = match self
+                .txt_lookup::<DomainKey>(seal.domain_key(), params.cache_txt)
+                .await
+            {
                 Ok(record) => record,
                 Err(err) => {
                     return output.with_result(err.into());
@@ -186,8 +209,9 @@ mod test {
     use mail_parser::MessageParser;
 
     use crate::{
-        common::{parse::TxtRecordParser, verify::DomainKey},
-        AuthenticatedMessage, DkimResult, Resolver,
+        common::{cache::test::DummyCaches, parse::TxtRecordParser, verify::DomainKey},
+        dkim::verify::test::new_cache,
+        AuthenticatedMessage, DkimResult, MessageAuthenticator,
     };
 
     #[tokio::test]
@@ -195,6 +219,7 @@ mod test {
         let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         test_dir.push("resources");
         test_dir.push("arc");
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
 
         for file_name in fs::read_dir(&test_dir).unwrap() {
             let file_name = file_name.unwrap().path();
@@ -205,7 +230,7 @@ mod test {
 
             let test = String::from_utf8(fs::read(&file_name).unwrap()).unwrap();
             let (dns_records, raw_message) = test.split_once("\n\n").unwrap();
-            let resolver = new_resolver(dns_records);
+            let caches = new_cache(dns_records);
             let raw_message = raw_message.replace('\n', "\r\n");
             let message = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
             assert_eq!(
@@ -216,28 +241,11 @@ mod test {
                 )
             );
 
-            let arc = resolver.verify_arc(&message).await;
+            let arc = resolver.verify_arc(caches.parameters(&message)).await;
             assert_eq!(arc.result(), &DkimResult::Pass);
 
-            let dkim = resolver.verify_dkim(&message).await;
+            let dkim = resolver.verify_dkim(caches.parameters(&message)).await;
             assert!(dkim.iter().any(|o| o.result() == &DkimResult::Pass));
         }
-    }
-
-    fn new_resolver(dns_records: &str) -> Resolver {
-        let resolver = Resolver::new_system_conf().unwrap();
-        for (key, value) in dns_records
-            .split('\n')
-            .filter_map(|r| r.split_once(' ').map(|(a, b)| (a, b.as_bytes())))
-        {
-            #[cfg(any(test, feature = "test"))]
-            resolver.txt_add(
-                format!("{key}."),
-                DomainKey::parse(value).unwrap(),
-                Instant::now() + Duration::new(3200, 0),
-            );
-        }
-
-        resolver
     }
 }

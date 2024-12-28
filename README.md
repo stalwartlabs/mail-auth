@@ -35,14 +35,14 @@ Features:
 ### DKIM Signature Verification
 
 ```rust
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Parse message
     let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
 
     // Validate signature
-    let result = resolver.verify_dkim(&authenticated_message).await;
+    let result = authenticator.verify_dkim(&authenticated_message).await;
 
     // Make sure all signatures passed verification
     assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
@@ -85,14 +85,14 @@ Features:
 ### ARC Chain Verification
 
 ```rust
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Parse message
     let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
 
     // Validate ARC chain
-    let result = resolver.verify_arc(&authenticated_message).await;
+    let result = authenticator.verify_arc(&authenticated_message).await;
 
     // Make sure ARC passed verification
     assert_eq!(result.result(), &DkimResult::Pass);
@@ -101,15 +101,15 @@ Features:
 ### ARC Chain Sealing
 
 ```rust
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Parse message to be sealed
     let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
 
     // Verify ARC and DKIM signatures
-    let arc_result = resolver.verify_arc(&authenticated_message).await;
-    let dkim_result = resolver.verify_dkim(&authenticated_message).await;
+    let arc_result = authenticator.verify_arc(&authenticated_message).await;
+    let dkim_result = authenticator.verify_dkim(&authenticated_message).await;
 
     // Build Authenticated-Results header
     let auth_results = AuthenticationResults::new("mx.mydomain.org")
@@ -137,18 +137,27 @@ Features:
 ### SPF Policy Evaluation
 
 ```rust
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Verify HELO identity
-    let result = resolver
-        .verify_spf_helo("127.0.0.1".parse().unwrap(), "gmail.com", "my-local-domain.org")
+    let result = authenticator
+        .verify_spf(SpfParameters::verify_ehlo(
+            "127.0.0.1".parse().unwrap(),
+            "gmail.com",
+            "my-local-domain.org",
+        ))
         .await;
     assert_eq!(result.result(), SpfResult::Fail);
 
     // Verify MAIL-FROM identity
-    let result = resolver
-        .verify_spf_sender("::1".parse().unwrap(), "gmail.com", "my-local-domain.org", "sender@gmail.com")
+    let result = authenticator
+        .verify_spf(SpfParameters::verify_mail_from(
+            "::1".parse().unwrap(),
+            "gmail.com",
+            "my-local-domain.org",
+            "sender@gmail.com",
+        ))
         .await;
     assert_eq!(result.result(), SpfResult::Fail);
 ```
@@ -156,26 +165,33 @@ Features:
 ### DMARC Policy Evaluation
 
 ```rust
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Verify DKIM signatures
     let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
-    let dkim_result = resolver.verify_dkim(&authenticated_message).await;
+    let dkim_result = authenticator.verify_dkim(&authenticated_message).await;
 
     // Verify SPF MAIL-FROM identity
-    let spf_result = resolver
-        .verify_spf_sender("::1".parse().unwrap(), "example.org", "my-local-domain.org", "sender@example.org")
+    let spf_result = authenticator
+        .verify_spf(SpfParameters::verify_mail_from(
+            "::1".parse().unwrap(),
+            "example.org",
+            "my-host-domain.org",
+            "sender@example.org",
+        ))
         .await;
 
     // Verify DMARC
-    let dmarc_result = resolver
+    let dmarc_result = authenticator
         .verify_dmarc(
-            &authenticated_message,
-            &dkim_result,
-            "example.org",
-            &spf_result,
-            |domain| psl::domain_str(domain).unwrap_or(domain),
+            DmarcParameters::new(
+                &authenticated_message,
+                &dkim_result,
+                "example.org",
+                &spf_result,
+            )
+            .with_domain_suffix_fn(|domain| psl::domain_str(domain).unwrap_or(domain)),
         )
         .await;
     assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);

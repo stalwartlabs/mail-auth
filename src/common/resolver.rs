@@ -12,14 +12,14 @@ use std::{
     borrow::Cow,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
+    time::Instant,
 };
 
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     error::{ResolveError, ResolveErrorKind},
-    proto::rr::RecordType,
     system_conf::read_system_conf,
-    AsyncResolver, Name,
+    AsyncResolver, Name, TokioAsyncResolver,
 };
 
 use crate::{
@@ -27,83 +27,54 @@ use crate::{
     dmarc::Dmarc,
     mta_sts::{MtaSts, TlsRpt},
     spf::{Macro, Spf},
-    Error, IpLookupStrategy, Resolver, Txt, MX,
+    Error, IpLookupStrategy, MessageAuthenticator, ResolverCache, Txt, MX,
 };
 
-use super::{
-    lru::{DnsCache, LruCache},
-    parse::TxtRecordParser,
-    verify::DomainKey,
-};
+use super::{parse::TxtRecordParser, verify::DomainKey};
 
-impl Resolver {
+pub struct DnsEntry<T> {
+    pub entry: T,
+    pub expires: Instant,
+}
+
+impl MessageAuthenticator {
     pub fn new_cloudflare_tls() -> Result<Self, ResolveError> {
-        Self::with_capacity(
-            ResolverConfig::cloudflare_tls(),
-            ResolverOpts::default(),
-            128,
-        )
+        Self::new(ResolverConfig::cloudflare_tls(), ResolverOpts::default())
     }
 
     pub fn new_cloudflare() -> Result<Self, ResolveError> {
-        Self::with_capacity(ResolverConfig::cloudflare(), ResolverOpts::default(), 128)
+        Self::new(ResolverConfig::cloudflare(), ResolverOpts::default())
     }
 
     pub fn new_google() -> Result<Self, ResolveError> {
-        Self::with_capacity(ResolverConfig::google(), ResolverOpts::default(), 128)
+        Self::new(ResolverConfig::google(), ResolverOpts::default())
     }
 
     pub fn new_quad9() -> Result<Self, ResolveError> {
-        Self::with_capacity(ResolverConfig::quad9(), ResolverOpts::default(), 128)
+        Self::new(ResolverConfig::quad9(), ResolverOpts::default())
     }
 
     pub fn new_quad9_tls() -> Result<Self, ResolveError> {
-        Self::with_capacity(ResolverConfig::quad9_tls(), ResolverOpts::default(), 128)
+        Self::new(ResolverConfig::quad9_tls(), ResolverOpts::default())
     }
 
     pub fn new_system_conf() -> Result<Self, ResolveError> {
         let (config, options) = read_system_conf()?;
-        Self::with_capacity(config, options, 128)
+        Self::new(config, options)
     }
 
-    pub fn with_capacity(
-        config: ResolverConfig,
-        options: ResolverOpts,
-        capacity: usize,
-    ) -> Result<Self, ResolveError> {
-        Ok(Self {
-            resolver: AsyncResolver::tokio(config, options),
-            cache_txt: LruCache::with_capacity(capacity),
-            cache_mx: LruCache::with_capacity(capacity),
-            cache_ipv4: LruCache::with_capacity(capacity),
-            cache_ipv6: LruCache::with_capacity(capacity),
-            cache_ptr: LruCache::with_capacity(capacity),
-        })
+    pub fn new(config: ResolverConfig, options: ResolverOpts) -> Result<Self, ResolveError> {
+        Ok(MessageAuthenticator(AsyncResolver::tokio(config, options)))
     }
 
-    pub fn with_capacities(
-        config: ResolverConfig,
-        options: ResolverOpts,
-        txt_capacity: usize,
-        mx_capacity: usize,
-        ipv4_capacity: usize,
-        ipv6_capacity: usize,
-        ptr_capacity: usize,
-    ) -> Result<Self, ResolveError> {
-        Ok(Self {
-            resolver: AsyncResolver::tokio(config, options),
-            cache_txt: LruCache::with_capacity(txt_capacity),
-            cache_mx: LruCache::with_capacity(mx_capacity),
-            cache_ipv4: LruCache::with_capacity(ipv4_capacity),
-            cache_ipv6: LruCache::with_capacity(ipv6_capacity),
-            cache_ptr: LruCache::with_capacity(ptr_capacity),
-        })
+    pub fn resolver(&self) -> &TokioAsyncResolver {
+        &self.0
     }
 
     pub async fn txt_raw_lookup(&self, key: impl IntoFqdn<'_>) -> crate::Result<Vec<u8>> {
         let mut result = vec![];
         for record in self
-            .resolver
+            .0
             .txt_lookup(Name::from_str_relaxed(key.into_fqdn().as_ref())?)
             .await?
             .as_lookup()
@@ -122,9 +93,10 @@ impl Resolver {
     pub async fn txt_lookup<'x, T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
         &self,
         key: impl IntoFqdn<'x>,
+        cache: Option<&impl ResolverCache<String, Txt>>,
     ) -> crate::Result<Arc<T>> {
         let key = key.into_fqdn();
-        if let Some(value) = self.cache_txt.get(key.as_ref()) {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get(key.as_ref())) {
             return T::unwrap_txt(value);
         }
 
@@ -134,21 +106,21 @@ impl Resolver {
         }
 
         let txt_lookup = self
-            .resolver
+            .0
             .txt_lookup(Name::from_str_relaxed(key.as_ref())?)
             .await?;
         let mut result = Err(Error::InvalidRecordType);
         let records = txt_lookup.as_lookup().record_iter().filter_map(|r| {
             let txt_data = r.data()?.as_txt()?.txt_data();
             match txt_data.len() {
-                1 => Cow::from(txt_data[0].as_ref()).into(),
+                1 => Some(Cow::from(txt_data[0].as_ref())),
                 0 => None,
                 _ => {
                     let mut entry = Vec::with_capacity(255 * txt_data.len());
                     for data in txt_data {
                         entry.extend_from_slice(data);
                     }
-                    Cow::from(entry).into()
+                    Some(Cow::from(entry))
                 }
             }
         });
@@ -159,16 +131,23 @@ impl Resolver {
                 break;
             }
         }
-        T::unwrap_txt(self.cache_txt.insert(
-            key.into_owned(),
-            result.into(),
-            txt_lookup.valid_until(),
-        ))
+
+        let result: Txt = result.into();
+
+        if let Some(cache) = cache {
+            cache.insert(key.into_owned(), result.clone(), txt_lookup.valid_until());
+        }
+
+        T::unwrap_txt(result)
     }
 
-    pub async fn mx_lookup<'x>(&self, key: impl IntoFqdn<'x>) -> crate::Result<Arc<Vec<MX>>> {
+    pub async fn mx_lookup<'x>(
+        &self,
+        key: impl IntoFqdn<'x>,
+        cache: Option<&impl ResolverCache<String, Arc<Vec<MX>>>>,
+    ) -> crate::Result<Arc<Vec<MX>>> {
         let key = key.into_fqdn();
-        if let Some(value) = self.cache_mx.get(key.as_ref()) {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get(key.as_ref())) {
             return Ok(value);
         }
 
@@ -178,7 +157,7 @@ impl Resolver {
         }
 
         let mx_lookup = self
-            .resolver
+            .0
             .mx_lookup(Name::from_str_relaxed(key.as_ref())?)
             .await?;
         let mx_records = mx_lookup.as_lookup().records();
@@ -200,18 +179,22 @@ impl Resolver {
         }
 
         records.sort_unstable_by(|a, b| a.preference.cmp(&b.preference));
+        let records = Arc::new(records);
 
-        Ok(self
-            .cache_mx
-            .insert(key.into_owned(), Arc::new(records), mx_lookup.valid_until()))
+        if let Some(cache) = cache {
+            cache.insert(key.into_owned(), records.clone(), mx_lookup.valid_until());
+        }
+
+        Ok(records)
     }
 
     pub async fn ipv4_lookup<'x>(
         &self,
         key: impl IntoFqdn<'x>,
+        cache: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
     ) -> crate::Result<Arc<Vec<Ipv4Addr>>> {
         let key = key.into_fqdn();
-        if let Some(value) = self.cache_ipv4.get(key.as_ref()) {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get(key.as_ref())) {
             return Ok(value);
         }
 
@@ -220,27 +203,44 @@ impl Resolver {
             return mock_resolve(key.as_ref());
         }
 
-        let ipv4_lookup = self
-            .resolver
-            .ipv4_lookup(Name::from_str_relaxed(key.as_ref())?)
-            .await?;
-        let ips: Vec<Ipv4Addr> = ipv4_lookup
+        let ipv4_lookup = self.ipv4_lookup_raw(key.as_ref()).await?;
+
+        if let Some(cache) = cache {
+            cache.insert(
+                key.into_owned(),
+                ipv4_lookup.entry.clone(),
+                ipv4_lookup.expires,
+            );
+        }
+
+        Ok(ipv4_lookup.entry)
+    }
+
+    pub async fn ipv4_lookup_raw<'x>(
+        &self,
+        key: &str,
+    ) -> crate::Result<DnsEntry<Arc<Vec<Ipv4Addr>>>> {
+        let ipv4_lookup = self.0.ipv4_lookup(Name::from_str_relaxed(key)?).await?;
+        let ips: Arc<Vec<Ipv4Addr>> = ipv4_lookup
             .as_lookup()
             .record_iter()
             .filter_map(|r| r.data()?.as_a()?.0.into())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Ipv4Addr>>()
+            .into();
 
-        Ok(self
-            .cache_ipv4
-            .insert(key.into_owned(), Arc::new(ips), ipv4_lookup.valid_until()))
+        Ok(DnsEntry {
+            entry: ips,
+            expires: ipv4_lookup.valid_until(),
+        })
     }
 
     pub async fn ipv6_lookup<'x>(
         &self,
         key: impl IntoFqdn<'x>,
+        cache: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
     ) -> crate::Result<Arc<Vec<Ipv6Addr>>> {
         let key = key.into_fqdn();
-        if let Some(value) = self.cache_ipv6.get(key.as_ref()) {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get(key.as_ref())) {
             return Ok(value);
         }
 
@@ -249,19 +249,35 @@ impl Resolver {
             return mock_resolve(key.as_ref());
         }
 
-        let ipv6_lookup = self
-            .resolver
-            .ipv6_lookup(Name::from_str_relaxed(key.as_ref())?)
-            .await?;
-        let ips = ipv6_lookup
+        let ipv6_lookup = self.ipv6_lookup_raw(key.as_ref()).await?;
+
+        if let Some(cache) = cache {
+            cache.insert(
+                key.into_owned(),
+                ipv6_lookup.entry.clone(),
+                ipv6_lookup.expires,
+            );
+        }
+
+        Ok(ipv6_lookup.entry)
+    }
+
+    pub async fn ipv6_lookup_raw<'x>(
+        &self,
+        key: &str,
+    ) -> crate::Result<DnsEntry<Arc<Vec<Ipv6Addr>>>> {
+        let ipv6_lookup = self.0.ipv6_lookup(Name::from_str_relaxed(key)?).await?;
+        let ips: Arc<Vec<Ipv6Addr>> = ipv6_lookup
             .as_lookup()
             .record_iter()
             .filter_map(|r| r.data()?.as_aaaa()?.0.into())
-            .collect::<Vec<_>>();
+            .collect::<Vec<Ipv6Addr>>()
+            .into();
 
-        Ok(self
-            .cache_ipv6
-            .insert(key.into_owned(), Arc::new(ips), ipv6_lookup.valid_until()))
+        Ok(DnsEntry {
+            entry: ips,
+            expires: ipv6_lookup.valid_until(),
+        })
     }
 
     pub async fn ip_lookup(
@@ -269,11 +285,13 @@ impl Resolver {
         key: &str,
         mut strategy: IpLookupStrategy,
         max_results: usize,
+        cache_ipv4: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
+        cache_ipv6: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
     ) -> crate::Result<Vec<IpAddr>> {
         loop {
             match strategy {
                 IpLookupStrategy::Ipv4Only | IpLookupStrategy::Ipv4thenIpv6 => {
-                    match (self.ipv4_lookup(key).await, strategy) {
+                    match (self.ipv4_lookup(key, cache_ipv4).await, strategy) {
                         (Ok(result), _) => {
                             return Ok(result
                                 .iter()
@@ -289,7 +307,7 @@ impl Resolver {
                     }
                 }
                 IpLookupStrategy::Ipv6Only | IpLookupStrategy::Ipv6thenIpv4 => {
-                    match (self.ipv6_lookup(key).await, strategy) {
+                    match (self.ipv6_lookup(key, cache_ipv6).await, strategy) {
                         (Ok(result), _) => {
                             return Ok(result
                                 .iter()
@@ -308,8 +326,12 @@ impl Resolver {
         }
     }
 
-    pub async fn ptr_lookup<'x>(&self, addr: IpAddr) -> crate::Result<Arc<Vec<String>>> {
-        if let Some(value) = self.cache_ptr.get(&addr) {
+    pub async fn ptr_lookup<'x>(
+        &self,
+        addr: IpAddr,
+        cache: Option<&impl ResolverCache<IpAddr, Arc<Vec<String>>>>,
+    ) -> crate::Result<Arc<Vec<String>>> {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get(&addr)) {
             return Ok(value);
         }
 
@@ -318,8 +340,8 @@ impl Resolver {
             return mock_resolve(&addr.to_string());
         }
 
-        let ptr_lookup = self.resolver.reverse_lookup(addr).await?;
-        let ptr = ptr_lookup
+        let ptr_lookup = self.0.reverse_lookup(addr).await?;
+        let ptr: Arc<Vec<String>> = ptr_lookup
             .as_lookup()
             .record_iter()
             .filter_map(|r| {
@@ -330,37 +352,64 @@ impl Resolver {
                     None
                 }
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<String>>()
+            .into();
 
-        Ok(self
-            .cache_ptr
-            .insert(addr, Arc::new(ptr), ptr_lookup.valid_until()))
+        if let Some(cache) = cache {
+            cache.insert(addr, ptr.clone(), ptr_lookup.valid_until());
+        }
+
+        Ok(ptr)
     }
 
-    pub async fn exists<'x>(&self, key: impl IntoFqdn<'x>) -> crate::Result<bool> {
-        #[cfg(any(test, feature = "test"))]
-        if true {
-            let key = key.into_fqdn().into_owned();
-            return match self.ipv4_lookup(key.as_str()).await {
-                Ok(_) => Ok(true),
-                Err(Error::DnsRecordNotFound(_)) => match self.ipv6_lookup(key.as_str()).await {
+    #[cfg(any(test, feature = "test"))]
+    pub async fn exists<'x>(
+        &self,
+        key: impl IntoFqdn<'x>,
+        cache_ipv4: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
+        cache_ipv6: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
+    ) -> crate::Result<bool> {
+        let key = key.into_fqdn().into_owned();
+        match self.ipv4_lookup(key.as_str(), cache_ipv4).await {
+            Ok(_) => Ok(true),
+            Err(Error::DnsRecordNotFound(_)) => {
+                match self.ipv6_lookup(key.as_str(), cache_ipv6).await {
                     Ok(_) => Ok(true),
                     Err(Error::DnsRecordNotFound(_)) => Ok(false),
                     Err(err) => Err(err),
-                },
-                Err(err) => Err(err),
-            };
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    #[cfg(not(any(test, feature = "test")))]
+    pub async fn exists<'x>(
+        &self,
+        key: impl IntoFqdn<'x>,
+        cache_ipv4: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
+        cache_ipv6: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
+    ) -> crate::Result<bool> {
+        let key = key.into_fqdn();
+
+        if cache_ipv4.map_or(false, |c| c.get(key.as_ref()).is_some())
+            || cache_ipv6.map_or(false, |c| c.get(key.as_ref()).is_some())
+        {
+            return Ok(true);
         }
 
-        let key = key.into_fqdn();
         match self
-            .resolver
+            .0
             .lookup_ip(Name::from_str_relaxed(key.as_ref())?)
             .await
         {
             Ok(result) => Ok(result.as_lookup().record_iter().any(|r| {
                 r.data().map_or(false, |d| {
-                    matches!(d.record_type(), RecordType::A | RecordType::AAAA)
+                    matches!(
+                        d.record_type(),
+                        hickory_resolver::proto::rr::RecordType::A
+                            | hickory_resolver::proto::rr::RecordType::AAAA
+                    )
                 })
             })),
             Err(err) => {
@@ -371,55 +420,6 @@ impl Resolver {
                 }
             }
         }
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn txt_add<'x>(
-        &self,
-        name: impl IntoFqdn<'x>,
-        value: impl Into<Txt>,
-        valid_until: std::time::Instant,
-    ) {
-        self.cache_txt
-            .insert(name.into_fqdn().into_owned(), value.into(), valid_until);
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn ipv4_add<'x>(
-        &self,
-        name: impl IntoFqdn<'x>,
-        value: Vec<Ipv4Addr>,
-        valid_until: std::time::Instant,
-    ) {
-        self.cache_ipv4
-            .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn ipv6_add<'x>(
-        &self,
-        name: impl IntoFqdn<'x>,
-        value: Vec<Ipv6Addr>,
-        valid_until: std::time::Instant,
-    ) {
-        self.cache_ipv6
-            .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn ptr_add(&self, name: IpAddr, value: Vec<String>, valid_until: std::time::Instant) {
-        self.cache_ptr.insert(name, Arc::new(value), valid_until);
-    }
-
-    #[cfg(any(test, feature = "test"))]
-    pub fn mx_add<'x>(
-        &self,
-        name: impl IntoFqdn<'x>,
-        value: Vec<MX>,
-        valid_until: std::time::Instant,
-    ) {
-        self.cache_mx
-            .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
     }
 }
 

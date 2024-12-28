@@ -8,7 +8,10 @@
  * except according to those terms.
  */
 
-use mail_auth::{AuthenticatedMessage, DmarcResult, Resolver};
+use mail_auth::{
+    dmarc::verify::DmarcParameters, spf::verify::SpfParameters, AuthenticatedMessage, DmarcResult,
+    MessageAuthenticator,
+};
 
 const TEST_MESSAGE: &str = r#"DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;
 d=football.example.com; i=@football.example.com;
@@ -39,31 +42,33 @@ Joe."#;
 
 #[tokio::main]
 async fn main() {
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Verify DKIM signatures
     let authenticated_message = AuthenticatedMessage::parse(TEST_MESSAGE.as_bytes()).unwrap();
-    let dkim_result = resolver.verify_dkim(&authenticated_message).await;
+    let dkim_result = authenticator.verify_dkim(&authenticated_message).await;
 
     // Verify SPF MAIL-FROM identity
-    let spf_result = resolver
-        .verify_spf_sender(
+    let spf_result = authenticator
+        .verify_spf(SpfParameters::verify_mail_from(
             "::1".parse().unwrap(),
             "example.org",
             "my-host-domain.org",
             "sender@example.org",
-        )
+        ))
         .await;
 
     // Verify DMARC
-    let dmarc_result = resolver
+    let dmarc_result = authenticator
         .verify_dmarc(
-            &authenticated_message,
-            &dkim_result,
-            "example.org",
-            &spf_result,
-            |domain| psl::domain_str(domain).unwrap_or(domain),
+            DmarcParameters::new(
+                &authenticated_message,
+                &dkim_result,
+                "example.org",
+                &spf_result,
+            )
+            .with_domain_suffix_fn(|domain| psl::domain_str(domain).unwrap_or(domain)),
         )
         .await;
     assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);

@@ -10,17 +10,8 @@
 
 #![doc = include_str!("../README.md")]
 
-use std::{
-    cell::Cell,
-    fmt::Display,
-    io,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-    time::SystemTime,
-};
-
 use arc::Set;
-use common::{crypto::HashAlgorithm, headers::Header, lru::LruCache, verify::DomainKey};
+use common::{crypto::HashAlgorithm, headers::Header, verify::DomainKey};
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
 use hickory_resolver::{
@@ -28,8 +19,17 @@ use hickory_resolver::{
     TokioAsyncResolver,
 };
 use mta_sts::{MtaSts, TlsRpt};
-use parking_lot::Mutex;
 use spf::{Macro, Spf};
+use std::{
+    borrow::Borrow,
+    cell::Cell,
+    fmt::Display,
+    hash::Hash,
+    io,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 
 pub mod arc;
 pub mod common;
@@ -44,13 +44,35 @@ pub use flate2;
 pub use hickory_resolver;
 pub use zip;
 
-pub struct Resolver {
-    pub(crate) resolver: TokioAsyncResolver,
-    pub(crate) cache_txt: LruCache<String, Txt>,
-    pub(crate) cache_mx: LruCache<String, Arc<Vec<MX>>>,
-    pub(crate) cache_ipv4: LruCache<String, Arc<Vec<Ipv4Addr>>>,
-    pub(crate) cache_ipv6: LruCache<String, Arc<Vec<Ipv6Addr>>>,
-    pub(crate) cache_ptr: LruCache<IpAddr, Arc<Vec<String>>>,
+#[derive(Clone)]
+pub struct MessageAuthenticator(pub TokioAsyncResolver);
+
+pub struct Parameters<'x, P, TXT, MXX, IPV4, IPV6, PTR>
+where
+    TXT: ResolverCache<String, Txt>,
+    MXX: ResolverCache<String, Arc<Vec<MX>>>,
+    IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>>,
+    IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>>,
+    PTR: ResolverCache<IpAddr, Arc<Vec<String>>>,
+{
+    pub params: P,
+    pub cache_txt: Option<&'x TXT>,
+    pub cache_mx: Option<&'x MXX>,
+    pub cache_ptr: Option<&'x PTR>,
+    pub cache_ipv4: Option<&'x IPV4>,
+    pub cache_ipv6: Option<&'x IPV6>,
+}
+
+pub trait ResolverCache<K, V>: Sized {
+    fn get<Q>(&self, name: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized;
+    fn remove<Q>(&self, name: &Q) -> Option<V>
+    where
+        K: Borrow<Q>,
+        Q: Hash + Eq + ?Sized;
+    fn insert(&self, key: K, value: V, valid_until: Instant);
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -380,17 +402,4 @@ pub(crate) fn is_within_pct(pct: u8) -> bool {
                 .wrapping_mul(11400714819323198485u64)
         }) % 100
             < pct as u64
-}
-
-impl Clone for Resolver {
-    fn clone(&self) -> Self {
-        Self {
-            resolver: self.resolver.clone(),
-            cache_txt: Mutex::new(self.cache_txt.lock().clone()),
-            cache_mx: Mutex::new(self.cache_mx.lock().clone()),
-            cache_ipv4: Mutex::new(self.cache_ipv4.lock().clone()),
-            cache_ipv6: Mutex::new(self.cache_ipv6.lock().clone()),
-            cache_ptr: Mutex::new(self.cache_ptr.lock().clone()),
-        }
-    }
 }

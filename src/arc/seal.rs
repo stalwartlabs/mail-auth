@@ -203,13 +203,14 @@ mod test {
     use crate::{
         arc::ArcSealer,
         common::{
+            cache::test::DummyCaches,
             crypto::{Ed25519Key, RsaKey, Sha256, SigningKey},
             headers::HeaderWriter,
             parse::TxtRecordParser,
             verify::DomainKey,
         },
         dkim::DkimSigner,
-        AuthenticatedMessage, AuthenticationResults, DkimResult, Resolver,
+        AuthenticatedMessage, AuthenticationResults, DkimResult, MessageAuthenticator,
     };
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
@@ -236,6 +237,8 @@ mod test {
     ))]
     #[tokio::test]
     async fn arc_seal() {
+        use crate::common::cache::test::DummyCaches;
+
         let message = concat!(
             "From: queso@manchego.org\r\n",
             "To: affumicata@scamorza.org\r\n",
@@ -246,20 +249,18 @@ mod test {
         );
 
         // Crate resolver
-        let resolver = Resolver::new_system_conf().unwrap();
-        #[cfg(any(test, feature = "test"))]
-        {
-            resolver.txt_add(
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = DummyCaches::new()
+            .with_txt(
                 "rsa._domainkey.manchego.org.".to_string(),
                 DomainKey::parse(RSA_PUBLIC_KEY.as_bytes()).unwrap(),
                 Instant::now() + Duration::new(3600, 0),
-            );
-            resolver.txt_add(
+            )
+            .with_txt(
                 "ed._domainkey.scamorza.org.".to_string(),
                 DomainKey::parse(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
                 Instant::now() + Duration::new(3600, 0),
             );
-        }
 
         // Create private keys
         let pk_ed_public =
@@ -289,6 +290,7 @@ mod test {
 
             raw_message = arc_verify_and_seal(
                 &resolver,
+                &caches,
                 &raw_message,
                 "scamorza.org",
                 "ed",
@@ -298,15 +300,23 @@ mod test {
                 Ed25519Key::from_seed_and_public_key(&pk_ed_private, &pk_ed_public).unwrap(),
             )
             .await;
-            raw_message =
-                arc_verify_and_seal(&resolver, &raw_message, "manchego.org", "rsa", pk_rsa).await;
+            raw_message = arc_verify_and_seal(
+                &resolver,
+                &caches,
+                &raw_message,
+                "manchego.org",
+                "rsa",
+                pk_rsa,
+            )
+            .await;
         }
 
         //println!("{}", raw_message);
     }
 
     async fn arc_verify_and_seal(
-        resolver: &Resolver,
+        resolver: &MessageAuthenticator,
+        caches: &DummyCaches,
         raw_message: &str,
         d: &str,
         s: &str,
@@ -320,8 +330,8 @@ mod test {
                 true
             )
         );
-        let dkim_result = resolver.verify_dkim(&message).await;
-        let arc_result = resolver.verify_arc(&message).await;
+        let dkim_result = resolver.verify_dkim(caches.parameters(&message)).await;
+        let arc_result = resolver.verify_arc(caches.parameters(&message)).await;
         assert!(
             matches!(arc_result.result(), DkimResult::Pass | DkimResult::None),
             "ARC validation failed: {:?}",

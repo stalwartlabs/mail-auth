@@ -114,13 +114,14 @@ pub mod test {
 
     use crate::{
         common::{
+            cache::test::DummyCaches,
             crypto::{Ed25519Key, RsaKey, Sha256},
             headers::HeaderIterator,
             parse::TxtRecordParser,
             verify::DomainKey,
         },
         dkim::{Atps, Canonicalization, DkimSigner, DomainKeyReport, HashAlgorithm, Signature},
-        AuthenticatedMessage, DkimOutput, DkimResult, Resolver,
+        AuthenticatedMessage, DkimOutput, DkimResult, MessageAuthenticator,
     };
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
@@ -192,6 +193,8 @@ pub mod test {
     ))]
     #[tokio::test]
     async fn dkim_sign_verify() {
+        use crate::common::cache::test::DummyCaches;
+
         let message = concat!(
             "From: bill@example.com\r\n",
             "To: jdoe@example.com\r\n",
@@ -233,25 +236,23 @@ pub mod test {
         .unwrap();
 
         // Create resolver
-        let resolver = Resolver::new_system_conf().unwrap();
-        #[cfg(any(test, feature = "test"))]
-        {
-            resolver.txt_add(
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = DummyCaches::new()
+            .with_txt(
                 "default._domainkey.example.com.".to_string(),
                 DomainKey::parse(RSA_PUBLIC_KEY.as_bytes()).unwrap(),
                 Instant::now() + Duration::new(3600, 0),
-            );
-            resolver.txt_add(
+            )
+            .with_txt(
                 "ed._domainkey.example.com.".to_string(),
                 DomainKey::parse(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
                 Instant::now() + Duration::new(3600, 0),
-            );
-            resolver.txt_add(
+            )
+            .with_txt(
                 "_report._domainkey.example.com.".to_string(),
                 DomainKeyReport::parse("ra=dkim-failures; rp=100; rr=x".as_bytes()).unwrap(),
                 Instant::now() + Duration::new(3600, 0),
             );
-        }
 
         dbg!("Test RSA-SHA256 relaxed/relaxed");
         #[cfg(feature = "rust-crypto")]
@@ -260,6 +261,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -275,6 +277,7 @@ pub mod test {
         dbg!("Test ED25519-SHA256 relaxed/relaxed");
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_ed)
                 .domain("example.com")
                 .selector("ed")
@@ -293,6 +296,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -312,6 +316,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -333,6 +338,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -359,6 +365,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify_with_opts(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -380,6 +387,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify_with_opts(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -401,6 +409,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -420,6 +429,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         let r = verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -444,6 +454,7 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -462,14 +473,14 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(any(test, feature = "test"))]
-        resolver.txt_add(
+        caches.txt_add(
             "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.".to_string(),
             Atps::parse(b"v=ATPS1;").unwrap(),
             Instant::now() + Duration::new(3600, 0),
         );
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -488,14 +499,14 @@ pub mod test {
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(any(test, feature = "test"))]
-        resolver.txt_add(
+        caches.txt_add(
             "example.com._atps.example.com.".to_string(),
             Atps::parse(b"v=ATPS1;").unwrap(),
             Instant::now() + Duration::new(3600, 0),
         );
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -509,8 +520,9 @@ pub mod test {
         .await;
     }
 
-    pub async fn verify_with_opts<'x>(
-        resolver: &Resolver,
+    pub(crate) async fn verify_with_opts<'x>(
+        resolver: &MessageAuthenticator,
+        caches: &DummyCaches,
         signature: Signature,
         message_: &'x str,
         expect: Result<(), super::Error>,
@@ -528,7 +540,7 @@ pub mod test {
                 strict
             )
         );
-        let dkim = resolver.verify_dkim(&message).await;
+        let dkim = resolver.verify_dkim(caches.parameters(&message)).await;
 
         match (dkim.last().unwrap().result(), &expect) {
             (DkimResult::Pass, Ok(_)) => (),
@@ -549,12 +561,13 @@ pub mod test {
             .collect()
     }
 
-    pub async fn verify<'x>(
-        resolver: &Resolver,
+    pub(crate) async fn verify<'x>(
+        resolver: &MessageAuthenticator,
+        caches: &DummyCaches,
         signature: Signature,
         message_: &'x str,
         expect: Result<(), super::Error>,
     ) -> Vec<DkimOutput<'x>> {
-        verify_with_opts(resolver, signature, message_, expect, true).await
+        verify_with_opts(resolver, caches, signature, message_, expect, true).await
     }
 }

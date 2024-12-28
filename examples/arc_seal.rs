@@ -14,7 +14,7 @@ use mail_auth::{
         crypto::{RsaKey, Sha256},
         headers::HeaderWriter,
     },
-    AuthenticatedMessage, AuthenticationResults, Resolver,
+    AuthenticatedMessage, AuthenticationResults, MessageAuthenticator,
 };
 
 const TEST_MESSAGE: &str = include_str!("../resources/arc/001.txt");
@@ -37,15 +37,15 @@ GMot/L2x0IYyMLAz6oLWh2hm7zwtb0CgOrPo1ke44hFYnfc=
 
 #[tokio::main]
 async fn main() {
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Parse message to be sealed
     let authenticated_message = AuthenticatedMessage::parse(TEST_MESSAGE.as_bytes()).unwrap();
 
     // Verify ARC and DKIM signatures
-    let arc_result = resolver.verify_arc(&authenticated_message).await;
-    let dkim_result = resolver.verify_dkim(&authenticated_message).await;
+    let arc_result = authenticator.verify_arc(&authenticated_message).await;
+    let dkim_result = authenticator.verify_dkim(&authenticated_message).await;
 
     // Build Authenticated-Results header
     let auth_results = AuthenticationResults::new("mx.mydomain.org")

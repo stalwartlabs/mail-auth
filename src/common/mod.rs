@@ -12,9 +12,9 @@ use crate::{Error, IprevResult};
 
 pub mod auth_results;
 pub mod base32;
+pub mod cache;
 pub mod crypto;
 pub mod headers;
-pub mod lru;
 pub mod message;
 pub mod parse;
 pub mod resolver;

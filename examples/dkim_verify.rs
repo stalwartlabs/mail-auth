@@ -8,7 +8,7 @@
  * except according to those terms.
  */
 
-use mail_auth::{AuthenticatedMessage, DkimResult, Resolver};
+use mail_auth::{AuthenticatedMessage, DkimResult, MessageAuthenticator};
 
 const TEST_MESSAGE: &str = r#"DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;
 d=football.example.com; i=@football.example.com;
@@ -39,14 +39,14 @@ Joe."#;
 
 #[tokio::main]
 async fn main() {
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Parse message
     let authenticated_message = AuthenticatedMessage::parse(TEST_MESSAGE.as_bytes()).unwrap();
 
     // Validate signature
-    let result = resolver.verify_dkim(&authenticated_message).await;
+    let result = authenticator.verify_dkim(&authenticated_message).await;
 
     // Make sure all signatures passed verification
     assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));

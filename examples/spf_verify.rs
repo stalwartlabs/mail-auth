@@ -8,31 +8,31 @@
  * except according to those terms.
  */
 
-use mail_auth::{Resolver, SpfResult};
+use mail_auth::{spf::verify::SpfParameters, MessageAuthenticator, SpfResult};
 
 #[tokio::main]
 async fn main() {
-    // Create a resolver using Cloudflare DNS
-    let resolver = Resolver::new_cloudflare_tls().unwrap();
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
 
     // Verify HELO identity
-    let result = resolver
-        .verify_spf_helo(
+    let result = authenticator
+        .verify_spf(SpfParameters::verify_ehlo(
             "127.0.0.1".parse().unwrap(),
             "gmail.com",
-            "my-host-domain.org",
-        )
+            "my-local-domain.org",
+        ))
         .await;
     assert_eq!(result.result(), SpfResult::Fail);
 
     // Verify MAIL-FROM identity
-    let result = resolver
-        .verify_spf_sender(
+    let result = authenticator
+        .verify_spf(SpfParameters::verify_mail_from(
             "::1".parse().unwrap(),
             "gmail.com",
-            "my-host-domain.org",
+            "my-local-domain.org",
             "sender@gmail.com",
-        )
+        ))
         .await;
     assert_eq!(result.result(), SpfResult::Fail);
 }

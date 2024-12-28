@@ -8,26 +8,50 @@
  * except according to those terms.
  */
 
-use std::sync::Arc;
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
 
 use crate::{
-    AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, Resolver,
-    SpfOutput, SpfResult,
+    common::cache::NoCache, AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult,
+    Error, MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt, MX,
 };
 
 use super::{Alignment, Dmarc, URI};
 
-impl Resolver {
+pub struct DmarcParameters<'x, F>
+where
+    F: for<'y> Fn(&'y str) -> &'y str,
+{
+    pub message: &'x AuthenticatedMessage<'x>,
+    pub dkim_output: &'x [DkimOutput<'x>],
+    pub rfc5321_mail_from_domain: &'x str,
+    pub spf_output: &'x SpfOutput,
+    pub domain_suffix_fn: F,
+}
+
+impl MessageAuthenticator {
     /// Verifies the DMARC policy of an RFC5321.MailFrom domain
-    pub async fn verify_dmarc(
+    pub async fn verify_dmarc<'x, TXT, MXX, IPV4, IPV6, PTR, F>(
         &self,
-        message: &AuthenticatedMessage<'_>,
-        dkim_output: &[DkimOutput<'_>],
-        rfc5321_mail_from_domain: &str,
-        spf_output: &SpfOutput,
-        domain_suffix_fn: impl Fn(&str) -> &str,
-    ) -> DmarcOutput {
+        params: impl Into<Parameters<'x, DmarcParameters<'x, F>, TXT, MXX, IPV4, IPV6, PTR>>,
+    ) -> DmarcOutput
+    where
+        TXT: ResolverCache<String, Txt> + 'x,
+        MXX: ResolverCache<String, Arc<Vec<MX>>> + 'x,
+        IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>> + 'x,
+        IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>> + 'x,
+        PTR: ResolverCache<IpAddr, Arc<Vec<String>>> + 'x,
+        F: for<'y> Fn(&'y str) -> &'y str,
+    {
         // Extract RFC5322.From domain
+        let params = params.into();
+        let message = params.params.message;
+        let dkim_output = params.params.dkim_output;
+        let domain_suffix_fn = params.params.domain_suffix_fn;
+        let rfc5321_mail_from_domain = params.params.rfc5321_mail_from_domain;
+        let spf_output = params.params.spf_output;
         let mut rfc5322_from_domain = "";
         for from in &message.from {
             if let Some((_, domain)) = from.rsplit_once('@') {
@@ -45,7 +69,10 @@ impl Resolver {
         }
 
         // Obtain DMARC policy
-        let dmarc = match self.dmarc_tree_walk(rfc5322_from_domain).await {
+        let dmarc = match self
+            .dmarc_tree_walk(rfc5322_from_domain, params.cache_txt)
+            .await
+        {
             Ok(Some(dmarc)) => dmarc,
             Ok(None) => return DmarcOutput::default().with_domain(rfc5322_from_domain),
             Err(err) => {
@@ -119,20 +146,24 @@ impl Resolver {
         &self,
         domain: &str,
         addresses: &'x [URI],
+        txt_cache: Option<&impl ResolverCache<String, Txt>>,
     ) -> Option<Vec<&'x URI>> {
         let mut result = Vec::with_capacity(addresses.len());
         for address in addresses {
             if address.uri.ends_with(domain)
                 || match self
-                    .txt_lookup::<Dmarc>(format!(
-                        "{}._report._dmarc.{}.",
-                        domain,
-                        address
-                            .uri
-                            .rsplit_once('@')
-                            .map(|(_, d)| d)
-                            .unwrap_or_default()
-                    ))
+                    .txt_lookup::<Dmarc>(
+                        format!(
+                            "{}._report._dmarc.{}.",
+                            domain,
+                            address
+                                .uri
+                                .rsplit_once('@')
+                                .map(|(_, d)| d)
+                                .unwrap_or_default()
+                        ),
+                        txt_cache,
+                    )
                     .await
                 {
                     Ok(_) => true,
@@ -147,7 +178,11 @@ impl Resolver {
         result.into()
     }
 
-    async fn dmarc_tree_walk(&self, domain: &str) -> crate::Result<Option<Arc<Dmarc>>> {
+    async fn dmarc_tree_walk(
+        &self,
+        domain: &str,
+        txt_cache: Option<&impl ResolverCache<String, Txt>>,
+    ) -> crate::Result<Option<Arc<Dmarc>>> {
         let labels = domain.split('.').collect::<Vec<_>>();
         let mut x = labels.len();
         if x == 1 {
@@ -164,7 +199,7 @@ impl Resolver {
             domain.push('.');
 
             // Query DMARC
-            match self.txt_lookup::<Dmarc>(domain).await {
+            match self.txt_lookup::<Dmarc>(domain, txt_cache).await {
                 Ok(dmarc) => {
                     return Ok(Some(dmarc));
                 }
@@ -186,6 +221,59 @@ impl Resolver {
     }
 }
 
+impl<'x> DmarcParameters<'x, fn(&str) -> &str> {
+    pub fn new(
+        message: &'x AuthenticatedMessage<'x>,
+        dkim_output: &'x [DkimOutput<'x>],
+        rfc5321_mail_from_domain: &'x str,
+        spf_output: &'x SpfOutput,
+    ) -> Self {
+        Self {
+            message,
+            dkim_output,
+            rfc5321_mail_from_domain,
+            spf_output,
+            domain_suffix_fn: |d| d,
+        }
+    }
+}
+
+impl<'x, F> DmarcParameters<'x, F>
+where
+    F: for<'y> Fn(&'y str) -> &'y str,
+{
+    pub fn with_domain_suffix_fn<NewF>(self, f: NewF) -> DmarcParameters<'x, NewF>
+    where
+        NewF: for<'y> Fn(&'y str) -> &'y str,
+    {
+        DmarcParameters {
+            message: self.message,
+            dkim_output: self.dkim_output,
+            rfc5321_mail_from_domain: self.rfc5321_mail_from_domain,
+            spf_output: self.spf_output,
+            domain_suffix_fn: f,
+        }
+    }
+}
+
+impl<'x, F> From<DmarcParameters<'x, F>>
+    for Parameters<
+        'x,
+        DmarcParameters<'x, F>,
+        NoCache<String, Txt>,
+        NoCache<String, Arc<Vec<MX>>>,
+        NoCache<String, Arc<Vec<Ipv4Addr>>>,
+        NoCache<String, Arc<Vec<Ipv6Addr>>>,
+        NoCache<IpAddr, Arc<Vec<String>>>,
+    >
+where
+    F: for<'y> Fn(&'y str) -> &'y str,
+{
+    fn from(params: DmarcParameters<'x, F>) -> Self {
+        Parameters::new(params)
+    }
+}
+
 #[cfg(test)]
 #[allow(unused)]
 mod test {
@@ -194,16 +282,19 @@ mod test {
     use mail_parser::MessageParser;
 
     use crate::{
-        common::parse::TxtRecordParser,
+        common::{cache::test::DummyCaches, parse::TxtRecordParser},
         dkim::Signature,
         dmarc::{Dmarc, Policy, URI},
-        AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, Error, Resolver, SpfOutput,
-        SpfResult,
+        AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, Error, MessageAuthenticator,
+        SpfOutput, SpfResult,
     };
+
+    use super::DmarcParameters;
 
     #[tokio::test]
     async fn dmarc_verify() {
-        let resolver = Resolver::new_system_conf().unwrap();
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = DummyCaches::new();
 
         for (
             dmarc_dns,
@@ -330,8 +421,7 @@ mod test {
                 Policy::Reject,
             ),
         ] {
-            #[cfg(any(test, feature = "test"))]
-            resolver.txt_add(
+            caches.txt_add(
                 dmarc_dns,
                 Dmarc::parse(dmarc.as_bytes()).unwrap(),
                 Instant::now() + Duration::new(3200, 0),
@@ -363,11 +453,15 @@ mod test {
             };
             let result = resolver
                 .verify_dmarc(
-                    &auth_message,
-                    &[dkim],
-                    rfc5321_mail_from_domain,
-                    &spf,
-                    |d| psl::domain_str(d).unwrap_or(d),
+                    caches.parameters(
+                        DmarcParameters::new(
+                            &auth_message,
+                            &[dkim],
+                            rfc5321_mail_from_domain,
+                            &spf,
+                        )
+                        .with_domain_suffix_fn(|d| psl::domain_str(d).unwrap_or(d)),
+                    ),
                 )
                 .await;
             assert_eq!(result.dkim_result, expect_dkim);
@@ -378,9 +472,8 @@ mod test {
 
     #[tokio::test]
     async fn dmarc_verify_report_address() {
-        let resolver = Resolver::new_system_conf().unwrap();
-        #[cfg(any(test, feature = "test"))]
-        resolver.txt_add(
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = DummyCaches::new().with_txt(
             "example.org._report._dmarc.external.org.",
             Dmarc::parse(b"v=DMARC1").unwrap(),
             Instant::now() + Duration::new(3200, 0),
@@ -393,7 +486,7 @@ mod test {
 
         assert_eq!(
             resolver
-                .verify_dmarc_report_address("example.org", &uris)
+                .verify_dmarc_report_address("example.org", &uris, Some(&caches.txt))
                 .await
                 .unwrap(),
             vec![

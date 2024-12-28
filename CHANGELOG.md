@@ -1,3 +1,7 @@
+mail-auth 0.6.0
+================================
+- Bring your own cache (or none at all): All validation functions can now take a `Parameters` struct that allows you to provide custom caches implementing the `ResolverCache` trait. By default no cache is used.
+
 mail-auth 0.5.1
 ================================
 - Build `AuthenticatedMessage` from `mail-parser::Message`.

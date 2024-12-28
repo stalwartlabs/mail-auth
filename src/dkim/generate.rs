@@ -84,7 +84,7 @@ mod test {
             verify::DomainKey,
         },
         dkim::{generate::DkimKeyPair, DkimSigner, DomainKeyReport},
-        Resolver,
+        MessageAuthenticator,
     };
 
     #[tokio::test]
@@ -99,7 +99,7 @@ mod test {
         let pk_rsa = RsaKey::<Sha256>::from_der(&rsa_pkcs.private_key).unwrap();
 
         // Create resolver
-        let resolver = Resolver::new_system_conf().unwrap();
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
         #[cfg(any(test, feature = "test"))]
         {
             resolver.txt_add(
