@@ -198,11 +198,6 @@ impl MessageAuthenticator {
             return Ok(value);
         }
 
-        #[cfg(any(test, feature = "test"))]
-        if true {
-            return mock_resolve(key.as_ref());
-        }
-
         let ipv4_lookup = self.ipv4_lookup_raw(key.as_ref()).await?;
 
         if let Some(cache) = cache {
@@ -220,6 +215,11 @@ impl MessageAuthenticator {
         &self,
         key: &str,
     ) -> crate::Result<DnsEntry<Arc<Vec<Ipv4Addr>>>> {
+        #[cfg(any(test, feature = "test"))]
+        if true {
+            return mock_resolve(key.as_ref());
+        }
+
         let ipv4_lookup = self.0.ipv4_lookup(Name::from_str_relaxed(key)?).await?;
         let ips: Arc<Vec<Ipv4Addr>> = ipv4_lookup
             .as_lookup()
@@ -244,11 +244,6 @@ impl MessageAuthenticator {
             return Ok(value);
         }
 
-        #[cfg(any(test, feature = "test"))]
-        if true {
-            return mock_resolve(key.as_ref());
-        }
-
         let ipv6_lookup = self.ipv6_lookup_raw(key.as_ref()).await?;
 
         if let Some(cache) = cache {
@@ -266,6 +261,11 @@ impl MessageAuthenticator {
         &self,
         key: &str,
     ) -> crate::Result<DnsEntry<Arc<Vec<Ipv6Addr>>>> {
+        #[cfg(any(test, feature = "test"))]
+        if true {
+            return mock_resolve(key.as_ref());
+        }
+
         let ipv6_lookup = self.0.ipv6_lookup(Name::from_str_relaxed(key)?).await?;
         let ips: Arc<Vec<Ipv6Addr>> = ipv6_lookup
             .as_lookup()
