@@ -132,7 +132,7 @@ mod tests {
 
         for file in fs::read_dir(&path).unwrap() {
             let file = file.as_ref().unwrap().path();
-            if !file.extension().map_or(false, |e| e == "json") {
+            if file.extension().is_none_or(|e| e != "json") {
                 continue;
             }
             let rpt = TlsReport::parse_json(&fs::read(&file).unwrap())
@@ -144,7 +144,7 @@ mod tests {
 
         for file in fs::read_dir(&path).unwrap() {
             let mut file = file.as_ref().unwrap().path();
-            if !file.extension().map_or(false, |e| e == "eml") {
+            if file.extension().is_none_or(|e| e != "eml") {
                 continue;
             }
             let rpt = TlsReport::parse_rfc5322(&fs::read(&file).unwrap())

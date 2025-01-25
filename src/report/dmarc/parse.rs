@@ -37,11 +37,11 @@ impl Report {
                     if part
                         .content_type()
                         .and_then(|ct| ct.subtype())
-                        .map_or(false, |t| t.eq_ignore_ascii_case("xml"))
+                        .is_some_and( |t| t.eq_ignore_ascii_case("xml"))
                         || part
                             .attachment_name()
                             .and_then(|n| n.rsplit_once('.'))
-                            .map_or(false, |(_, e)| e.eq_ignore_ascii_case("xml")) =>
+                            .is_some_and( |(_, e)| e.eq_ignore_ascii_case("xml")) =>
                 {
                     match Report::parse_xml(report.as_bytes()) {
                         Ok(feedback) => return Ok(feedback),
@@ -286,7 +286,7 @@ impl PolicyPublished {
                 b"testing" => {
                     p.testing = reader
                         .next_value::<String>(buf)?
-                        .map_or(false, |s| s.eq_ignore_ascii_case("y"));
+                        .is_some_and( |s| s.eq_ignore_ascii_case("y"));
                 }
                 b"fo" => {
                     p.fo = reader.next_value::<String>(buf)?;

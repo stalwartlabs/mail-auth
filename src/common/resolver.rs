@@ -211,13 +211,10 @@ impl MessageAuthenticator {
         Ok(ipv4_lookup.entry)
     }
 
-    pub async fn ipv4_lookup_raw<'x>(
-        &self,
-        key: &str,
-    ) -> crate::Result<DnsEntry<Arc<Vec<Ipv4Addr>>>> {
+    pub async fn ipv4_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<Vec<Ipv4Addr>>>> {
         #[cfg(any(test, feature = "test"))]
         if true {
-            return mock_resolve(key.as_ref());
+            return mock_resolve(key);
         }
 
         let ipv4_lookup = self.0.ipv4_lookup(Name::from_str_relaxed(key)?).await?;
@@ -257,13 +254,10 @@ impl MessageAuthenticator {
         Ok(ipv6_lookup.entry)
     }
 
-    pub async fn ipv6_lookup_raw<'x>(
-        &self,
-        key: &str,
-    ) -> crate::Result<DnsEntry<Arc<Vec<Ipv6Addr>>>> {
+    pub async fn ipv6_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<Vec<Ipv6Addr>>>> {
         #[cfg(any(test, feature = "test"))]
         if true {
-            return mock_resolve(key.as_ref());
+            return mock_resolve(key);
         }
 
         let ipv6_lookup = self.0.ipv6_lookup(Name::from_str_relaxed(key)?).await?;
@@ -326,7 +320,7 @@ impl MessageAuthenticator {
         }
     }
 
-    pub async fn ptr_lookup<'x>(
+    pub async fn ptr_lookup(
         &self,
         addr: IpAddr,
         cache: Option<&impl ResolverCache<IpAddr, Arc<Vec<String>>>>,
@@ -392,8 +386,8 @@ impl MessageAuthenticator {
     ) -> crate::Result<bool> {
         let key = key.into_fqdn();
 
-        if cache_ipv4.map_or(false, |c| c.get(key.as_ref()).is_some())
-            || cache_ipv6.map_or(false, |c| c.get(key.as_ref()).is_some())
+        if cache_ipv4.is_some_and(|c| c.get(key.as_ref()).is_some())
+            || cache_ipv6.is_some_and(|c| c.get(key.as_ref()).is_some())
         {
             return Ok(true);
         }
@@ -404,7 +398,7 @@ impl MessageAuthenticator {
             .await
         {
             Ok(result) => Ok(result.as_lookup().record_iter().any(|r| {
-                r.data().map_or(false, |d| {
+                r.data().is_some_and(|d| {
                     matches!(
                         d.record_type(),
                         hickory_resolver::proto::rr::RecordType::A

@@ -183,7 +183,7 @@ impl DmarcOutput {
     pub fn requested_reports(&self) -> bool {
         self.record
             .as_ref()
-            .map_or(false, |r| !r.rua.is_empty() || !r.ruf.is_empty())
+            .is_some_and(|r| !r.rua.is_empty() || !r.ruf.is_empty())
     }
 
     /// Returns the failure reporting options

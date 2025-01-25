@@ -28,7 +28,7 @@ impl TxtRecordParser for Spf {
         let mut record = bytes.iter();
         if !matches!(record.key(), Some(k) if k == V)
             || !record.match_bytes(b"spf1")
-            || record.next().map_or(false, |v| !v.is_ascii_whitespace())
+            || record.next().is_some_and( |v| !v.is_ascii_whitespace())
         {
             return Err(Error::InvalidRecordType);
         }

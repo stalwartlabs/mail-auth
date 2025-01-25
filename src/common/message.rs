@@ -45,25 +45,17 @@ impl<'x> AuthenticatedMessage<'x> {
                 HeaderName::MessageId => {
                     message.message_id_header_present = true;
                 }
-                HeaderName::Other(text) => {
-                    let name = text.as_bytes();
-                    match name.first() {
-                        Some(b'D' | b'd') => {
-                            if name.eq_ignore_ascii_case(b"DKIM-Signature") {
-                                message.parse_dkim(name, value, strict);
-                            }
-                        }
-                        Some(b'A' | b'a') => {
-                            if name.eq_ignore_ascii_case(b"ARC-Authentication-Results") {
-                                message.parse_aar(name, value);
-                            } else if name.eq_ignore_ascii_case(b"ARC-Seal") {
-                                message.parse_as(name, value);
-                            } else if name.eq_ignore_ascii_case(b"ARC-Message-Signature") {
-                                message.parse_ams(name, value, strict);
-                            }
-                        }
-                        _ => (),
-                    }
+                HeaderName::DkimSignature => {
+                    message.parse_dkim(name, value, strict);
+                }
+                HeaderName::ArcAuthenticationResults => {
+                    message.parse_aar(name, value);
+                }
+                HeaderName::ArcSeal => {
+                    message.parse_as(name, value);
+                }
+                HeaderName::ArcMessageSignature => {
+                    message.parse_ams(name, value, strict);
                 }
                 _ => (),
             }

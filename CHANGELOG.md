@@ -1,3 +1,7 @@
+mail-auth 0.6.1
+================================
+- Bump to `mail-parser` 0.10.0.
+
 mail-auth 0.6.0
 ================================
 - `Resolver` is now `MessageAuthenticator`.
