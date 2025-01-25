@@ -1,11 +1,7 @@
 /*
- * Copyright (c) 2020-2023, Stalwart Labs Ltd.
+ * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
  *
- * Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
- * https://www.apache.org/licenses/LICENSE-2.0> or the MIT license
- * <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
- * option. This file may not be copied, modified, or distributed
- * except according to those terms.
+ * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
 use std::io::{BufRead, Cursor, Read};
@@ -37,11 +33,11 @@ impl Report {
                     if part
                         .content_type()
                         .and_then(|ct| ct.subtype())
-                        .is_some_and( |t| t.eq_ignore_ascii_case("xml"))
+                        .is_some_and(|t| t.eq_ignore_ascii_case("xml"))
                         || part
                             .attachment_name()
                             .and_then(|n| n.rsplit_once('.'))
-                            .is_some_and( |(_, e)| e.eq_ignore_ascii_case("xml")) =>
+                            .is_some_and(|(_, e)| e.eq_ignore_ascii_case("xml")) =>
                 {
                     match Report::parse_xml(report.as_bytes()) {
                         Ok(feedback) => return Ok(feedback),
@@ -286,7 +282,7 @@ impl PolicyPublished {
                 b"testing" => {
                     p.testing = reader
                         .next_value::<String>(buf)?
-                        .is_some_and( |s| s.eq_ignore_ascii_case("y"));
+                        .is_some_and(|s| s.eq_ignore_ascii_case("y"));
                 }
                 b"fo" => {
                     p.fo = reader.next_value::<String>(buf)?;

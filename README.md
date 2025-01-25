@@ -261,5 +261,4 @@ at your option.
 
 ## Copyright
 
-Copyright (C) 2020-2023, Stalwart Labs Ltd.
-
+Copyright (C) 2020, Stalwart Labs LLC

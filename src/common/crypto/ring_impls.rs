@@ -1,3 +1,9 @@
+/*
+ * SPDX-FileCopyrightText: 2020 Stalwart Labs LLC <hello@stalw.art>
+ *
+ * SPDX-License-Identifier: Apache-2.0 OR MIT
+ */
+
 use std::marker::PhantomData;
 
 use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
