@@ -38,6 +38,7 @@ pub mod spf;
 
 pub use flate2;
 pub use hickory_resolver;
+#[cfg(feature = "report")]
 pub use zip;
 
 #[derive(Clone)]
