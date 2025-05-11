@@ -169,7 +169,7 @@ impl<'x> Variables<'x> {
         let mut start_pos = 0;
 
         for (pos, ch) in var.iter().enumerate() {
-            if (b'+'..=b'_').contains(ch) && (delimiters & 1u64 << (*ch - b'+')) != 0 {
+            if (b'+'..=b'_').contains(ch) && (delimiters & (1u64 << (*ch - b'+'))) != 0 {
                 parts_len += pos - start_pos + 1;
                 parts.push(&var[start_pos..pos]);
                 start_pos = pos + 1;

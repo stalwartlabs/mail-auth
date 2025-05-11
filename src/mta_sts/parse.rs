@@ -9,19 +9,19 @@ use crate::common::parse::{TagParser, TxtRecordParser, V};
 use super::{MtaSts, ReportUri, TlsRpt};
 
 const ID: u64 = (b'i' as u64) | ((b'd' as u64) << 8);
-const RUA: u64 = (b'r' as u64) | (b'u' as u64) << 8 | (b'a' as u64) << 16;
+const RUA: u64 = (b'r' as u64) | ((b'u' as u64) << 8) | ((b'a' as u64) << 16);
 
 const MAILTO: u64 = (b'm' as u64)
-    | (b'a' as u64) << 8
-    | (b'i' as u64) << 16
-    | (b'l' as u64) << 24
-    | (b't' as u64) << 32
-    | (b'o' as u64) << 40;
+    | ((b'a' as u64) << 8)
+    | ((b'i' as u64) << 16)
+    | ((b'l' as u64) << 24)
+    | ((b't' as u64) << 32)
+    | ((b'o' as u64) << 40);
 const HTTPS: u64 = (b'h' as u64)
-    | (b't' as u64) << 8
-    | (b't' as u64) << 16
-    | (b'p' as u64) << 24
-    | (b's' as u64) << 32;
+    | ((b't' as u64) << 8)
+    | ((b't' as u64) << 16)
+    | ((b'p' as u64) << 24)
+    | ((b's' as u64) << 32);
 
 impl TxtRecordParser for MtaSts {
     #[allow(clippy::while_let_on_iterator)]

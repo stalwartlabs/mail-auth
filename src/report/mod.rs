@@ -13,12 +13,20 @@ use std::{borrow::Cow, net::IpAddr};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct DateRange {
     begin: u64,
     end: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct ReportMetadata {
     org_name: String,
     email: String,
@@ -29,6 +37,10 @@ pub struct ReportMetadata {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum Alignment {
     Relaxed,
     Strict,
@@ -37,6 +49,10 @@ pub enum Alignment {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum Disposition {
     None,
     Quarantine,
@@ -46,6 +62,10 @@ pub enum Disposition {
 }
 
 #[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum ActionDisposition {
     None,
     Pass,
@@ -56,6 +76,10 @@ pub enum ActionDisposition {
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct PolicyPublished {
     pub domain: String,
     pub version_published: Option<f32>,
@@ -70,6 +94,10 @@ pub struct PolicyPublished {
 impl Eq for PolicyPublished {}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum DmarcResult {
     Pass,
     Fail,
@@ -78,6 +106,10 @@ pub enum DmarcResult {
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum PolicyOverride {
     Forwarded,
     SampledOut,
@@ -89,12 +121,20 @@ pub enum PolicyOverride {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct PolicyOverrideReason {
     type_: PolicyOverride,
     comment: Option<String>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct PolicyEvaluated {
     disposition: ActionDisposition,
     dkim: DmarcResult,
@@ -103,6 +143,10 @@ pub struct PolicyEvaluated {
 }
 
 #[derive(Debug, Clone, Hash, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct Row {
     source_ip: Option<IpAddr>,
     count: u32,
@@ -110,12 +154,20 @@ pub struct Row {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct Extension {
     name: String,
     definition: String,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct Identifier {
     envelope_to: Option<String>,
     envelope_from: String,
@@ -123,6 +175,10 @@ pub struct Identifier {
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum DkimResult {
     #[default]
     None,
@@ -135,6 +191,10 @@ pub enum DkimResult {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct DKIMAuthResult {
     domain: String,
     selector: String,
@@ -143,6 +203,10 @@ pub struct DKIMAuthResult {
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum SPFDomainScope {
     Helo,
     MailFrom,
@@ -151,6 +215,10 @@ pub enum SPFDomainScope {
 }
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum SpfResult {
     #[default]
     None,
@@ -163,6 +231,10 @@ pub enum SpfResult {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct SPFAuthResult {
     domain: String,
     scope: SPFDomainScope,
@@ -171,12 +243,20 @@ pub struct SPFAuthResult {
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct AuthResult {
     dkim: Vec<DKIMAuthResult>,
     spf: Vec<SPFAuthResult>,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct Record {
     row: Row,
     identifiers: Identifier,
@@ -185,6 +265,10 @@ pub struct Record {
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct Report {
     version: f32,
     report_metadata: ReportMetadata,
@@ -210,18 +294,30 @@ impl From<String> for Error {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct Feedback<'x> {
     feedback_type: FeedbackType,
     arrival_date: Option<i64>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     authentication_results: Vec<Cow<'x, str>>,
     incidents: u32,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     original_envelope_id: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     original_mail_from: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     original_rcpt_to: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     reported_domain: Vec<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     reported_uri: Vec<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     reporting_mta: Option<Cow<'x, str>>,
     source_ip: Option<IpAddr>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     user_agent: Option<Cow<'x, str>>,
     version: u32,
     source_port: u32,
@@ -229,21 +325,35 @@ pub struct Feedback<'x> {
     // Auth-Failure keys
     auth_failure: AuthFailureType,
     delivery_result: DeliveryResult,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     dkim_adsp_dns: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     dkim_canonicalized_body: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     dkim_canonicalized_header: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     dkim_domain: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     dkim_identity: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     dkim_selector: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     dkim_selector_dns: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     spf_dns: Option<Cow<'x, str>>,
     identity_alignment: IdentityAlignment,
 
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     message: Option<Cow<'x, str>>,
+    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     headers: Option<Cow<'x, str>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum AuthFailureType {
     Adsp,
     BodyHash,
@@ -256,6 +366,10 @@ pub enum AuthFailureType {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum IdentityAlignment {
     None,
     Spf,
@@ -266,6 +380,10 @@ pub enum IdentityAlignment {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum DeliveryResult {
     Delivered,
     Spam,
@@ -277,6 +395,10 @@ pub enum DeliveryResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum FeedbackType {
     Abuse,
     AuthFailure,

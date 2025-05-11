@@ -1,7 +1,7 @@
 [package]
 name = "mail-auth"
 description = "DKIM, ARC, SPF and DMARC library for Rust"
-version = "0.6.1"
+version = "0.7.0"
 edition = "2021"
 authors = [ "Stalwart Labs <hello@stalw.art>"]
 license = "Apache-2.0 OR MIT"
@@ -21,25 +21,27 @@ rust-crypto = ["ed25519-dalek", "rsa", "sha1", "sha2"]
 generate = ["rsa", "rand"]
 report = ["quick-xml"]
 test = []
+rkyv = ["dep:rkyv", "mail-parser/rkyv"]
 
 [dependencies]
 ahash = "0.8.0"
 ed25519-dalek = { version = "2.0", optional = true }
 flate2 = "1.0.25"
-mail-parser = { version = "0.10", features = ["full_encoding"] }
+mail-parser = { version = "0.11", features = ["full_encoding"] }
 mail-builder = { version = "0.4" }
 quick-xml = { version = "0.37", optional = true }
 ring = { version = "0.17", optional = true }
-rsa = { version = "0.9.6", optional = true }
+rsa = { version = "0.9.8", optional = true }
 rustls-pemfile = { version = "2", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha1 = { version = "0.10", features = ["oid"], optional = true }
 sha2 = { version = "0.10.6", features = ["oid"], optional = true }
-hickory-resolver = { version = "0.24", features = ["dns-over-rustls", "dnssec-ring"] }
+hickory-resolver = { version = "0.25", features = ["tls-ring", "dnssec-ring"] }
 zip = "2.1.1"
 rand = { version = "0.8.5", optional = true }
 quick_cache = "0.6.9"
+rkyv = { version = "0.8.10", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1.16", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }

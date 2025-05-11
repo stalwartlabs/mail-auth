@@ -134,7 +134,7 @@ impl<'x> Iterator for HeaderIterator<'x> {
                         } else if self
                             .iter
                             .peek()
-                            .map_or(true, |(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
+                            .is_none_or(|(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
                         {
                             // Invalid header, return anyway.
                             let header_name = self
@@ -151,7 +151,7 @@ impl<'x> Iterator for HeaderIterator<'x> {
                 && self
                     .iter
                     .peek()
-                    .map_or(true, |(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
+                    .is_none_or(|(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
             {
                 let header_name = self
                     .message
@@ -221,7 +221,7 @@ impl<'x> Iterator for HeaderParser<'x> {
                         } else if self
                             .iter
                             .peek()
-                            .map_or(true, |(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
+                            .is_none_or(|(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
                         {
                             // Invalid header, return anyway.
                             let header_name = self
@@ -263,7 +263,7 @@ impl<'x> Iterator for HeaderParser<'x> {
                 && self
                     .iter
                     .peek()
-                    .map_or(true, |(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
+                    .is_none_or(|(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
             {
                 let header_name = self
                     .message
@@ -364,56 +364,58 @@ impl Writer for Vec<u8> {
     }
 }
 
-const FROM: u64 = (b'f' as u64) | (b'r' as u64) << 8 | (b'o' as u64) << 16 | (b'm' as u64) << 24;
+const FROM: u64 =
+    (b'f' as u64) | ((b'r' as u64) << 8) | ((b'o' as u64) << 16) | ((b'm' as u64) << 24);
 const DKIM: u64 = (b'd' as u64)
-    | (b'k' as u64) << 8
-    | (b'i' as u64) << 16
-    | (b'm' as u64) << 24
-    | (b'-' as u64) << 32
-    | (b's' as u64) << 40
-    | (b'i' as u64) << 48
-    | (b'g' as u64) << 56;
+    | ((b'k' as u64) << 8)
+    | ((b'i' as u64) << 16)
+    | ((b'm' as u64) << 24)
+    | ((b'-' as u64) << 32)
+    | ((b's' as u64) << 40)
+    | ((b'i' as u64) << 48)
+    | ((b'g' as u64) << 56);
 const AAR: u64 = (b'a' as u64)
-    | (b'r' as u64) << 8
-    | (b'c' as u64) << 16
-    | (b'-' as u64) << 24
-    | (b'a' as u64) << 32
-    | (b'u' as u64) << 40
-    | (b't' as u64) << 48
-    | (b'h' as u64) << 56;
+    | ((b'r' as u64) << 8)
+    | ((b'c' as u64) << 16)
+    | ((b'-' as u64) << 24)
+    | ((b'a' as u64) << 32)
+    | ((b'u' as u64) << 40)
+    | ((b't' as u64) << 48)
+    | ((b'h' as u64) << 56);
 const AMS: u64 = (b'a' as u64)
-    | (b'r' as u64) << 8
-    | (b'c' as u64) << 16
-    | (b'-' as u64) << 24
-    | (b'm' as u64) << 32
-    | (b'e' as u64) << 40
-    | (b's' as u64) << 48
-    | (b's' as u64) << 56;
+    | ((b'r' as u64) << 8)
+    | ((b'c' as u64) << 16)
+    | ((b'-' as u64) << 24)
+    | ((b'm' as u64) << 32)
+    | ((b'e' as u64) << 40)
+    | ((b's' as u64) << 48)
+    | ((b's' as u64) << 56);
 const AS: u64 = (b'a' as u64)
-    | (b'r' as u64) << 8
-    | (b'c' as u64) << 16
-    | (b'-' as u64) << 24
-    | (b's' as u64) << 32
-    | (b'e' as u64) << 40
-    | (b'a' as u64) << 48
-    | (b'l' as u64) << 56;
+    | ((b'r' as u64) << 8)
+    | ((b'c' as u64) << 16)
+    | ((b'-' as u64) << 24)
+    | ((b's' as u64) << 32)
+    | ((b'e' as u64) << 40)
+    | ((b'a' as u64) << 48)
+    | ((b'l' as u64) << 56);
 const RECEIVED: u64 = (b'r' as u64)
-    | (b'e' as u64) << 8
-    | (b'c' as u64) << 16
-    | (b'e' as u64) << 24
-    | (b'i' as u64) << 32
-    | (b'v' as u64) << 40
-    | (b'e' as u64) << 48
-    | (b'd' as u64) << 56;
-const DATE: u64 = (b'd' as u64) | (b'a' as u64) << 8 | (b't' as u64) << 16 | (b'e' as u64) << 24;
+    | ((b'e' as u64) << 8)
+    | ((b'c' as u64) << 16)
+    | ((b'e' as u64) << 24)
+    | ((b'i' as u64) << 32)
+    | ((b'v' as u64) << 40)
+    | ((b'e' as u64) << 48)
+    | ((b'd' as u64) << 56);
+const DATE: u64 =
+    (b'd' as u64) | ((b'a' as u64) << 8) | ((b't' as u64) << 16) | ((b'e' as u64) << 24);
 const MSGID: u64 = (b'm' as u64)
-    | (b'e' as u64) << 8
-    | (b's' as u64) << 16
-    | (b's' as u64) << 24
-    | (b'a' as u64) << 32
-    | (b'g' as u64) << 40
-    | (b'e' as u64) << 48
-    | (b'-' as u64) << 56;
+    | ((b'e' as u64) << 8)
+    | ((b's' as u64) << 16)
+    | ((b's' as u64) << 24)
+    | ((b'a' as u64) << 32)
+    | ((b'g' as u64) << 40)
+    | ((b'e' as u64) << 48)
+    | ((b'-' as u64) << 56);
 
 #[cfg(test)]
 mod test {

@@ -24,7 +24,7 @@ impl TxtRecordParser for Spf {
         let mut record = bytes.iter();
         if !matches!(record.key(), Some(k) if k == V)
             || !record.match_bytes(b"spf1")
-            || record.next().is_some_and( |v| !v.is_ascii_whitespace())
+            || record.next().is_some_and(|v| !v.is_ascii_whitespace())
         {
             return Err(Error::InvalidRecordType);
         }
@@ -209,36 +209,36 @@ impl TxtRecordParser for Spf {
 }
 
 const A: u64 = b'a' as u64;
-const ALL: u64 = (b'l' as u64) << 16 | (b'l' as u64) << 8 | (b'a' as u64);
-const EXISTS: u64 = (b's' as u64) << 40
-    | (b't' as u64) << 32
-    | (b's' as u64) << 24
-    | (b'i' as u64) << 16
-    | (b'x' as u64) << 8
+const ALL: u64 = ((b'l' as u64) << 16) | ((b'l' as u64) << 8) | (b'a' as u64);
+const EXISTS: u64 = ((b's' as u64) << 40)
+    | ((b't' as u64) << 32)
+    | ((b's' as u64) << 24)
+    | ((b'i' as u64) << 16)
+    | ((b'x' as u64) << 8)
     | (b'e' as u64);
-const EXP: u64 = (b'p' as u64) << 16 | (b'x' as u64) << 8 | (b'e' as u64);
-const INCLUDE: u64 = (b'e' as u64) << 48
-    | (b'd' as u64) << 40
-    | (b'u' as u64) << 32
-    | (b'l' as u64) << 24
-    | (b'c' as u64) << 16
-    | (b'n' as u64) << 8
+const EXP: u64 = ((b'p' as u64) << 16) | ((b'x' as u64) << 8) | (b'e' as u64);
+const INCLUDE: u64 = ((b'e' as u64) << 48)
+    | ((b'd' as u64) << 40)
+    | ((b'u' as u64) << 32)
+    | ((b'l' as u64) << 24)
+    | ((b'c' as u64) << 16)
+    | ((b'n' as u64) << 8)
     | (b'i' as u64);
-const IP4: u64 = (b'4' as u64) << 16 | (b'p' as u64) << 8 | (b'i' as u64);
-const IP6: u64 = (b'6' as u64) << 16 | (b'p' as u64) << 8 | (b'i' as u64);
-const MX: u64 = (b'x' as u64) << 8 | (b'm' as u64);
-const PTR: u64 = (b'r' as u64) << 16 | (b't' as u64) << 8 | (b'p' as u64);
-const REDIRECT: u64 = (b't' as u64) << 56
-    | (b'c' as u64) << 48
-    | (b'e' as u64) << 40
-    | (b'r' as u64) << 32
-    | (b'i' as u64) << 24
-    | (b'd' as u64) << 16
-    | (b'e' as u64) << 8
+const IP4: u64 = ((b'4' as u64) << 16) | ((b'p' as u64) << 8) | (b'i' as u64);
+const IP6: u64 = ((b'6' as u64) << 16) | ((b'p' as u64) << 8) | (b'i' as u64);
+const MX: u64 = ((b'x' as u64) << 8) | (b'm' as u64);
+const PTR: u64 = ((b'r' as u64) << 16) | ((b't' as u64) << 8) | (b'p' as u64);
+const REDIRECT: u64 = ((b't' as u64) << 56)
+    | ((b'c' as u64) << 48)
+    | ((b'e' as u64) << 40)
+    | ((b'r' as u64) << 32)
+    | ((b'i' as u64) << 24)
+    | ((b'd' as u64) << 16)
+    | ((b'e' as u64) << 8)
     | (b'r' as u64);
-const RA: u64 = (b'a' as u64) << 8 | (b'r' as u64);
-const RP: u64 = (b'p' as u64) << 8 | (b'r' as u64);
-const RR: u64 = (b'r' as u64) << 8 | (b'r' as u64);
+const RA: u64 = ((b'a' as u64) << 8) | (b'r' as u64);
+const RP: u64 = ((b'p' as u64) << 8) | (b'r' as u64);
+const RR: u64 = ((b'r' as u64) << 8) | (b'r' as u64);
 
 pub(crate) trait SPFParser: Sized {
     fn next_term(&mut self) -> Option<(u64, Qualifier, u8)>;
@@ -920,7 +920,8 @@ mod test {
                                         num_parts: 1,
                                         reverse: true,
                                         escape: false,
-                                        delimiters: 1u64 << (b'+' - b'+') | 1u64 << (b'-' - b'+'),
+                                        delimiters: (1u64 << (b'+' - b'+'))
+                                            | (1u64 << (b'-' - b'+')),
                                     },
                                     Macro::Literal(b"._spf.".to_vec()),
                                     Macro::Variable {
@@ -1314,10 +1315,10 @@ mod test {
                             num_parts: 0,
                             reverse: false,
                             escape: false,
-                            delimiters: 1u64 << (b',' - b'+')
-                                | 1u64 << (b'=' - b'+')
-                                | 1u64 << (b'_' - b'+')
-                                | 1u64 << (b'/' - b'+'),
+                            delimiters: (1u64 << (b',' - b'+'))
+                                | (1u64 << (b'=' - b'+'))
+                                | (1u64 << (b'_' - b'+'))
+                                | (1u64 << (b'/' - b'+')),
                         },
                         Macro::Literal(b"._spf.".to_vec()),
                         Macro::Variable {

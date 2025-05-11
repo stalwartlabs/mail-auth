@@ -11,8 +11,8 @@ use common::{crypto::HashAlgorithm, headers::Header, verify::DomainKey};
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
 use hickory_resolver::{
-    proto::{error::ProtoError, op::ResponseCode},
-    TokioAsyncResolver,
+    proto::{op::ResponseCode, ProtoError},
+    TokioResolver,
 };
 use mta_sts::{MtaSts, TlsRpt};
 use spf::{Macro, Spf};
@@ -41,7 +41,7 @@ pub use hickory_resolver;
 pub use zip;
 
 #[derive(Clone)]
-pub struct MessageAuthenticator(pub TokioAsyncResolver);
+pub struct MessageAuthenticator(pub TokioResolver);
 
 pub struct Parameters<'x, P, TXT, MXX, IPV4, IPV6, PTR>
 where
@@ -110,7 +110,7 @@ pub struct AuthenticatedMessage<'x> {
     pub headers: Vec<(&'x [u8], &'x [u8])>,
     pub from: Vec<String>,
     pub raw_message: &'x [u8],
-    pub body_offset: usize,
+    pub body_offset: u32,
     pub body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
     pub dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature>>>,
     pub ams_headers: Vec<Header<'x, crate::Result<arc::Signature>>>,

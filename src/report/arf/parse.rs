@@ -49,7 +49,7 @@ impl<'x> Feedback<'x> {
                     included_message = match message.raw_message {
                         Cow::Borrowed(message) => Cow::Borrowed(
                             message
-                                .get(part.offset_body..part.offset_end)
+                                .get(part.offset_body as usize..part.offset_end as usize)
                                 .unwrap_or_default(),
                         ),
                         message => message,

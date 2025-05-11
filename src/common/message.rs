@@ -25,8 +25,10 @@ impl<'x> AuthenticatedMessage<'x> {
         };
 
         for header in root.headers() {
-            let name = &parsed.raw_message[header.offset_field..header.offset_start - 1];
-            let value = &parsed.raw_message[header.offset_start..header.offset_end];
+            let name =
+                &parsed.raw_message[header.offset_field as usize..header.offset_start as usize - 1];
+            let value =
+                &parsed.raw_message[header.offset_start as usize..header.offset_end as usize];
 
             match &header.name {
                 HeaderName::From => {
@@ -106,9 +108,9 @@ impl<'x> AuthenticatedMessage<'x> {
 
             // Obtain message body
             if let Some(offset) = headers.body_offset() {
-                message.body_offset = offset;
+                message.body_offset = offset as u32;
             } else {
-                message.body_offset = raw_message.len();
+                message.body_offset = raw_message.len() as u32;
             }
             Some(message.finalize())
         } else {
@@ -201,7 +203,10 @@ impl<'x> AuthenticatedMessage<'x> {
     }
 
     fn finalize(mut self) -> Self {
-        let body = self.raw_message.get(self.body_offset..).unwrap_or_default();
+        let body = self
+            .raw_message
+            .get(self.body_offset as usize..)
+            .unwrap_or_default();
 
         // Calculate body hashes
         for (cb, ha, l, bh) in &mut self.body_hashes {
@@ -253,7 +258,9 @@ impl<'x> AuthenticatedMessage<'x> {
     }
 
     pub fn raw_headers(&self) -> &[u8] {
-        self.raw_message.get(..self.body_offset).unwrap_or_default()
+        self.raw_message
+            .get(..self.body_offset as usize)
+            .unwrap_or_default()
     }
 
     pub fn raw_parsed_headers(&self) -> &[(&[u8], &[u8])] {
@@ -261,11 +268,13 @@ impl<'x> AuthenticatedMessage<'x> {
     }
 
     pub fn raw_body(&self) -> &[u8] {
-        self.raw_message.get(self.body_offset..).unwrap_or_default()
+        self.raw_message
+            .get(self.body_offset as usize..)
+            .unwrap_or_default()
     }
 
     pub fn body_offset(&self) -> usize {
-        self.body_offset
+        self.body_offset as usize
     }
 
     pub fn froms(&self) -> &[String] {

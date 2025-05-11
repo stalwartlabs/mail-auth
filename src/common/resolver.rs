@@ -13,9 +13,10 @@ use std::{
 
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
-    error::{ResolveError, ResolveErrorKind},
+    name_server::TokioConnectionProvider,
+    proto::ProtoErrorKind,
     system_conf::read_system_conf,
-    AsyncResolver, Name, TokioAsyncResolver,
+    Name, ResolveError, ResolveErrorKind, TokioResolver,
 };
 
 use crate::{
@@ -60,10 +61,14 @@ impl MessageAuthenticator {
     }
 
     pub fn new(config: ResolverConfig, options: ResolverOpts) -> Result<Self, ResolveError> {
-        Ok(MessageAuthenticator(AsyncResolver::tokio(config, options)))
+        Ok(MessageAuthenticator(
+            TokioResolver::builder_with_config(config, TokioConnectionProvider::default())
+                .with_options(options)
+                .build(),
+        ))
     }
 
-    pub fn resolver(&self) -> &TokioAsyncResolver {
+    pub fn resolver(&self) -> &TokioResolver {
         &self.0
     }
 
@@ -76,7 +81,7 @@ impl MessageAuthenticator {
             .as_lookup()
             .record_iter()
         {
-            if let Some(txt_data) = record.data().and_then(|r| r.as_txt()) {
+            if let Some(txt_data) = record.data().as_txt() {
                 for item in txt_data.txt_data() {
                     result.extend_from_slice(item);
                 }
@@ -107,7 +112,7 @@ impl MessageAuthenticator {
             .await?;
         let mut result = Err(Error::InvalidRecordType);
         let records = txt_lookup.as_lookup().record_iter().filter_map(|r| {
-            let txt_data = r.data()?.as_txt()?.txt_data();
+            let txt_data = r.data().as_txt()?.txt_data();
             match txt_data.len() {
                 1 => Some(Cow::from(txt_data[0].as_ref())),
                 0 => None,
@@ -159,7 +164,7 @@ impl MessageAuthenticator {
         let mx_records = mx_lookup.as_lookup().records();
         let mut records: Vec<MX> = Vec::with_capacity(mx_records.len());
         for mx_record in mx_records {
-            if let Some(mx) = mx_record.data().and_then(|r| r.as_mx()) {
+            if let Some(mx) = mx_record.data().as_mx() {
                 let preference = mx.preference();
                 let exchange = mx.exchange().to_lowercase().to_string();
 
@@ -217,7 +222,7 @@ impl MessageAuthenticator {
         let ips: Arc<Vec<Ipv4Addr>> = ipv4_lookup
             .as_lookup()
             .record_iter()
-            .filter_map(|r| r.data()?.as_a()?.0.into())
+            .filter_map(|r| r.data().as_a()?.0.into())
             .collect::<Vec<Ipv4Addr>>()
             .into();
 
@@ -260,7 +265,7 @@ impl MessageAuthenticator {
         let ips: Arc<Vec<Ipv6Addr>> = ipv6_lookup
             .as_lookup()
             .record_iter()
-            .filter_map(|r| r.data()?.as_aaaa()?.0.into())
+            .filter_map(|r| r.data().as_aaaa()?.0.into())
             .collect::<Vec<Ipv6Addr>>()
             .into();
 
@@ -335,7 +340,7 @@ impl MessageAuthenticator {
             .as_lookup()
             .record_iter()
             .filter_map(|r| {
-                let r = r.data()?.as_ptr()?;
+                let r = r.data().as_ptr()?;
                 if !r.is_empty() {
                     r.to_lowercase().to_string().into()
                 } else {
@@ -394,21 +399,22 @@ impl MessageAuthenticator {
             .await
         {
             Ok(result) => Ok(result.as_lookup().record_iter().any(|r| {
-                r.data().is_some_and(|d| {
-                    matches!(
-                        d.record_type(),
-                        hickory_resolver::proto::rr::RecordType::A
-                            | hickory_resolver::proto::rr::RecordType::AAAA
-                    )
-                })
+                matches!(
+                    r.data().record_type(),
+                    hickory_resolver::proto::rr::RecordType::A
+                        | hickory_resolver::proto::rr::RecordType::AAAA
+                )
             })),
-            Err(err) => {
-                if matches!(err.kind(), ResolveErrorKind::NoRecordsFound { .. }) {
-                    Ok(false)
-                } else {
-                    Err(err.into())
+            Err(err) => match err.kind() {
+                ResolveErrorKind::Proto(proto) => {
+                    if let ProtoErrorKind::NoRecordsFound { .. } = proto.kind() {
+                        Ok(false)
+                    } else {
+                        Err(err.into())
+                    }
                 }
-            }
+                _ => Err(err.into()),
+            },
         }
     }
 }
@@ -416,9 +422,12 @@ impl MessageAuthenticator {
 impl From<ResolveError> for Error {
     fn from(err: ResolveError) -> Self {
         match err.kind() {
-            ResolveErrorKind::NoRecordsFound { response_code, .. } => {
-                Error::DnsRecordNotFound(*response_code)
-            }
+            ResolveErrorKind::Proto(proto) => match proto.kind() {
+                ProtoErrorKind::NoRecordsFound { response_code, .. } => {
+                    Error::DnsRecordNotFound(*response_code)
+                }
+                _ => Error::DnsError(err.to_string()),
+            },
             _ => Error::DnsError(err.to_string()),
         }
     }

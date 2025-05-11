@@ -13,6 +13,10 @@ pub mod generate;
 pub mod parse;
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct TlsReport {
     #[serde(rename = "organization-name")]
     #[serde(default)]
@@ -35,6 +39,10 @@ pub struct TlsReport {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct Policy {
     #[serde(rename = "policy")]
     pub policy: PolicyDetails,
@@ -48,6 +56,10 @@ pub struct Policy {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct PolicyDetails {
     #[serde(rename = "policy-type")]
     pub policy_type: PolicyType,
@@ -66,6 +78,10 @@ pub struct PolicyDetails {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct Summary {
     #[serde(rename = "total-successful-session-count")]
     #[serde(default)]
@@ -77,6 +93,10 @@ pub struct Summary {
 }
 
 #[derive(Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct FailureDetails {
     #[serde(rename = "result-type")]
     pub result_type: ResultType,
@@ -105,6 +125,10 @@ pub struct FailureDetails {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub struct DateRange {
     #[serde(rename = "start-datetime")]
     #[serde(serialize_with = "serialize_datetime")]
@@ -117,6 +141,10 @@ pub struct DateRange {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone, Copy)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum PolicyType {
     #[serde(rename = "tlsa")]
     Tlsa,
@@ -130,6 +158,10 @@ pub enum PolicyType {
 }
 
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 pub enum ResultType {
     #[serde(rename = "starttls-not-supported")]
     StartTlsNotSupported,

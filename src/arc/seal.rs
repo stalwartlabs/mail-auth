@@ -60,7 +60,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
 
         // Canonicalize body
         if set.signature.l > 0 {
-            set.signature.l = (message.raw_message.len() - message.body_offset) as u64;
+            set.signature.l = message.raw_message.len() as u64 - message.body_offset as u64;
         }
         let ha = HashAlgorithm::from(set.signature.a);
         if let Some((_, _, _, bh)) = message
@@ -75,7 +75,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
                 set.signature.cb.canonical_body(
                     message
                         .raw_message
-                        .get(message.body_offset..)
+                        .get(message.body_offset as usize..)
                         .unwrap_or_default(),
                     u64::MAX,
                 ),

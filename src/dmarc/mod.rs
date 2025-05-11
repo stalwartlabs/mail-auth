@@ -32,6 +32,10 @@ pub struct Dmarc {
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
 #[allow(clippy::upper_case_acronyms)]
 pub struct URI {
     pub uri: String,

@@ -223,49 +223,6 @@ pub mod test {
             self
         }
 
-        /*pub fn with_ipv4<'x>(
-            self,
-            name: impl IntoFqdn<'x>,
-            value: Vec<Ipv4Addr>,
-            valid_until: std::time::Instant,
-        ) -> Self {
-            self.ipv4
-                .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
-            self
-        }
-
-        pub fn with_ipv6<'x>(
-            self,
-            name: impl IntoFqdn<'x>,
-            value: Vec<Ipv6Addr>,
-            valid_until: std::time::Instant,
-        ) -> Self {
-            self.ipv6
-                .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
-            self
-        }
-
-        pub fn with_ptr(
-            self,
-            name: IpAddr,
-            value: Vec<String>,
-            valid_until: std::time::Instant,
-        ) -> Self {
-            self.ptr.insert(name, Arc::new(value), valid_until);
-            self
-        }
-
-        pub fn with_mx<'x>(
-            self,
-            name: impl IntoFqdn<'x>,
-            value: Vec<MX>,
-            valid_until: std::time::Instant,
-        ) -> Self {
-            self.mx
-                .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
-            self
-        }*/
-
         pub fn txt_add<'x>(
             &self,
             name: impl IntoFqdn<'x>,

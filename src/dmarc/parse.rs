@@ -318,21 +318,22 @@ impl ItemParser for Format {
 }
 
 const ADKIM: u64 = (b'a' as u64)
-    | (b'd' as u64) << 8
-    | (b'k' as u64) << 16
-    | (b'i' as u64) << 24
-    | (b'm' as u64) << 32;
-const ASPF: u64 = (b'a' as u64) | (b's' as u64) << 8 | (b'p' as u64) << 16 | (b'f' as u64) << 24;
-const FO: u64 = (b'f' as u64) | (b'o' as u64) << 8;
-const NP: u64 = (b'n' as u64) | (b'p' as u64) << 8;
+    | ((b'd' as u64) << 8)
+    | ((b'k' as u64) << 16)
+    | ((b'i' as u64) << 24)
+    | ((b'm' as u64) << 32);
+const ASPF: u64 =
+    (b'a' as u64) | ((b's' as u64) << 8) | ((b'p' as u64) << 16) | ((b'f' as u64) << 24);
+const FO: u64 = (b'f' as u64) | ((b'o' as u64) << 8);
+const NP: u64 = (b'n' as u64) | ((b'p' as u64) << 8);
 const P: u64 = b'p' as u64;
-const PCT: u64 = (b'p' as u64) | (b'c' as u64) << 8 | (b't' as u64) << 16;
-const RF: u64 = (b'r' as u64) | (b'f' as u64) << 8;
-const RI: u64 = (b'r' as u64) | (b'i' as u64) << 8;
-const RUA: u64 = (b'r' as u64) | (b'u' as u64) << 8 | (b'a' as u64) << 16;
-const RUF: u64 = (b'r' as u64) | (b'u' as u64) << 8 | (b'f' as u64) << 16;
-const SP: u64 = (b's' as u64) | (b'p' as u64) << 8;
-const PSD: u64 = (b'p' as u64) | (b's' as u64) << 8 | (b'd' as u64) << 16;
+const PCT: u64 = (b'p' as u64) | ((b'c' as u64) << 8) | ((b't' as u64) << 16);
+const RF: u64 = (b'r' as u64) | ((b'f' as u64) << 8);
+const RI: u64 = (b'r' as u64) | ((b'i' as u64) << 8);
+const RUA: u64 = (b'r' as u64) | ((b'u' as u64) << 8) | ((b'a' as u64) << 16);
+const RUF: u64 = (b'r' as u64) | ((b'u' as u64) << 8) | ((b'f' as u64) << 16);
+const SP: u64 = (b's' as u64) | ((b'p' as u64) << 8);
+const PSD: u64 = (b'p' as u64) | ((b's' as u64) << 8) | ((b'd' as u64) << 16);
 
 #[cfg(test)]
 mod test {

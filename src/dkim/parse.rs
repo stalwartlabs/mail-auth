@@ -20,24 +20,27 @@ use super::{
 };
 
 const ATPSH: u64 = (b'a' as u64)
-    | (b't' as u64) << 8
-    | (b'p' as u64) << 16
-    | (b's' as u64) << 24
-    | (b'h' as u64) << 32;
-const ATPS: u64 = (b'a' as u64) | (b't' as u64) << 8 | (b'p' as u64) << 16 | (b's' as u64) << 24;
-const NONE: u64 = (b'n' as u64) | (b'o' as u64) << 8 | (b'n' as u64) << 16 | (b'e' as u64) << 24;
+    | ((b't' as u64) << 8)
+    | ((b'p' as u64) << 16)
+    | ((b's' as u64) << 24)
+    | ((b'h' as u64) << 32);
+const ATPS: u64 =
+    (b'a' as u64) | ((b't' as u64) << 8) | ((b'p' as u64) << 16) | ((b's' as u64) << 24);
+const NONE: u64 =
+    (b'n' as u64) | ((b'o' as u64) << 8) | ((b'n' as u64) << 16) | ((b'e' as u64) << 24);
 const SHA256: u64 = (b's' as u64)
-    | (b'h' as u64) << 8
-    | (b'a' as u64) << 16
-    | (b'2' as u64) << 24
-    | (b'5' as u64) << 32
-    | (b'6' as u64) << 40;
-const SHA1: u64 = (b's' as u64) | (b'h' as u64) << 8 | (b'a' as u64) << 16 | (b'1' as u64) << 24;
-const RA: u64 = (b'r' as u64) | (b'a' as u64) << 8;
-const RP: u64 = (b'r' as u64) | (b'p' as u64) << 8;
-const RR: u64 = (b'r' as u64) | (b'r' as u64) << 8;
-const RS: u64 = (b'r' as u64) | (b's' as u64) << 8;
-const ALL: u64 = (b'a' as u64) | (b'l' as u64) << 8 | (b'l' as u64) << 16;
+    | ((b'h' as u64) << 8)
+    | ((b'a' as u64) << 16)
+    | ((b'2' as u64) << 24)
+    | ((b'5' as u64) << 32)
+    | ((b'6' as u64) << 40);
+const SHA1: u64 =
+    (b's' as u64) | ((b'h' as u64) << 8) | ((b'a' as u64) << 16) | ((b'1' as u64) << 24);
+const RA: u64 = (b'r' as u64) | ((b'a' as u64) << 8);
+const RP: u64 = (b'r' as u64) | ((b'p' as u64) << 8);
+const RR: u64 = (b'r' as u64) | ((b'r' as u64) << 8);
+const RS: u64 = (b'r' as u64) | ((b's' as u64) << 8);
+const ALL: u64 = (b'a' as u64) | ((b'l' as u64) << 8) | ((b'l' as u64) << 16);
 
 impl Signature {
     #[allow(clippy::while_let_on_iterator)]
