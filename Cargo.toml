@@ -19,7 +19,7 @@ doctest = false
 default = ["ring", "rustls-pemfile", "report"]
 rust-crypto = ["ed25519-dalek", "rsa", "sha1", "sha2"]
 generate = ["rsa", "rand"]
-report = ["quick-xml"]
+report = ["quick-xml", "zip"]
 test = []
 rkyv = ["dep:rkyv", "mail-parser/rkyv"]
 
@@ -38,7 +38,7 @@ serde_json = "1.0"
 sha1 = { version = "0.10", features = ["oid"], optional = true }
 sha2 = { version = "0.10.6", features = ["oid"], optional = true }
 hickory-resolver = { version = "0.25", features = ["tls-ring", "dnssec-ring"] }
-zip = "2.1.1"
+zip = { version = "2.1.1", optional = true }
 rand = { version = "0.8.5", optional = true }
 quick_cache = "0.6.9"
 rkyv = { version = "0.8.10", optional = true }
