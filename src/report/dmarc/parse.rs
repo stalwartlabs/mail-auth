@@ -304,17 +304,18 @@ impl Extension {
         buf: &mut Vec<u8>,
         extensions: &mut Vec<Extension>,
     ) -> Result<(), String> {
+        let decoder = reader.decoder();
         while let Some(tag) = reader.next_tag(buf)? {
             match tag.name().as_ref() {
                 b"extension" => {
                     let mut e = Extension::default();
                     if let Ok(Some(attr)) = tag.try_get_attribute("name") {
-                        if let Ok(attr) = attr.unescape_value() {
+                        if let Ok(attr) = attr.decode_and_unescape_value(decoder) {
                             e.name = attr.to_string();
                         }
                     }
                     if let Ok(Some(attr)) = tag.try_get_attribute("definition") {
-                        if let Ok(attr) = attr.unescape_value() {
+                        if let Ok(attr) = attr.decode_and_unescape_value(decoder) {
                             e.definition = attr.to_string();
                         }
                     }
