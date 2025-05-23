@@ -113,7 +113,8 @@ impl<'x> AuthenticationResults<'x> {
     pub fn with_arc_result(mut self, arc: &ArcOutput, remote_ip: IpAddr) -> Self {
         self.auth_results.push_str(";\r\n\tarc=");
         arc.result.as_auth_result(&mut self.auth_results);
-        write!(self.auth_results, " smtp.remote-ip={remote_ip}").ok();
+        let _ = write!(self.auth_results, " smtp.remote-ip=");
+        let _ = format_ip_as_pvalue(&mut self.auth_results, remote_ip);
         self
     }
 
@@ -140,7 +141,8 @@ impl<'x> AuthenticationResults<'x> {
     pub fn with_iprev_result(mut self, iprev: &IprevOutput, remote_ip: IpAddr) -> Self {
         self.auth_results.push_str(";\r\n\tiprev=");
         iprev.result.as_auth_result(&mut self.auth_results);
-        write!(self.auth_results, " policy.iprev={remote_ip}").ok();
+        let _ = write!(self.auth_results, " policy.iprev=");
+        let _ = format_ip_as_pvalue(&mut self.auth_results, remote_ip);
         self
     }
 }
@@ -346,6 +348,19 @@ impl AsAuthResult for Error {
     }
 }
 
+/// Encodes the IP address to be used in a [`pvalue`] field.
+///
+/// IPv4 addresses can be used as-is, but IPv6 addresses need to be quoted
+/// since they contain `:` characters.
+///
+/// [`pvalue`]: https://datatracker.ietf.org/doc/html/rfc8601#section-2.2
+fn format_ip_as_pvalue(w: &mut impl Write, ip: IpAddr) -> std::fmt::Result {
+    match ip {
+        IpAddr::V4(addr) => write!(w, "{addr}"),
+        IpAddr::V6(addr) => write!(w, "\"{addr}\""),
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::{
@@ -543,7 +558,7 @@ mod test {
                 "192.127.9.2".parse().unwrap(),
             ),
             (
-                "arc=neutral (body hash did not verify) smtp.remote-ip=1:2:3::a",
+                "arc=neutral (body hash did not verify) smtp.remote-ip=\"1:2:3::a\"",
                 DkimResult::Neutral(Error::FailedBodyHashMatch),
                 "1:2:3::a".parse().unwrap(),
             ),
@@ -571,7 +586,7 @@ mod test {
                 "192.127.9.2".parse().unwrap(),
             ),
             (
-                "iprev=fail (policy not aligned) policy.iprev=1:2:3::a",
+                "iprev=fail (policy not aligned) policy.iprev=\"1:2:3::a\"",
                 IprevOutput {
                     result: IprevResult::Fail(Error::NotAligned),
                     ptr: None,
