@@ -407,7 +407,7 @@ impl MessageAuthenticator {
         }
 
         // Evaluate explain
-        if let (Some(macro_string), Some(SpfResult::Fail { .. })) = (&spf_record.exp, &result) {
+        if let (Some(macro_string), Some(SpfResult::Fail)) = (&spf_record.exp, &result) {
             if let Ok(macro_string) = self
                 .txt_lookup::<Macro>(
                     macro_string.eval(&vars, &domain, true).to_string(),

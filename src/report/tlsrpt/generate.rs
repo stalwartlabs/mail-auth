@@ -98,7 +98,7 @@ impl TlsReport {
     ) -> io::Result<String> {
         let mut buf = Vec::new();
         self.write_rfc5322(report_domain, submitter, from, to, &mut buf)?;
-        String::from_utf8(buf).map_err(|err| io::Error::new(io::ErrorKind::Other, err))
+        String::from_utf8(buf).map_err(io::Error::other)
     }
 
     pub fn to_json(&self) -> String {

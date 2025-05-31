@@ -40,7 +40,7 @@ impl Base32Writer {
 
     pub fn with_capacity(capacity: usize) -> Self {
         Base32Writer {
-            result: String::with_capacity((capacity + 3) / 4 * 5),
+            result: String::with_capacity(capacity.div_ceil(4) * 5),
             last_byte: 0,
             pos: 0,
         }
