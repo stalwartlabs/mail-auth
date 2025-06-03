@@ -1,13 +1,18 @@
+mail-auth 0.7.1
+================================
+- Bump `hickory-resolver`to 0.26.0-alpha.1
+- Bump `zip` to 4.0
+
 mail-auth 0.7.0
 ================================
-- Bump to `mail-parser` 0.11.
-- Bump to `hickory-resolver` 0.25.
+- Bump `mail-parser` to 0.11.
+- Bump `hickory-resolver` to 0.25.
 - Added `rkyv` support.
 - Make `zip` dependency optional.
 
 mail-auth 0.6.1
 ================================
-- Bump to `mail-parser` 0.10.0.
+- Bump `mail-parser` to 0.10.0.
 
 mail-auth 0.6.0
 ================================

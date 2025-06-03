@@ -14,9 +14,9 @@ use std::{
 use hickory_resolver::{
     config::{ResolverConfig, ResolverOpts},
     name_server::TokioConnectionProvider,
-    proto::ProtoErrorKind,
+    proto::{ProtoError, ProtoErrorKind},
     system_conf::read_system_conf,
-    Name, ResolveError, ResolveErrorKind, TokioResolver,
+    Name, TokioResolver,
 };
 
 use crate::{
@@ -35,32 +35,32 @@ pub struct DnsEntry<T> {
 }
 
 impl MessageAuthenticator {
-    pub fn new_cloudflare_tls() -> Result<Self, ResolveError> {
+    pub fn new_cloudflare_tls() -> Result<Self, ProtoError> {
         Self::new(ResolverConfig::cloudflare_tls(), ResolverOpts::default())
     }
 
-    pub fn new_cloudflare() -> Result<Self, ResolveError> {
+    pub fn new_cloudflare() -> Result<Self, ProtoError> {
         Self::new(ResolverConfig::cloudflare(), ResolverOpts::default())
     }
 
-    pub fn new_google() -> Result<Self, ResolveError> {
+    pub fn new_google() -> Result<Self, ProtoError> {
         Self::new(ResolverConfig::google(), ResolverOpts::default())
     }
 
-    pub fn new_quad9() -> Result<Self, ResolveError> {
+    pub fn new_quad9() -> Result<Self, ProtoError> {
         Self::new(ResolverConfig::quad9(), ResolverOpts::default())
     }
 
-    pub fn new_quad9_tls() -> Result<Self, ResolveError> {
+    pub fn new_quad9_tls() -> Result<Self, ProtoError> {
         Self::new(ResolverConfig::quad9_tls(), ResolverOpts::default())
     }
 
-    pub fn new_system_conf() -> Result<Self, ResolveError> {
+    pub fn new_system_conf() -> Result<Self, ProtoError> {
         let (config, options) = read_system_conf()?;
         Self::new(config, options)
     }
 
-    pub fn new(config: ResolverConfig, options: ResolverOpts) -> Result<Self, ResolveError> {
+    pub fn new(config: ResolverConfig, options: ResolverOpts) -> Result<Self, ProtoError> {
         Ok(MessageAuthenticator(
             TokioResolver::builder_with_config(config, TokioConnectionProvider::default())
                 .with_options(options)
@@ -406,28 +406,19 @@ impl MessageAuthenticator {
                 )
             })),
             Err(err) => match err.kind() {
-                ResolveErrorKind::Proto(proto) => {
-                    if let ProtoErrorKind::NoRecordsFound { .. } = proto.kind() {
-                        Ok(false)
-                    } else {
-                        Err(err.into())
-                    }
-                }
+                ProtoErrorKind::NoRecordsFound { .. } => Ok(false),
                 _ => Err(err.into()),
             },
         }
     }
 }
 
-impl From<ResolveError> for Error {
-    fn from(err: ResolveError) -> Self {
+impl From<ProtoError> for Error {
+    fn from(err: ProtoError) -> Self {
         match err.kind() {
-            ResolveErrorKind::Proto(proto) => match proto.kind() {
-                ProtoErrorKind::NoRecordsFound { response_code, .. } => {
-                    Error::DnsRecordNotFound(*response_code)
-                }
-                _ => Error::DnsError(err.to_string()),
-            },
+            ProtoErrorKind::NoRecordsFound(response_code) => {
+                Error::DnsRecordNotFound(response_code.response_code)
+            }
             _ => Error::DnsError(err.to_string()),
         }
     }

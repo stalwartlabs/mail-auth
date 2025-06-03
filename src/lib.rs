@@ -10,10 +10,7 @@ use arc::Set;
 use common::{crypto::HashAlgorithm, headers::Header, verify::DomainKey};
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
-use hickory_resolver::{
-    proto::{op::ResponseCode, ProtoError},
-    TokioResolver,
-};
+use hickory_resolver::{proto::op::ResponseCode, TokioResolver};
 use mta_sts::{MtaSts, TlsRpt};
 use spf::{Macro, Spf};
 use std::{
@@ -349,12 +346,6 @@ impl Display for DmarcResult {
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Error::Io(err.to_string())
-    }
-}
-
-impl From<ProtoError> for Error {
-    fn from(err: ProtoError) -> Self {
-        Error::DnsError(err.to_string())
     }
 }
 

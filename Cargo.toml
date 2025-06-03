@@ -1,9 +1,9 @@
 [package]
 name = "mail-auth"
 description = "DKIM, ARC, SPF and DMARC library for Rust"
-version = "0.7.0"
+version = "0.7.1"
 edition = "2021"
-authors = [ "Stalwart Labs <hello@stalw.art>"]
+authors = [ "Stalwart Labs LLC <hello@stalw.art>"]
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/stalwartlabs/mail-auth"
 homepage = "https://github.com/stalwartlabs/mail-auth"
@@ -37,8 +37,8 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha1 = { version = "0.10", features = ["oid"], optional = true }
 sha2 = { version = "0.10.6", features = ["oid"], optional = true }
-hickory-resolver = { version = "0.25", features = ["tls-ring", "dnssec-ring"] }
-zip = { version = "2.1.1", optional = true }
+hickory-resolver = { version = "=0.26.0-alpha.1", features = ["tls-ring", "dnssec-ring"] }
+zip = { version = "4.0", optional = true }
 rand = { version = "0.8.5", optional = true }
 quick_cache = "0.6.9"
 rkyv = { version = "0.8.10", optional = true }
