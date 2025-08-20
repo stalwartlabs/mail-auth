@@ -245,30 +245,30 @@ mod test {
                 ),
                 (
                     concat!("from:John doe <jdoe@domain.com>\r\n", "subject:test\r\n"),
-                    concat!(" body\r\n"),
+                    " body\r\n",
                 ),
                 (
                     concat!(
                         "  From : John\tdoe <jdoe@domain.com>\t\r\n",
                         "SUB JECT:\ttest  \t  \r\n"
                     ),
-                    concat!(" body \t   \r\n"),
+                    " body \t   \r\n",
                 ),
             ),
             (
-                concat!("H: value\t\r\n\r\n",),
-                (concat!("h:value\r\n"), concat!("")),
-                (concat!("H: value\t\r\n"), concat!("\r\n")),
+                "H: value\t\r\n\r\n",
+                ("h:value\r\n", ""),
+                ("H: value\t\r\n", "\r\n"),
             ),
             (
-                concat!("\tx\t: \t\t\tz\r\n\r\nabc",),
-                (concat!("x:z\r\n"), concat!("abc\r\n")),
-                ("\tx\t: \t\t\tz\r\n", concat!("abc\r\n")),
+                "\tx\t: \t\t\tz\r\n\r\nabc",
+                ("x:z\r\n", "abc\r\n"),
+                ("\tx\t: \t\t\tz\r\n", "abc\r\n"),
             ),
             (
-                concat!("Subject: hello\r\n\r\n\r\n",),
-                (concat!("subject:hello\r\n"), ""),
-                ("Subject: hello\r\n", concat!("\r\n")),
+                "Subject: hello\r\n\r\n\r\n",
+                ("subject:hello\r\n", ""),
+                ("Subject: hello\r\n", "\r\n"),
             ),
         ] {
             let mut header_iterator = HeaderIterator::new(message.as_bytes());

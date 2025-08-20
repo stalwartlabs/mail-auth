@@ -1423,7 +1423,7 @@ mod test {
                 },
             ),
             (
-                concat!("v=spf1 mx:example.org -all ra=postmaster rp=15 rr=e:f:s:n"),
+                "v=spf1 mx:example.org -all ra=postmaster rp=15 rr=e:f:s:n",
                 Spf {
                     version: Version::V1,
                     ra: b"postmaster".to_vec().into(),
@@ -1445,7 +1445,7 @@ mod test {
                 },
             ),
             (
-                concat!("v=spf1 ip6:fe80:0000:0000::0000:0000:0000:1 -all"),
+                "v=spf1 ip6:fe80:0000:0000::0000:0000:0000:1 -all",
                 Spf {
                     version: Version::V1,
                     ra: None,

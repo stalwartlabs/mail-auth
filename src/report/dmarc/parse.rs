@@ -4,21 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::io::{BufRead, Cursor, Read};
-use std::net::IpAddr;
-use std::str::FromStr;
-
-use flate2::read::GzDecoder;
-use mail_parser::{MessageParser, MimeHeaders, PartType};
-use quick_xml::events::{BytesStart, Event};
-use quick_xml::reader::Reader;
-
 use crate::report::{
     ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Disposition, DkimResult,
     DmarcResult, Error, Extension, Identifier, PolicyEvaluated, PolicyOverride,
     PolicyOverrideReason, PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult,
     SPFDomainScope, SpfResult,
 };
+use flate2::read::GzDecoder;
+use mail_parser::{MessageParser, MimeHeaders, PartType};
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::reader::Reader;
+use std::borrow::Cow;
+use std::io::{BufRead, Cursor, Read};
+use std::net::IpAddr;
+use std::str::FromStr;
 
 impl Report {
     pub fn parse_rfc5322(report: &[u8]) -> Result<Self, Error> {
@@ -707,11 +706,46 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
     }
 
     fn next_value<T: FromStr>(&mut self, buf: &mut Vec<u8>) -> Result<Option<T>, String> {
-        let mut value = None;
+        let mut value: Option<String> = None;
+
         loop {
             match self.read_event_into(buf) {
                 Ok(Event::Text(e)) => {
-                    value = e.unescape().ok().and_then(|v| T::from_str(v.as_ref()).ok());
+                    let v = e.xml_content().map_err(|e| {
+                        format!(
+                            "Failed to decode text value at position {}: {}",
+                            self.buffer_position(),
+                            e
+                        )
+                    })?;
+                    if let Some(value) = &mut value {
+                        value.push_str(&v);
+                    } else {
+                        value = Some(v.into_owned());
+                    }
+                }
+                Ok(Event::GeneralRef(e)) => {
+                    let v = hashify::tiny_map!(e.as_ref(),
+                        b"lt" => "<",
+                        b"gt" => ">",
+                        b"amp" => "&",
+                        b"apos" => "'",
+                        b"quot" => "\"",
+                    )
+                    .map(Cow::Borrowed)
+                    .or_else(|| {
+                        e.resolve_char_ref()
+                            .ok()
+                            .flatten()
+                            .map(|v| Cow::Owned(v.to_string()))
+                    })
+                    .unwrap_or_else(|| e.xml_content().unwrap_or_default());
+
+                    if let Some(value) = &mut value {
+                        value.push_str(&v);
+                    } else {
+                        value = Some(v.into_owned());
+                    }
                 }
                 Ok(Event::End(_)) => {
                     break;
@@ -733,7 +767,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
             }
         }
 
-        Ok(value)
+        Ok(value.and_then(|v| T::from_str(&v).ok()))
     }
 
     fn skip_tag(&mut self, buf: &mut Vec<u8>) -> Result<(), String> {

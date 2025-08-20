@@ -69,7 +69,7 @@ pub trait ResolverCache<K, V>: Sized {
     fn insert(&self, key: K, value: V, valid_until: Instant);
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, Hash, PartialEq, Eq)]
 pub enum IpLookupStrategy {
     /// Only query for A (Ipv4) records
     Ipv4Only,

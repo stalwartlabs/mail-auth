@@ -19,7 +19,7 @@ doctest = false
 default = ["ring", "rustls-pemfile", "report"]
 rust-crypto = ["ed25519-dalek", "rsa", "sha1", "sha2"]
 generate = ["rsa", "rand"]
-report = ["quick-xml", "zip"]
+report = ["quick-xml", "zip", "hashify"]
 test = []
 rkyv = ["dep:rkyv", "mail-parser/rkyv"]
 
@@ -29,7 +29,8 @@ ed25519-dalek = { version = "2.0", optional = true }
 flate2 = "1.0.25"
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 mail-builder = { version = "0.4" }
-quick-xml = { version = "0.37", optional = true }
+quick-xml = { version = "0.38", optional = true }
+hashify =  { version = "0.2.6", optional = true }
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.8", optional = true }
 rustls-pemfile = { version = "2", optional = true }

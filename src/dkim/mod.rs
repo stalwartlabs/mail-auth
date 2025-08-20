@@ -241,7 +241,7 @@ impl ArcOutput<'_> {
         &self.result
     }
 
-    pub fn sets(&self) -> &[Set] {
+    pub fn sets(&'_ self) -> &'_ [Set<'_>] {
         &self.set
     }
 }
