@@ -1,3 +1,8 @@
+mail-auth 0.7.2
+================================
+- Bump `quick-xml` to 0.38
+- Bump `zip` to 5.1
+
 mail-auth 0.7.1
 ================================
 - Bump `hickory-resolver`to 0.26.0-alpha.1
