@@ -6,7 +6,7 @@
 
 use std::borrow::Cow;
 
-use mail_parser::{parsers::MessageStream, HeaderValue, MessageParser, MimeHeaders, PartType};
+use mail_parser::{HeaderValue, MessageParser, MimeHeaders, PartType, parsers::MessageStream};
 
 use crate::{
     common::headers::HeaderIterator,
@@ -228,10 +228,10 @@ impl<'x> Feedback<'x> {
                         } else {
                             txt_value.into()
                         });
-                    } else if key.eq_ignore_ascii_case(b"Received-Date") {
-                        if let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date() {
-                            f.arrival_date = dt.to_timestamp().into();
-                        }
+                    } else if key.eq_ignore_ascii_case(b"Received-Date")
+                        && let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date()
+                    {
+                        f.arrival_date = dt.to_timestamp().into();
                     }
                 }
                 Some(b'S' | b's') => {
@@ -261,11 +261,7 @@ impl<'x> Feedback<'x> {
             }
         }
 
-        if has_ft {
-            Some(f)
-        } else {
-            None
-        }
+        if has_ft { Some(f) } else { None }
     }
 }
 

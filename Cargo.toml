@@ -2,7 +2,7 @@
 name = "mail-auth"
 description = "DKIM, ARC, SPF and DMARC library for Rust"
 version = "0.7.2"
-edition = "2021"
+edition = "2024"
 authors = [ "Stalwart Labs LLC <hello@stalw.art>"]
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/stalwartlabs/mail-auth"

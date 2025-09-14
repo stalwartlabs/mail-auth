@@ -308,15 +308,15 @@ impl Extension {
             match tag.name().as_ref() {
                 b"extension" => {
                     let mut e = Extension::default();
-                    if let Ok(Some(attr)) = tag.try_get_attribute("name") {
-                        if let Ok(attr) = attr.decode_and_unescape_value(decoder) {
-                            e.name = attr.to_string();
-                        }
+                    if let Ok(Some(attr)) = tag.try_get_attribute("name")
+                        && let Ok(attr) = attr.decode_and_unescape_value(decoder)
+                    {
+                        e.name = attr.to_string();
                     }
-                    if let Ok(Some(attr)) = tag.try_get_attribute("definition") {
-                        if let Ok(attr) = attr.decode_and_unescape_value(decoder) {
-                            e.definition = attr.to_string();
-                        }
+                    if let Ok(Some(attr)) = tag.try_get_attribute("definition")
+                        && let Ok(attr) = attr.decode_and_unescape_value(decoder)
+                    {
+                        e.definition = attr.to_string();
                     }
                     extensions.push(e);
                     reader.skip_tag(buf)?;
@@ -761,7 +761,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
                     return Err(format!(
                         "Expected value, found unexpected EOF at position {}.",
                         self.buffer_position()
-                    ))
+                    ));
                 }
                 _ => (),
             }
@@ -788,7 +788,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
                     return Err(format!(
                         "Expected value, found unexpected EOF at position {}.",
                         self.buffer_position()
-                    ))
+                    ));
                 }
                 _ => (),
             }

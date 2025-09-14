@@ -11,19 +11,20 @@ use std::{
 };
 
 use crate::{
+    AuthenticatedMessage, DkimOutput, DkimResult, Error, MX, MessageAuthenticator, Parameters,
+    ResolverCache, Txt,
     common::{
         base32::Base32Writer,
         cache::NoCache,
         headers::Writer,
         verify::{DomainKey, VerifySignature},
     },
-    is_within_pct, AuthenticatedMessage, DkimOutput, DkimResult, Error, MessageAuthenticator,
-    Parameters, ResolverCache, Txt, MX,
+    is_within_pct,
 };
 
 use super::{
-    Atps, DomainKeyReport, Flag, HashAlgorithm, Signature, RR_DNS, RR_EXPIRATION, RR_OTHER,
-    RR_SIGNATURE, RR_VERIFICATION,
+    Atps, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_EXPIRATION, RR_OTHER, RR_SIGNATURE,
+    RR_VERIFICATION, Signature,
 };
 
 impl MessageAuthenticator {
@@ -138,11 +139,11 @@ impl MessageAuthenticator {
                 let mut found = false;
                 // RFC5322.From has to match atps=
                 for from in &message.from {
-                    if let Some((_, domain)) = from.rsplit_once('@') {
-                        if domain.eq(atps) {
-                            found = true;
-                            break;
-                        }
+                    if let Some((_, domain)) = from.rsplit_once('@')
+                        && domain.eq(atps)
+                    {
+                        found = true;
+                        break;
                     }
                 }
 
@@ -436,9 +437,9 @@ pub mod test {
     use mail_parser::MessageParser;
 
     use crate::{
+        AuthenticatedMessage, DkimResult, MessageAuthenticator,
         common::{cache::test::DummyCaches, parse::TxtRecordParser, verify::DomainKey},
         dkim::verify::Verifier,
-        AuthenticatedMessage, DkimResult, MessageAuthenticator,
     };
 
     #[tokio::test]

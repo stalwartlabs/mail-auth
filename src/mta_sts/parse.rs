@@ -47,10 +47,10 @@ impl TxtRecordParser for MtaSts {
             }
         }
 
-        if let Some(id) = id {
-            if has_version {
-                return Ok(MtaSts { id });
-            }
+        if let Some(id) = id
+            && has_version
+        {
+            return Ok(MtaSts { id });
         }
         Err(crate::Error::InvalidRecordType)
     }

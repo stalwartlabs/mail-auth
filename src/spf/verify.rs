@@ -11,8 +11,8 @@ use std::{
 };
 
 use crate::{
-    common::cache::NoCache, Error, MessageAuthenticator, Parameters, ResolverCache, SpfOutput,
-    SpfResult, Txt, MX,
+    Error, MX, MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt,
+    common::cache::NoCache,
 };
 
 use super::{Macro, Mechanism, Qualifier, Spf, Variables};
@@ -272,12 +272,12 @@ impl MessageAuthenticator {
                             ) => {
                                 return output
                                     .with_result(SpfResult::PermError)
-                                    .with_report(&spf_record)
+                                    .with_report(&spf_record);
                             }
                             Err(_) => {
                                 return output
                                     .with_result(SpfResult::TempError)
-                                    .with_report(&spf_record)
+                                    .with_report(&spf_record);
                             }
                         }
                     }
@@ -294,8 +294,8 @@ impl MessageAuthenticator {
 
                         if let Ok(records) = self.ptr_lookup(ip, params.cache_ptr).await {
                             for record in records.iter() {
-                                if lookup_limit.can_lookup() {
-                                    if let Ok(true) = self
+                                if lookup_limit.can_lookup()
+                                    && let Ok(true) = self
                                         .ip_matches(
                                             record,
                                             ip,
@@ -305,15 +305,14 @@ impl MessageAuthenticator {
                                             params.cache_ipv6,
                                         )
                                         .await
-                                    {
-                                        matches = record == &target_addr
-                                            || record
-                                                .strip_suffix('.')
-                                                .unwrap_or(record.as_str())
-                                                .ends_with(&target_sub_addr);
-                                        if matches {
-                                            break;
-                                        }
+                                {
+                                    matches = record == &target_addr
+                                        || record
+                                            .strip_suffix('.')
+                                            .unwrap_or(record.as_str())
+                                            .ends_with(&target_sub_addr);
+                                    if matches {
+                                        break;
                                     }
                                 }
                             }
@@ -392,12 +391,12 @@ impl MessageAuthenticator {
                         ) => {
                             return output
                                 .with_result(SpfResult::PermError)
-                                .with_report(&spf_record)
+                                .with_report(&spf_record);
                         }
                         Err(_) => {
                             return output
                                 .with_result(SpfResult::TempError)
-                                .with_report(&spf_record)
+                                .with_report(&spf_record);
                         }
                     }
                 }
@@ -407,19 +406,18 @@ impl MessageAuthenticator {
         }
 
         // Evaluate explain
-        if let (Some(macro_string), Some(SpfResult::Fail)) = (&spf_record.exp, &result) {
-            if let Ok(macro_string) = self
+        if let (Some(macro_string), Some(SpfResult::Fail)) = (&spf_record.exp, &result)
+            && let Ok(macro_string) = self
                 .txt_lookup::<Macro>(
                     macro_string.eval(&vars, &domain, true).to_string(),
                     params.cache_txt,
                 )
                 .await
-            {
-                return output
-                    .with_result(SpfResult::Fail)
-                    .with_explanation(macro_string.eval(&vars, &domain, false).to_string())
-                    .with_report(&spf_record);
-            }
+        {
+            return output
+                .with_result(SpfResult::Fail)
+                .with_explanation(macro_string.eval(&vars, &domain, false).to_string())
+                .with_report(&spf_record);
         }
 
         output
@@ -668,9 +666,9 @@ mod test {
     };
 
     use crate::{
+        MX, MessageAuthenticator, SpfResult,
         common::{cache::test::DummyCaches, parse::TxtRecordParser},
         spf::{Macro, Spf},
-        MessageAuthenticator, SpfResult, MX,
     };
 
     use super::SpfParameters;
@@ -794,10 +792,10 @@ mod test {
                             )))
                             .await;
                         assert_eq!(
-                                output.result(),
-                                result,
-                                "Failed for {test_name:?}, test {test_num}, ehlo: {helo}, mail-from: {mail_from}.",
-                            );
+                            output.result(),
+                            result,
+                            "Failed for {test_name:?}, test {test_num}, ehlo: {helo}, mail-from: {mail_from}.",
+                        );
 
                         if !exp.is_empty() {
                             assert_eq!(Some(exp.to_string()).as_deref(), output.explanation());

@@ -267,10 +267,10 @@ impl TagParser for Iter<'_, u8> {
             }
         }
 
-        if !tag.is_empty() {
-            if let Some(tag) = T::parse(&tag) {
-                tags.push(tag);
-            }
+        if !tag.is_empty()
+            && let Some(tag) = T::parse(&tag)
+        {
+            tags.push(tag);
         }
 
         tags
@@ -292,11 +292,7 @@ impl TagParser for Iter<'_, u8> {
             }
         }
 
-        if has_digits {
-            num.into()
-        } else {
-            None
-        }
+        if has_digits { num.into() } else { None }
     }
 
     #[inline(always)]
@@ -347,10 +343,10 @@ impl TagParser for Iter<'_, u8> {
                 buf.push(ch);
             }
         }
-        if !buf.is_empty() {
-            if let Some(item) = T::parse(&buf) {
-                items.push(item);
-            }
+        if !buf.is_empty()
+            && let Some(item) = T::parse(&buf)
+        {
+            items.push(item);
         }
         items
     }
@@ -372,10 +368,10 @@ impl TagParser for Iter<'_, u8> {
                 buf.push(ch);
             }
         }
-        if !buf.is_empty() {
-            if let Some(item) = T::parse(&buf) {
-                flags |= item.into();
-            }
+        if !buf.is_empty()
+            && let Some(item) = T::parse(&buf)
+        {
+            flags |= item.into();
         }
         flags
     }
