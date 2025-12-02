@@ -349,6 +349,42 @@ impl MessageAuthenticator {
                 }
             }
 
+            // Follow redirect
+            if let (Some(macro_string), None) = (&spf_record.redirect, &result) {
+                if !lookup_limit.can_lookup() {
+                    return output
+                        .with_result(SpfResult::PermError)
+                        .with_report(&spf_record);
+                }
+
+                let target_name = macro_string.eval(&vars, &domain, true);
+                match self
+                    .txt_lookup::<Spf>(target_name.as_ref(), params.cache_txt)
+                    .await
+                {
+                    Ok(redirect_spf) => {
+                        let new_domain = target_name.to_string();
+                        spf_record = redirect_spf;
+                        directives = spf_record.directives.iter().enumerate().skip(0);
+                        domain = new_domain;
+                        vars.set_domain(domain.as_bytes().to_vec());
+                        continue;
+                    }
+                    Err(
+                        Error::DnsRecordNotFound(_) | Error::InvalidRecordType | Error::ParseError,
+                    ) => {
+                        return output
+                            .with_result(SpfResult::PermError)
+                            .with_report(&spf_record);
+                    }
+                    Err(_) => {
+                        return output
+                            .with_result(SpfResult::TempError)
+                            .with_report(&spf_record);
+                    }
+                }
+            }
+
             if let Some((prev_record, prev_pos, prev_domain)) = include_stack.pop() {
                 spf_record = prev_record;
                 directives = spf_record.directives.iter().enumerate().skip(prev_pos);
@@ -363,44 +399,6 @@ impl MessageAuthenticator {
                     result = None;
                 }
             } else {
-                // Follow redirect
-                if let (Some(macro_string), None) = (&spf_record.redirect, &result) {
-                    if !lookup_limit.can_lookup() {
-                        return output
-                            .with_result(SpfResult::PermError)
-                            .with_report(&spf_record);
-                    }
-
-                    let target_name = macro_string.eval(&vars, &domain, true);
-                    match self
-                        .txt_lookup::<Spf>(target_name.as_ref(), params.cache_txt)
-                        .await
-                    {
-                        Ok(redirect_spf) => {
-                            let new_domain = target_name.to_string();
-                            spf_record = redirect_spf;
-                            directives = spf_record.directives.iter().enumerate().skip(0);
-                            domain = new_domain;
-                            vars.set_domain(domain.as_bytes().to_vec());
-                            continue;
-                        }
-                        Err(
-                            Error::DnsRecordNotFound(_)
-                            | Error::InvalidRecordType
-                            | Error::ParseError,
-                        ) => {
-                            return output
-                                .with_result(SpfResult::PermError)
-                                .with_report(&spf_record);
-                        }
-                        Err(_) => {
-                            return output
-                                .with_result(SpfResult::TempError)
-                                .with_report(&spf_record);
-                        }
-                    }
-                }
-
                 break;
             }
         }

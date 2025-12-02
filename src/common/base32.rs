@@ -79,7 +79,7 @@ impl Base32Writer {
     }
 
     pub fn finalize(mut self) -> String {
-        if self.pos % 5 != 0 {
+        if !self.pos.is_multiple_of(5) {
             self.push_byte(0, true);
         }
 

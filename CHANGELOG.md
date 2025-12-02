@@ -1,3 +1,8 @@
+mail-auth 0.7.3
+================================
+- Fix bug in SPF verification with mixed `redirect` and `include` mechanisms.
+- Bump `zip` to 6.0
+
 mail-auth 0.7.2
 ================================
 - Bump `quick-xml` to 0.38

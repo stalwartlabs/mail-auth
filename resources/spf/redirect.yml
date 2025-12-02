@@ -42,3 +42,16 @@ tests:
     ip: 192.168.1.2
     expect: permerror
 
+---
+name: Redirect mixed with include
+records:
+  spf: geometry.ooo v=spf1 include:_spf.yandex.net include:spf.unisender.com ~all
+  spf: _spf.yandex.net v=spf1 redirect=_spf.yandex.ru
+  spf: spf.unisender.com v=spf1 redirect=_spf.yandex.ru
+  spf: _spf.yandex.ru v=spf1 include:_spf-ipv4-yc.yandex.ru include:_spf-ipv6.yandex.ru ~all
+  spf: _spf-ipv4-yc.yandex.ru v=spf1 ip4:178.154.239.80/28 ip4:178.154.239.72/29 ip4:178.154.239.144/28 ip4:178.154.239.136/29 ip4:178.154.239.208/28 ip4:178.154.239.200/29 ip4:51.250.56.16/28 ip4:51.250.56.80/28 ip4:51.250.56.144/28 ~all
+tests:
+  - domain: geometry.ooo
+    sender: sender@geometry.ooo
+    ip: 178.154.239.94
+    expect: pass
