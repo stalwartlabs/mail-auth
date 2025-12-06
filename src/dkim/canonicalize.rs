@@ -4,8 +4,150 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::common::{
+    crypto::HashContext,
+    headers::{HeaderStream, Writable, Writer},
+};
+
 use super::{Canonicalization, Signature};
-use crate::common::headers::{HeaderStream, Writable, Writer};
+
+/// Incremental body hasher for streaming DKIM signing.
+///
+/// This struct allows body content to be fed in chunks while maintaining
+/// the canonicalization state between calls.
+pub struct BodyHasher<H> {
+    hasher: H,
+    canonicalization: Canonicalization,
+    body_length_limit: u64,
+    bytes_hashed: u64,
+    // Canonicalization state
+    crlf_seq: usize,
+    last_ch: u8,
+    is_empty: bool,
+    done: bool,
+}
+
+impl<H: Writer> BodyHasher<H> {
+    /// Creates a new incremental body hasher.
+    ///
+    /// # Arguments
+    /// * `hasher` - The hash context to write canonicalized body to
+    /// * `canonicalization` - The body canonicalization algorithm to use
+    /// * `body_length_limit` - Maximum bytes to hash (0 = unlimited)
+    pub fn new(hasher: H, canonicalization: Canonicalization, body_length_limit: u64) -> Self {
+        Self {
+            hasher,
+            canonicalization,
+            body_length_limit,
+            bytes_hashed: 0,
+            crlf_seq: 0,
+            last_ch: 0,
+            is_empty: true,
+            done: false,
+        }
+    }
+
+    /// Feed a chunk of body data to the hasher.
+    ///
+    /// Data is canonicalized according to the configured algorithm and
+    /// written to the underlying hash context.
+    pub fn write(&mut self, chunk: &[u8]) {
+        if self.done {
+            return;
+        }
+
+        // Apply body length limit if set
+        let chunk = if self.body_length_limit > 0 {
+            let remaining = self.body_length_limit.saturating_sub(self.bytes_hashed);
+            if remaining == 0 {
+                return;
+            }
+            let limit = std::cmp::min(remaining as usize, chunk.len());
+            &chunk[..limit]
+        } else {
+            chunk
+        };
+
+        self.bytes_hashed += chunk.len() as u64;
+
+        match self.canonicalization {
+            Canonicalization::Relaxed => {
+                for &ch in chunk {
+                    match ch {
+                        b' ' | b'\t' => {
+                            while self.crlf_seq > 0 {
+                                self.hasher.write(b"\r\n");
+                                self.crlf_seq -= 1;
+                            }
+                            self.is_empty = false;
+                        }
+                        b'\n' => {
+                            self.crlf_seq += 1;
+                        }
+                        b'\r' => {}
+                        _ => {
+                            while self.crlf_seq > 0 {
+                                self.hasher.write(b"\r\n");
+                                self.crlf_seq -= 1;
+                            }
+
+                            if self.last_ch == b' ' || self.last_ch == b'\t' {
+                                self.hasher.write(b" ");
+                            }
+
+                            self.hasher.write(&[ch]);
+                            self.is_empty = false;
+                        }
+                    }
+                    self.last_ch = ch;
+                }
+            }
+            Canonicalization::Simple => {
+                for &ch in chunk {
+                    match ch {
+                        b'\n' => {
+                            self.crlf_seq += 1;
+                        }
+                        b'\r' => {}
+                        _ => {
+                            while self.crlf_seq > 0 {
+                                self.hasher.write(b"\r\n");
+                                self.crlf_seq -= 1;
+                            }
+                            self.hasher.write(&[ch]);
+                            self.is_empty = false;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Finalize the body hash.
+    ///
+    /// Applies the final canonicalization rules (trailing CRLF handling)
+    /// and returns the completed hash context along with the number of
+    /// body bytes that were processed.
+    pub fn finish(mut self) -> (H, u64)
+    where
+        H: HashContext,
+    {
+        if !self.done {
+            self.done = true;
+            match self.canonicalization {
+                Canonicalization::Relaxed => {
+                    if !self.is_empty {
+                        self.hasher.write(b"\r\n");
+                    }
+                }
+                Canonicalization::Simple => {
+                    self.hasher.write(b"\r\n");
+                }
+            }
+        }
+        (self.hasher, self.bytes_hashed)
+    }
+}
 
 pub struct CanonicalBody<'a> {
     canonicalization: Canonicalization,
@@ -206,10 +348,10 @@ impl Writable for CanonicalHeaders<'_> {
 mod test {
     use mail_builder::encoders::base64::base64_encode;
 
-    use super::{CanonicalBody, CanonicalHeaders};
+    use super::{BodyHasher, CanonicalBody, CanonicalHeaders};
     use crate::{
         common::{
-            crypto::{HashImpl, Sha256},
+            crypto::{HashContext, HashImpl, Sha256},
             headers::{HeaderIterator, Writable},
         },
         dkim::Canonicalization,
@@ -334,6 +476,140 @@ mod test {
                     hash,
                 );
             }
+        }
+    }
+
+    #[test]
+    fn body_hasher_matches_canonical_body() {
+        // Test that BodyHasher produces identical results to CanonicalBody
+        for (body, canonicalization) in [
+            (" C \r\nD \t E\r\n", Canonicalization::Relaxed),
+            (" C \r\nD \t E\r\n", Canonicalization::Simple),
+            (" body \t   \r\n\r\n\r\n", Canonicalization::Relaxed),
+            (" body \t   \r\n\r\n\r\n", Canonicalization::Simple),
+            ("", Canonicalization::Relaxed),
+            ("", Canonicalization::Simple),
+            ("\r\n", Canonicalization::Relaxed),
+            ("\r\n", Canonicalization::Simple),
+            ("abc", Canonicalization::Relaxed),
+            ("abc", Canonicalization::Simple),
+            ("hello world\r\n", Canonicalization::Relaxed),
+            ("hello world\r\n", Canonicalization::Simple),
+        ] {
+            // Hash using CanonicalBody
+            let mut expected_hasher = Sha256::hasher();
+            CanonicalBody {
+                canonicalization,
+                body: body.as_bytes(),
+            }
+            .write(&mut expected_hasher);
+            let expected_hash = expected_hasher.complete();
+
+            // Hash using BodyHasher (single chunk)
+            let mut body_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
+            body_hasher.write(body.as_bytes());
+            let (actual_hasher, _) = body_hasher.finish();
+            let actual_hash = actual_hasher.complete();
+
+            assert_eq!(
+                expected_hash.as_ref(),
+                actual_hash.as_ref(),
+                "BodyHasher (single chunk) mismatch for body {:?} with {:?} canonicalization",
+                body,
+                canonicalization
+            );
+        }
+    }
+
+    #[test]
+    fn body_hasher_chunked_matches_single() {
+        // Test that chunked input produces same result as single input
+        let body = " C \r\nD \t E\r\nMore content here\r\n\r\n";
+
+        for canonicalization in [Canonicalization::Relaxed, Canonicalization::Simple] {
+            // Single chunk
+            let mut single_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
+            single_hasher.write(body.as_bytes());
+            let (single_result, single_len) = single_hasher.finish();
+            let single_hash = single_result.complete();
+
+            // Multiple chunks - split at various points
+            for chunk_size in [1, 2, 3, 5, 7, 10] {
+                let mut chunked_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
+                for chunk in body.as_bytes().chunks(chunk_size) {
+                    chunked_hasher.write(chunk);
+                }
+                let (chunked_result, chunked_len) = chunked_hasher.finish();
+                let chunked_hash = chunked_result.complete();
+
+                assert_eq!(
+                    single_hash.as_ref(),
+                    chunked_hash.as_ref(),
+                    "Chunked (size {}) mismatch for {:?} canonicalization",
+                    chunk_size,
+                    canonicalization
+                );
+                assert_eq!(single_len, chunked_len);
+            }
+        }
+    }
+
+    #[test]
+    fn body_hasher_length_limit() {
+        let body = "Hello World! This is a test body.\r\n";
+
+        for canonicalization in [Canonicalization::Relaxed, Canonicalization::Simple] {
+            // Hash with limit of 10 bytes
+            let mut limited_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 10);
+            limited_hasher.write(body.as_bytes());
+            let (limited_result, limited_len) = limited_hasher.finish();
+            let limited_hash = limited_result.complete();
+
+            // Hash the first 10 bytes using CanonicalBody
+            let mut expected_hasher = Sha256::hasher();
+            CanonicalBody {
+                canonicalization,
+                body: &body.as_bytes()[..10],
+            }
+            .write(&mut expected_hasher);
+            let expected_hash = expected_hasher.complete();
+
+            assert_eq!(
+                expected_hash.as_ref(),
+                limited_hash.as_ref(),
+                "Body length limit mismatch for {:?} canonicalization",
+                canonicalization
+            );
+            assert_eq!(limited_len, 10);
+        }
+    }
+
+    #[test]
+    fn body_hasher_split_crlf() {
+        // Test that CRLF split across chunks is handled correctly
+        let body = "Line1\r\nLine2\r\n";
+
+        for canonicalization in [Canonicalization::Relaxed, Canonicalization::Simple] {
+            // Single chunk reference
+            let mut single_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
+            single_hasher.write(body.as_bytes());
+            let (single_result, _) = single_hasher.finish();
+            let single_hash = single_result.complete();
+
+            // Split right in the middle of \r\n
+            let mut split_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
+            split_hasher.write(b"Line1\r");
+            split_hasher.write(b"\nLine2\r");
+            split_hasher.write(b"\n");
+            let (split_result, _) = split_hasher.finish();
+            let split_hash = split_result.complete();
+
+            assert_eq!(
+                single_hash.as_ref(),
+                split_hash.as_ref(),
+                "Split CRLF mismatch for {:?} canonicalization",
+                canonicalization
+            );
         }
     }
 }
