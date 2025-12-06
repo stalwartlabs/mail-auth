@@ -22,6 +22,8 @@ pub mod parse;
 pub mod sign;
 pub mod verify;
 
+pub use sign::DkimSigningStream;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Canonicalization {
     #[default]
