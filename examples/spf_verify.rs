@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use mail_auth::{spf::verify::SpfParameters, MessageAuthenticator, SpfResult};
+use mail_auth::{MessageAuthenticator, SpfResult, spf::verify::SpfParameters};
 
 #[tokio::main]
 async fn main() {

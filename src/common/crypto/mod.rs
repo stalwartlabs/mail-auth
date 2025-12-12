@@ -5,9 +5,9 @@
  */
 
 #[cfg(feature = "sha1")]
-use sha1::{digest::Output, Digest};
+use sha1::{Digest, digest::Output};
 
-use crate::{dkim::Canonicalization, Result};
+use crate::{Result, dkim::Canonicalization};
 
 use super::headers::{Writable, Writer};
 

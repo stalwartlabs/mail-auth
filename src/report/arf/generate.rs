@@ -7,9 +7,9 @@
 use std::{fmt::Write, io, time::SystemTime};
 
 use mail_builder::{
-    headers::{address::Address, content_type::ContentType, HeaderType},
-    mime::{make_boundary, BodyPart, MimePart},
     MessageBuilder,
+    headers::{HeaderType, address::Address, content_type::ContentType},
+    mime::{BodyPart, MimePart, make_boundary},
 };
 use mail_parser::DateTime;
 

@@ -11,14 +11,14 @@ use std::{
 };
 
 use crate::{
+    ArcOutput, AuthenticatedMessage, DkimResult, Error, MX, MessageAuthenticator, Parameters,
+    ResolverCache, Txt,
     common::{
         crypto::HashAlgorithm,
         headers::Header,
         verify::{DomainKey, VerifySignature},
     },
-    dkim::{verify::Verifier, Canonicalization},
-    ArcOutput, AuthenticatedMessage, DkimResult, Error, MessageAuthenticator, Parameters,
-    ResolverCache, Txt, MX,
+    dkim::{Canonicalization, verify::Verifier},
 };
 
 use super::{ChainValidation, Set};
@@ -205,9 +205,9 @@ mod test {
     use mail_parser::MessageParser;
 
     use crate::{
+        AuthenticatedMessage, DkimResult, MessageAuthenticator,
         common::{cache::test::DummyCaches, parse::TxtRecordParser, verify::DomainKey},
         dkim::verify::test::new_cache,
-        AuthenticatedMessage, DkimResult, MessageAuthenticator,
     };
 
     #[tokio::test]

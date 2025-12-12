@@ -8,14 +8,14 @@ use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
 
-use super::{canonicalize::CanonicalHeaders, DkimSigner, Done, Signature};
+use super::{DkimSigner, Done, Signature, canonicalize::CanonicalHeaders};
 
 use crate::{
+    Error,
     common::{
         crypto::SigningKey,
         headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream, Writable, Writer},
     },
-    Error,
 };
 
 impl<T: SigningKey> DkimSigner<T, Done> {
@@ -106,9 +106,10 @@ pub mod test {
     use std::time::{Duration, Instant};
 
     use hickory_resolver::proto::op::ResponseCode;
-    use mail_parser::{decoders::base64::base64_decode, MessageParser};
+    use mail_parser::{MessageParser, decoders::base64::base64_decode};
 
     use crate::{
+        AuthenticatedMessage, DkimOutput, DkimResult, MessageAuthenticator,
         common::{
             cache::test::DummyCaches,
             crypto::{Ed25519Key, RsaKey, Sha256},
@@ -117,7 +118,6 @@ pub mod test {
             verify::DomainKey,
         },
         dkim::{Atps, Canonicalization, DkimSigner, DomainKeyReport, HashAlgorithm, Signature},
-        AuthenticatedMessage, DkimOutput, DkimResult, MessageAuthenticator,
     };
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");

@@ -12,7 +12,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{Parameters, ResolverCache, Txt, MX};
+use crate::{MX, Parameters, ResolverCache, Txt};
 
 pub struct NoCache<K, V>(PhantomData<(K, V)>);
 
@@ -161,7 +161,7 @@ pub mod test {
         sync::Arc,
     };
 
-    use crate::{common::resolver::IntoFqdn, Parameters, ResolverCache, Txt, MX};
+    use crate::{MX, Parameters, ResolverCache, Txt, common::resolver::IntoFqdn};
 
     pub(crate) struct DummyCache<K, V>(std::sync::Mutex<std::collections::HashMap<K, V>>);
 

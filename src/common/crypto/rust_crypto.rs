@@ -8,13 +8,13 @@ use std::array::TryFromSliceError;
 use std::marker::PhantomData;
 
 use ed25519_dalek::Signer;
-use rsa::{pkcs1::DecodeRsaPrivateKey, Pkcs1v15Sign, RsaPrivateKey};
+use rsa::{Pkcs1v15Sign, RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
 use sha2::digest::Digest;
 
 use crate::{
+    Error, Result,
     common::headers::{Writable, Writer},
     dkim::Canonicalization,
-    Error, Result,
 };
 
 use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};

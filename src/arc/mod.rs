@@ -11,13 +11,13 @@ pub mod seal;
 pub mod verify;
 
 use crate::{
+    ArcOutput, AuthenticationResults, DkimResult,
     common::{
         crypto::{Algorithm, Sha256, SigningKey},
         headers::Header,
         verify::VerifySignature,
     },
     dkim::{Canonicalization, NeedDomain},
-    ArcOutput, AuthenticationResults, DkimResult,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]

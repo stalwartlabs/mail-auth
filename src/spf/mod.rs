@@ -13,7 +13,7 @@ use std::{
     net::{Ipv4Addr, Ipv6Addr},
 };
 
-use crate::{is_within_pct, SpfOutput, SpfResult, Version};
+use crate::{SpfOutput, SpfResult, Version, is_within_pct};
 
 /*
       "+" pass

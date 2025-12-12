@@ -11,13 +11,13 @@ use std::fmt::Write;
 use std::net::IpAddr;
 
 use crate::{
+    ArcOutput, DkimOutput, DmarcOutput, SpfOutput,
     dmarc::Dmarc,
     report::{
         ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
         PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
         SpfResult,
     },
-    ArcOutput, DkimOutput, DmarcOutput, SpfOutput,
 };
 
 use super::PolicyPublished;

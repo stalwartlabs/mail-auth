@@ -364,9 +364,9 @@ fn format_ip_as_pvalue(w: &mut impl Write, ip: IpAddr) -> std::fmt::Result {
 #[cfg(test)]
 mod test {
     use crate::{
-        dkim::Signature, dmarc::Policy, ArcOutput, AuthenticationResults, DkimOutput, DkimResult,
-        DmarcOutput, DmarcResult, Error, IprevOutput, IprevResult, ReceivedSpf, SpfOutput,
-        SpfResult,
+        ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
+        IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, dkim::Signature,
+        dmarc::Policy,
     };
 
     #[test]

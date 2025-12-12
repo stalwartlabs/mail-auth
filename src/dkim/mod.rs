@@ -5,12 +5,12 @@
  */
 
 use crate::{
+    ArcOutput, DkimOutput, DkimResult, Error, Version,
     arc::Set,
     common::{
         crypto::{Algorithm, HashAlgorithm, SigningKey},
         verify::VerifySignature,
     },
-    ArcOutput, DkimOutput, DkimResult, Error, Version,
 };
 
 pub mod builder;

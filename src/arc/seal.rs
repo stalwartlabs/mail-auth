@@ -9,12 +9,12 @@ use std::time::SystemTime;
 use mail_builder::encoders::base64::base64_encode;
 
 use crate::{
+    ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
     common::{
         crypto::{HashAlgorithm, Sha256, SigningKey},
         headers::{Writable, Writer},
     },
-    dkim::{canonicalize::CanonicalHeaders, Canonicalization, Done},
-    ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
+    dkim::{Canonicalization, Done, canonicalize::CanonicalHeaders},
 };
 
 use super::{ArcSealer, ArcSet, ChainValidation, Signature};
@@ -194,9 +194,10 @@ impl Signature {
 mod test {
     use std::time::{Duration, Instant};
 
-    use mail_parser::{decoders::base64::base64_decode, MessageParser};
+    use mail_parser::{MessageParser, decoders::base64::base64_decode};
 
     use crate::{
+        AuthenticatedMessage, AuthenticationResults, DkimResult, MessageAuthenticator,
         arc::ArcSealer,
         common::{
             cache::test::DummyCaches,
@@ -206,7 +207,6 @@ mod test {
             verify::DomainKey,
         },
         dkim::DkimSigner,
-        AuthenticatedMessage, AuthenticationResults, DkimResult, MessageAuthenticator,
     };
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");

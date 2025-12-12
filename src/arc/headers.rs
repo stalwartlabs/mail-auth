@@ -5,12 +5,12 @@
  */
 
 use crate::{
+    AuthenticationResults,
     common::{
         crypto::Algorithm,
         headers::{HeaderWriter, Writer},
     },
     dkim::Canonicalization,
-    AuthenticationResults,
 };
 
 use super::{ArcSet, ChainValidation, Seal, Signature};

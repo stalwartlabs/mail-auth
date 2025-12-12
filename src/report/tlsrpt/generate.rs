@@ -6,11 +6,11 @@
 
 use std::io;
 
-use flate2::{write::GzEncoder, Compression};
+use flate2::{Compression, write::GzEncoder};
 use mail_builder::{
-    headers::{address::Address, content_type::ContentType, HeaderType},
-    mime::{make_boundary, BodyPart, MimePart},
     MessageBuilder,
+    headers::{HeaderType, address::Address, content_type::ContentType},
+    mime::{BodyPart, MimePart, make_boundary},
 };
 
 use super::TlsReport;

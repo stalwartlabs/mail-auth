@@ -5,8 +5,8 @@
  */
 
 use mail_auth::{
-    dmarc::verify::DmarcParameters, spf::verify::SpfParameters, AuthenticatedMessage, DmarcResult,
-    MessageAuthenticator,
+    AuthenticatedMessage, DmarcResult, MessageAuthenticator, dmarc::verify::DmarcParameters,
+    spf::verify::SpfParameters,
 };
 
 const TEST_MESSAGE: &str = r#"DKIM-Signature: v=1; a=ed25519-sha256; c=relaxed/relaxed;

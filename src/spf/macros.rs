@@ -222,7 +222,7 @@ fn add_part(result: &mut Vec<u8>, part: &[u8], pos: usize, escape: bool) {
 mod test {
     use std::net::IpAddr;
 
-    use crate::spf::{parse::SPFParser, Variables};
+    use crate::spf::{Variables, parse::SPFParser};
 
     #[test]
     fn expand_macro() {

@@ -9,15 +9,15 @@ use std::marker::PhantomData;
 use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{
-    Ed25519KeyPair, KeyPair, RsaKeyPair, UnparsedPublicKey, ED25519,
-    RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY, RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
-    RSA_PKCS1_SHA256,
+    ED25519, Ed25519KeyPair, KeyPair, RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
+    RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY, RSA_PKCS1_SHA256, RsaKeyPair,
+    UnparsedPublicKey,
 };
 
 use crate::{
+    Error, Result,
     common::headers::{Writable, Writer},
     dkim::Canonicalization,
-    Error, Result,
 };
 
 use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};

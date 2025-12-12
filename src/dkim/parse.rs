@@ -9,14 +9,14 @@ use std::slice::Iter;
 use mail_parser::decoders::base64::base64_decode_stream;
 
 use crate::{
+    Error,
     common::{crypto::VerifyingKeyType, parse::*, verify::DomainKey},
     dkim::{RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION},
-    Error,
 };
 
 use super::{
-    Algorithm, Atps, Canonicalization, DomainKeyReport, Flag, HashAlgorithm, Service, Signature,
-    Version, RR_DNS, RR_OTHER, RR_POLICY,
+    Algorithm, Atps, Canonicalization, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_OTHER,
+    RR_POLICY, Service, Signature, Version,
 };
 
 const ATPSH: u64 = (b'a' as u64)
@@ -465,9 +465,9 @@ mod test {
             verify::DomainKey,
         },
         dkim::{
-            Canonicalization, DomainKeyReport, Signature, RR_DNS, RR_EXPIRATION, RR_OTHER,
-            RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION, R_FLAG_MATCH_DOMAIN,
-            R_FLAG_TESTING, R_SVC_ALL, R_SVC_EMAIL,
+            Canonicalization, DomainKeyReport, R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_SVC_ALL,
+            R_SVC_EMAIL, RR_DNS, RR_EXPIRATION, RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG,
+            RR_VERIFICATION, Signature,
         },
     };
 

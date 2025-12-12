@@ -5,12 +5,12 @@
  */
 
 use mail_auth::{
+    AuthenticatedMessage, AuthenticationResults, MessageAuthenticator,
     arc::ArcSealer,
     common::{
         crypto::{RsaKey, Sha256},
         headers::HeaderWriter,
     },
-    AuthenticatedMessage, AuthenticationResults, MessageAuthenticator,
 };
 
 const TEST_MESSAGE: &str = include_str!("../resources/arc/001.txt");
