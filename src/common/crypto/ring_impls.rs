@@ -13,7 +13,7 @@ use ring::signature::{
     RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY, RSA_PKCS1_SHA256, RsaKeyPair,
     UnparsedPublicKey,
 };
-use rustls_pki_types::{PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
+use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
 
 use crate::{
     Error, Result,
@@ -31,34 +31,48 @@ pub struct RsaKey<T> {
 }
 
 impl<T: HashImpl> RsaKey<T> {
+    #[deprecated(since = "0.7.4", note = "use `from_key_der()` instead")]
     pub fn from_pkcs8_pem(pkcs8_pem: &str) -> Result<Self> {
-        let pkcs8_der = PrivatePkcs8KeyDer::from_pem_slice(pkcs8_pem.as_bytes())
-            .map_err(|err| Error::CryptoError(err.to_string()))?;
-
-        Self::from_pkcs8_der(pkcs8_der.secret_pkcs8_der())
+        Self::from_key_der(PrivateKeyDer::Pkcs8(
+            PrivatePkcs8KeyDer::from_pem_slice(pkcs8_pem.as_bytes())
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+        ))
     }
 
     /// Creates a new RSA private key from PKCS8 DER-encoded bytes.
+    #[deprecated(since = "0.7.4", note = "use `from_key_der()` instead")]
     pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self> {
-        Ok(Self {
-            inner: RsaKeyPair::from_pkcs8(pkcs8_der)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-            rng: SystemRandom::new(),
-            padding: PhantomData,
-        })
+        Self::from_key_der(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(pkcs8_der)))
     }
 
+    #[deprecated(since = "0.7.4", note = "use `from_key_der()` instead")]
     pub fn from_rsa_pem(rsa_pem: &str) -> Result<Self> {
-        let rsa_der = PrivatePkcs1KeyDer::from_pem_slice(rsa_pem.as_bytes())
-            .map_err(|err| Error::CryptoError(err.to_string()))?;
-
-        Self::from_der(rsa_der.secret_pkcs1_der())
+        Self::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(rsa_pem.as_bytes())
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+        ))
     }
 
     /// Creates a new RSA private key from a PKCS1 binary slice.
+    #[deprecated(since = "0.7.4", note = "use `from_key_der()` instead")]
     pub fn from_der(der: &[u8]) -> Result<Self> {
+        Self::from_key_der(PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(der)))
+    }
+
+    /// Creates a new RSA private key from various DER-encoded key formats.
+    ///
+    /// Only supports PKCS1 and PKCS8 formats -- will yield an error for other formats.
+    pub fn from_key_der(key_der: PrivateKeyDer<'_>) -> Result<Self> {
+        let inner = match key_der {
+            PrivateKeyDer::Pkcs1(der) => RsaKeyPair::from_der(der.secret_pkcs1_der())
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+            PrivateKeyDer::Pkcs8(der) => RsaKeyPair::from_der(der.secret_pkcs8_der())
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+            _ => return Err(Error::CryptoError("Unsupported RSA key format".to_string())),
+        };
+
         Ok(Self {
-            inner: RsaKeyPair::from_der(der).map_err(|err| Error::CryptoError(err.to_string()))?,
+            inner,
             rng: SystemRandom::new(),
             padding: PhantomData,
         })
