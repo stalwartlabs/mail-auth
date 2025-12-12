@@ -227,10 +227,7 @@ mod test {
     const ED25519_PUBLIC_KEY: &str =
         "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
+    #[cfg(any(feature = "rust-crypto", feature = "ring"))]
     #[tokio::test]
     async fn arc_seal() {
         use crate::common::cache::test::DummyCaches;

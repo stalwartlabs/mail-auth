@@ -138,10 +138,7 @@ pub mod test {
     const ED25519_PUBLIC_KEY: &str =
         "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
+    #[cfg(any(feature = "rust-crypto", feature = "ring"))]
     #[test]
     fn dkim_sign() {
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
@@ -183,10 +180,7 @@ pub mod test {
         );
     }
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
+    #[cfg(any(feature = "rust-crypto", feature = "ring"))]
     #[tokio::test]
     async fn dkim_sign_verify() {
         use crate::common::cache::test::DummyCaches;

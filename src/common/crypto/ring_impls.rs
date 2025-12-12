@@ -13,6 +13,7 @@ use ring::signature::{
     RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY, RSA_PKCS1_SHA256, RsaKeyPair,
     UnparsedPublicKey,
 };
+use rustls_pki_types::{PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
 
 use crate::{
     Error, Result,
@@ -30,15 +31,9 @@ pub struct RsaKey<T> {
 }
 
 impl<T: HashImpl> RsaKey<T> {
-    #[cfg(feature = "rustls-pemfile")]
     pub fn from_pkcs8_pem(pkcs8_pem: &str) -> Result<Self> {
-        let item = rustls_pemfile::read_one(&mut pkcs8_pem.as_bytes())
+        let pkcs8_der = PrivatePkcs8KeyDer::from_pem_slice(pkcs8_pem.as_bytes())
             .map_err(|err| Error::CryptoError(err.to_string()))?;
-
-        let pkcs8_der = match item {
-            Some(rustls_pemfile::Item::Pkcs8Key(key)) => key,
-            _ => return Err(Error::CryptoError("No PKCS8 key found in PEM".to_string())),
-        };
 
         Self::from_pkcs8_der(pkcs8_der.secret_pkcs8_der())
     }
@@ -53,15 +48,9 @@ impl<T: HashImpl> RsaKey<T> {
         })
     }
 
-    #[cfg(feature = "rustls-pemfile")]
     pub fn from_rsa_pem(rsa_pem: &str) -> Result<Self> {
-        let item = rustls_pemfile::read_one(&mut rsa_pem.as_bytes())
+        let rsa_der = PrivatePkcs1KeyDer::from_pem_slice(rsa_pem.as_bytes())
             .map_err(|err| Error::CryptoError(err.to_string()))?;
-
-        let rsa_der = match item {
-            Some(rustls_pemfile::Item::Pkcs1Key(key)) => key,
-            _ => return Err(Error::CryptoError("No RSA key found in PEM".to_string())),
-        };
 
         Self::from_der(rsa_der.secret_pkcs1_der())
     }
