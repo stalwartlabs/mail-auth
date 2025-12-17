@@ -9,15 +9,16 @@ use std::marker::PhantomData;
 use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{
-    Ed25519KeyPair, KeyPair, RsaKeyPair, UnparsedPublicKey, ED25519,
-    RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY, RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
-    RSA_PKCS1_SHA256,
+    ED25519, Ed25519KeyPair, KeyPair, RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
+    RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY, RSA_PKCS1_SHA256, RsaKeyPair,
+    UnparsedPublicKey,
 };
+use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
 
 use crate::{
+    Error, Result,
     common::headers::{Writable, Writer},
     dkim::Canonicalization,
-    Error, Result,
 };
 
 use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
@@ -30,46 +31,48 @@ pub struct RsaKey<T> {
 }
 
 impl<T: HashImpl> RsaKey<T> {
-    #[cfg(feature = "rustls-pemfile")]
+    #[deprecated(since = "0.7.4", note = "use `from_key_der()` instead")]
     pub fn from_pkcs8_pem(pkcs8_pem: &str) -> Result<Self> {
-        let item = rustls_pemfile::read_one(&mut pkcs8_pem.as_bytes())
-            .map_err(|err| Error::CryptoError(err.to_string()))?;
-
-        let pkcs8_der = match item {
-            Some(rustls_pemfile::Item::Pkcs8Key(key)) => key,
-            _ => return Err(Error::CryptoError("No PKCS8 key found in PEM".to_string())),
-        };
-
-        Self::from_pkcs8_der(pkcs8_der.secret_pkcs8_der())
+        Self::from_key_der(PrivateKeyDer::Pkcs8(
+            PrivatePkcs8KeyDer::from_pem_slice(pkcs8_pem.as_bytes())
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+        ))
     }
 
     /// Creates a new RSA private key from PKCS8 DER-encoded bytes.
+    #[deprecated(since = "0.7.4", note = "use `from_key_der()` instead")]
     pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self> {
-        Ok(Self {
-            inner: RsaKeyPair::from_pkcs8(pkcs8_der)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-            rng: SystemRandom::new(),
-            padding: PhantomData,
-        })
+        Self::from_key_der(PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(pkcs8_der)))
     }
 
-    #[cfg(feature = "rustls-pemfile")]
+    #[deprecated(since = "0.7.4", note = "use `from_key_der()` instead")]
     pub fn from_rsa_pem(rsa_pem: &str) -> Result<Self> {
-        let item = rustls_pemfile::read_one(&mut rsa_pem.as_bytes())
-            .map_err(|err| Error::CryptoError(err.to_string()))?;
-
-        let rsa_der = match item {
-            Some(rustls_pemfile::Item::Pkcs1Key(key)) => key,
-            _ => return Err(Error::CryptoError("No RSA key found in PEM".to_string())),
-        };
-
-        Self::from_der(rsa_der.secret_pkcs1_der())
+        Self::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(rsa_pem.as_bytes())
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+        ))
     }
 
     /// Creates a new RSA private key from a PKCS1 binary slice.
+    #[deprecated(since = "0.7.4", note = "use `from_key_der()` instead")]
     pub fn from_der(der: &[u8]) -> Result<Self> {
+        Self::from_key_der(PrivateKeyDer::Pkcs1(PrivatePkcs1KeyDer::from(der)))
+    }
+
+    /// Creates a new RSA private key from various DER-encoded key formats.
+    ///
+    /// Only supports PKCS1 and PKCS8 formats -- will yield an error for other formats.
+    pub fn from_key_der(key_der: PrivateKeyDer<'_>) -> Result<Self> {
+        let inner = match key_der {
+            PrivateKeyDer::Pkcs1(der) => RsaKeyPair::from_der(der.secret_pkcs1_der())
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+            PrivateKeyDer::Pkcs8(der) => RsaKeyPair::from_der(der.secret_pkcs8_der())
+                .map_err(|err| Error::CryptoError(err.to_string()))?,
+            _ => return Err(Error::CryptoError("Unsupported RSA key format".to_string())),
+        };
+
         Ok(Self {
-            inner: RsaKeyPair::from_der(der).map_err(|err| Error::CryptoError(err.to_string()))?,
+            inner,
             rng: SystemRandom::new(),
             padding: PhantomData,
         })

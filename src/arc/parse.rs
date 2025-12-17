@@ -7,9 +7,9 @@
 use mail_parser::decoders::base64::base64_decode_stream;
 
 use crate::{
-    common::{crypto::Algorithm, parse::TagParser},
-    dkim::{parse::SignatureParser, Canonicalization},
     Error,
+    common::{crypto::Algorithm, parse::TagParser},
+    dkim::{Canonicalization, parse::SignatureParser},
 };
 
 use super::{ChainValidation, Results, Seal, Signature};

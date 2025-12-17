@@ -10,7 +10,7 @@ use arc::Set;
 use common::{crypto::HashAlgorithm, headers::Header, verify::DomainKey};
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
-use hickory_resolver::{proto::op::ResponseCode, TokioResolver};
+use hickory_resolver::{TokioResolver, proto::op::ResponseCode};
 use mta_sts::{MtaSts, TlsRpt};
 use spf::{Macro, Spf};
 use std::{

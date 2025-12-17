@@ -10,8 +10,8 @@ use std::{
 };
 
 use crate::{
-    dkim::Canonicalization, Error, IprevOutput, IprevResult, MessageAuthenticator, Parameters,
-    ResolverCache, Txt, MX,
+    Error, IprevOutput, IprevResult, MX, MessageAuthenticator, Parameters, ResolverCache, Txt,
+    dkim::Canonicalization,
 };
 
 use super::{

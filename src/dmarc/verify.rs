@@ -10,8 +10,9 @@ use std::{
 };
 
 use crate::{
-    common::cache::NoCache, AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult,
-    Error, MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt, MX,
+    AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
+    MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt,
+    common::cache::NoCache,
 };
 
 use super::{Alignment, Dmarc, URI};
@@ -278,11 +279,11 @@ mod test {
     use mail_parser::MessageParser;
 
     use crate::{
+        AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, Error, MessageAuthenticator,
+        SpfOutput, SpfResult,
         common::{cache::test::DummyCaches, parse::TxtRecordParser},
         dkim::Signature,
         dmarc::{Dmarc, Policy, URI},
-        AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, Error, MessageAuthenticator,
-        SpfOutput, SpfResult,
     };
 
     use super::DmarcParameters;

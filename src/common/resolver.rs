@@ -12,19 +12,19 @@ use std::{
 };
 
 use hickory_resolver::{
+    Name, TokioResolver,
     config::{ResolverConfig, ResolverOpts},
     name_server::TokioConnectionProvider,
     proto::{ProtoError, ProtoErrorKind},
     system_conf::read_system_conf,
-    Name, TokioResolver,
 };
 
 use crate::{
+    Error, IpLookupStrategy, MX, MessageAuthenticator, ResolverCache, Txt,
     dkim::{Atps, DomainKeyReport},
     dmarc::Dmarc,
     mta_sts::{MtaSts, TlsRpt},
     spf::{Macro, Spf},
-    Error, IpLookupStrategy, MessageAuthenticator, ResolverCache, Txt, MX,
 };
 
 use super::{parse::TxtRecordParser, verify::DomainKey};
@@ -293,7 +293,7 @@ impl MessageAuthenticator {
                                 .take(max_results)
                                 .copied()
                                 .map(IpAddr::from)
-                                .collect())
+                                .collect());
                         }
                         (Err(err), IpLookupStrategy::Ipv4Only) => return Err(err),
                         _ => {
@@ -309,7 +309,7 @@ impl MessageAuthenticator {
                                 .take(max_results)
                                 .copied()
                                 .map(IpAddr::from)
-                                .collect())
+                                .collect());
                         }
                         (Err(err), IpLookupStrategy::Ipv6Only) => return Err(err),
                         _ => {

@@ -4,9 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use mail_parser::{parsers::MessageStream, Address, HeaderName, HeaderValue, Message};
+use mail_parser::{Address, HeaderName, HeaderValue, Message, parsers::MessageStream};
 
-use crate::{arc, common::crypto::HashAlgorithm, dkim, AuthenticatedMessage};
+use crate::{AuthenticatedMessage, arc, common::crypto::HashAlgorithm, dkim};
 
 use super::headers::{AuthenticatedHeader, Header, HeaderParser};
 

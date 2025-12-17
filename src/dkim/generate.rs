@@ -6,11 +6,11 @@
 
 use mail_builder::encoders::base64::base64_encode;
 use rsa::{
-    pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey},
     RsaPrivateKey, RsaPublicKey,
+    pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey},
 };
 
-use crate::{common::crypto::Ed25519Key, Error};
+use crate::{Error, common::crypto::Ed25519Key};
 
 pub struct DkimKeyPair {
     private_key: Vec<u8>,
@@ -74,13 +74,13 @@ mod test {
     use std::time::{Duration, Instant};
 
     use crate::{
+        MessageAuthenticator,
         common::{
             crypto::{Ed25519Key, RsaKey, Sha256},
             parse::TxtRecordParser,
             verify::DomainKey,
         },
-        dkim::{generate::DkimKeyPair, DkimSigner, DomainKeyReport},
-        MessageAuthenticator,
+        dkim::{DkimSigner, DomainKeyReport, generate::DkimKeyPair},
     };
 
     #[tokio::test]

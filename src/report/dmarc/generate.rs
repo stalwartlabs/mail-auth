@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use flate2::{write::GzEncoder, Compression};
+use flate2::{Compression, write::GzEncoder};
 use mail_builder::{
-    headers::{address::Address, HeaderType},
-    mime::make_boundary,
     MessageBuilder,
+    headers::{HeaderType, address::Address},
+    mime::make_boundary,
 };
 
 use crate::report::{

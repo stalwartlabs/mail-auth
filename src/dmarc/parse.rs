@@ -9,8 +9,8 @@ use std::slice::Iter;
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 
 use crate::{
-    common::parse::{ItemParser, TagParser, TxtRecordParser, N, T, V, Y},
     Error, Version,
+    common::parse::{ItemParser, N, T, TagParser, TxtRecordParser, V, Y},
 };
 
 use super::{Alignment, Dmarc, Format, Policy, Psd, Report, URI};
@@ -338,9 +338,9 @@ const PSD: u64 = (b'p' as u64) | ((b's' as u64) << 8) | ((b'd' as u64) << 16);
 #[cfg(test)]
 mod test {
     use crate::{
+        Version,
         common::parse::TxtRecordParser,
         dmarc::{Alignment, Dmarc, Format, Policy, Psd, Report, URI},
-        Version,
     };
 
     #[test]

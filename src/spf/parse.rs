@@ -10,13 +10,13 @@ use std::{
 };
 
 use crate::{
-    common::parse::{TagParser, TxtRecordParser, V},
     Error, Version,
+    common::parse::{TagParser, TxtRecordParser, V},
 };
 
 use super::{
-    Directive, Macro, Mechanism, Qualifier, Spf, Variable, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
-    RR_TEMP_PERM_ERROR,
+    Directive, Macro, Mechanism, Qualifier, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
+    RR_TEMP_PERM_ERROR, Spf, Variable,
 };
 
 impl TxtRecordParser for Spf {
@@ -734,8 +734,8 @@ mod test {
     use crate::{
         common::parse::TxtRecordParser,
         spf::{
-            Directive, Macro, Mechanism, Qualifier, Spf, Variable, Version, RR_FAIL,
-            RR_NEUTRAL_NONE, RR_SOFTFAIL, RR_TEMP_PERM_ERROR,
+            Directive, Macro, Mechanism, Qualifier, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
+            RR_TEMP_PERM_ERROR, Spf, Variable, Version,
         },
     };
 
