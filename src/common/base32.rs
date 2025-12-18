@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::slice::Iter;
-
 use super::headers::Writer;
+use std::slice::Iter;
 
 pub(crate) static BASE32_ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 pub static BASE32_INVERSE: [u8; 256] = [

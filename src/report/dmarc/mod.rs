@@ -6,10 +6,7 @@
 
 pub mod generate;
 pub mod parse;
-
-use std::fmt::Write;
-use std::net::IpAddr;
-
+use super::PolicyPublished;
 use crate::{
     ArcOutput, DkimOutput, DmarcOutput, SpfOutput,
     dmarc::Dmarc,
@@ -19,8 +16,8 @@ use crate::{
         SpfResult,
     },
 };
-
-use super::PolicyPublished;
+use std::fmt::Write;
+use std::net::IpAddr;
 
 impl Report {
     pub fn new() -> Self {

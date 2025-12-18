@@ -4,19 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{
-    net::{Ipv4Addr, Ipv6Addr},
-    slice::Iter,
+use super::{
+    Directive, Macro, Mechanism, Qualifier, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
+    RR_TEMP_PERM_ERROR, Spf, Variable,
 };
-
 use crate::{
     Error, Version,
     common::parse::{TagParser, TxtRecordParser, V},
 };
-
-use super::{
-    Directive, Macro, Mechanism, Qualifier, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
-    RR_TEMP_PERM_ERROR, Spf, Variable,
+use std::{
+    net::{Ipv4Addr, Ipv6Addr},
+    slice::Iter,
 };
 
 impl TxtRecordParser for Spf {

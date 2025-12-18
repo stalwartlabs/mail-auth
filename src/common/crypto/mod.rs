@@ -4,12 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use super::headers::{Writable, Writer};
+use crate::{Result, dkim::Canonicalization};
 #[cfg(feature = "sha1")]
 use sha1::{Digest, digest::Output};
-
-use crate::{Result, dkim::Canonicalization};
-
-use super::headers::{Writable, Writer};
 
 #[cfg(feature = "rust-crypto")]
 mod rust_crypto;

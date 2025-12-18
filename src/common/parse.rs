@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{borrow::Cow, slice::Iter};
-
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
+use std::{borrow::Cow, slice::Iter};
 
 pub(crate) const V: u64 = b'v' as u64;
 pub(crate) const A: u64 = b'a' as u64;

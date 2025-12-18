@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{borrow::Cow, net::IpAddr};
-
 use super::{AuthFailureType, DeliveryResult, Feedback, FeedbackType, IdentityAlignment};
+use std::{borrow::Cow, net::IpAddr};
 
 pub mod generate;
 pub mod parse;

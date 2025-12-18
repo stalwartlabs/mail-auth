@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use super::{ArcSealer, Seal, Signature};
 use crate::{
     common::crypto::{Sha256, SigningKey},
     dkim::{Canonicalization, Done, NeedDomain, NeedHeaders, NeedSelector},
 };
-
-use super::{ArcSealer, Seal, Signature};
 
 impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T> {
     pub fn from_key(key: T) -> ArcSealer<T, NeedDomain> {

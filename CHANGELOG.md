@@ -1,3 +1,7 @@
+mail-auth 0.7.4
+================================
+- Parse PEM with `rustls-pki-types` (#49)
+
 mail-auth 0.7.3
 ================================
 - Fix bug in SPF verification with mixed `redirect` and `include` mechanisms.

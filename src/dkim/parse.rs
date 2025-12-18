@@ -4,20 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::slice::Iter;
-
-use mail_parser::decoders::base64::base64_decode_stream;
-
+use super::{
+    Algorithm, Atps, Canonicalization, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_OTHER,
+    RR_POLICY, Service, Signature, Version,
+};
 use crate::{
     Error,
     common::{crypto::VerifyingKeyType, parse::*, verify::DomainKey},
     dkim::{RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION},
 };
-
-use super::{
-    Algorithm, Atps, Canonicalization, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_OTHER,
-    RR_POLICY, Service, Signature, Version,
-};
+use mail_parser::decoders::base64::base64_decode_stream;
+use std::slice::Iter;
 
 const ATPSH: u64 = (b'a' as u64)
     | ((b't' as u64) << 8)

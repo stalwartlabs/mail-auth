@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{fmt::Display, sync::Arc};
-
-use serde::{Deserialize, Serialize};
-
 use crate::{DmarcOutput, DmarcResult, Error, Version};
+use serde::{Deserialize, Serialize};
+use std::{fmt::Display, sync::Arc};
 
 pub mod parse;
 pub mod verify;

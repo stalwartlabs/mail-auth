@@ -4,8 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::marker::PhantomData;
-
+use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
+use crate::{
+    Error, Result,
+    common::headers::{Writable, Writer},
+    dkim::Canonicalization,
+};
 use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
 use ring::rand::SystemRandom;
 use ring::signature::{
@@ -14,14 +18,7 @@ use ring::signature::{
     UnparsedPublicKey,
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
-
-use crate::{
-    Error, Result,
-    common::headers::{Writable, Writer},
-    dkim::Canonicalization,
-};
-
-use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
+use std::marker::PhantomData;
 
 #[derive(Debug)]
 pub struct RsaKey<T> {

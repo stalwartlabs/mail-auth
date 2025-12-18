@@ -4,12 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-    time::SystemTime,
-};
-
 use crate::{
     AuthenticatedMessage, DkimOutput, DkimResult, Error, MX, MessageAuthenticator, Parameters,
     ResolverCache, Txt,
@@ -20,6 +14,11 @@ use crate::{
         verify::{DomainKey, VerifySignature},
     },
     is_within_pct,
+};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+    time::SystemTime,
 };
 
 use super::{

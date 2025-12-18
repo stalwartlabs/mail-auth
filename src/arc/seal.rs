@@ -4,10 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::time::SystemTime;
-
-use mail_builder::encoders::base64::base64_encode;
-
+use super::{ArcSealer, ArcSet, ChainValidation, Signature};
 use crate::{
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
     common::{
@@ -16,8 +13,8 @@ use crate::{
     },
     dkim::{Canonicalization, Done, canonicalize::CanonicalHeaders},
 };
-
-use super::{ArcSealer, ArcSet, ChainValidation, Signature};
+use mail_builder::encoders::base64::base64_encode;
+use std::time::SystemTime;
 
 impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
     pub fn seal<'x>(
@@ -192,10 +189,6 @@ impl Signature {
 #[cfg(test)]
 #[allow(unused)]
 mod test {
-    use std::time::{Duration, Instant};
-
-    use mail_parser::{MessageParser, decoders::base64::base64_decode};
-
     use crate::{
         AuthenticatedMessage, AuthenticationResults, DkimResult, MessageAuthenticator,
         arc::ArcSealer,
@@ -208,6 +201,9 @@ mod test {
         },
         dkim::DkimSigner,
     };
+    use mail_parser::{MessageParser, decoders::base64::base64_decode};
+    use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
+    use std::time::{Duration, Instant};
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
 
@@ -264,7 +260,10 @@ mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         let mut raw_message = DkimSigner::from_key(pk_rsa)
             .domain("manchego.org")
             .selector("rsa")
@@ -279,7 +278,10 @@ mod test {
             #[cfg(feature = "rust-crypto")]
             let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
             #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-            let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+            let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+                PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+            ))
+            .unwrap();
 
             raw_message = arc_verify_and_seal(
                 &resolver,

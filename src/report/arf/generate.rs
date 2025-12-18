@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{fmt::Write, io, time::SystemTime};
-
+use crate::report::{AuthFailureType, DeliveryResult, Feedback, FeedbackType, IdentityAlignment};
 use mail_builder::{
     MessageBuilder,
     headers::{HeaderType, address::Address, content_type::ContentType},
     mime::{BodyPart, MimePart, make_boundary},
 };
 use mail_parser::DateTime;
-
-use crate::report::{AuthFailureType, DeliveryResult, Feedback, FeedbackType, IdentityAlignment};
+use std::{fmt::Write, io, time::SystemTime};
 
 impl<'x> Feedback<'x> {
     pub fn write_rfc5322(

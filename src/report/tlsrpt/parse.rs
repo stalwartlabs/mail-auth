@@ -4,15 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::io::{Cursor, Read};
-
+use super::TlsReport;
+use crate::report::Error;
 use flate2::read::GzDecoder;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
+use std::io::{Cursor, Read};
 use zip::ZipArchive;
-
-use crate::report::Error;
-
-use super::TlsReport;
 
 impl TlsReport {
     pub fn parse_json(report: &[u8]) -> Result<Self, Error> {

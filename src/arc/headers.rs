@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use super::{ArcSet, ChainValidation, Seal, Signature};
 use crate::{
     AuthenticationResults,
     common::{
@@ -12,8 +13,6 @@ use crate::{
     },
     dkim::Canonicalization,
 };
-
-use super::{ArcSet, ChainValidation, Seal, Signature};
 
 impl Signature {
     pub(crate) fn write(&self, writer: &mut impl Writer, as_header: bool) {

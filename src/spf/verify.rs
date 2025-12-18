@@ -4,18 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use super::{Macro, Mechanism, Qualifier, Spf, Variables};
+use crate::{
+    Error, MX, MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt,
+    common::cache::NoCache,
+};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
     time::Instant,
 };
-
-use crate::{
-    Error, MX, MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt,
-    common::cache::NoCache,
-};
-
-use super::{Macro, Mechanism, Qualifier, Spf, Variables};
 
 pub struct SpfParameters<'x> {
     ip: IpAddr,

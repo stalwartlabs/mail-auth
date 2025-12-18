@@ -4,19 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
+use super::{
+    cache::NoCache,
+    crypto::{Algorithm, VerifyingKey},
 };
-
 use crate::{
     Error, IprevOutput, IprevResult, MX, MessageAuthenticator, Parameters, ResolverCache, Txt,
     dkim::Canonicalization,
 };
-
-use super::{
-    cache::NoCache,
-    crypto::{Algorithm, VerifyingKey},
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
 };
 
 pub struct DomainKey {

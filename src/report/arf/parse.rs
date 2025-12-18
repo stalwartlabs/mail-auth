@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::borrow::Cow;
-
-use mail_parser::{HeaderValue, MessageParser, MimeHeaders, PartType, parsers::MessageStream};
-
 use crate::{
     common::headers::HeaderIterator,
     report::{AuthFailureType, DeliveryResult, Error, Feedback, FeedbackType, IdentityAlignment},
 };
+use mail_parser::{HeaderValue, MessageParser, MimeHeaders, PartType, parsers::MessageStream};
+use std::borrow::Cow;
 
 impl<'x> Feedback<'x> {
     pub fn parse_rfc5322(message: &'x [u8]) -> Result<Self, Error> {

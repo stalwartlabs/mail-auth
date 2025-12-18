@@ -7,13 +7,11 @@
 pub mod macros;
 pub mod parse;
 pub mod verify;
-
+use crate::{SpfOutput, SpfResult, Version, is_within_pct};
 use std::{
     borrow::Cow,
     net::{Ipv4Addr, Ipv6Addr},
 };
-
-use crate::{SpfOutput, SpfResult, Version, is_within_pct};
 
 /*
       "+" pass

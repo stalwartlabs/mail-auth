@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::common::crypto::{HashAlgorithm, SigningKey};
-
 use super::{Canonicalization, DkimSigner, Done, NeedDomain, NeedHeaders, NeedSelector, Signature};
+use crate::common::crypto::{HashAlgorithm, SigningKey};
 
 impl<T: SigningKey> DkimSigner<T> {
     pub fn from_key(key: T) -> DkimSigner<T, NeedDomain> {

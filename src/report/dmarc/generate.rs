@@ -4,19 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::report::{
+    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Disposition, DkimResult,
+    DmarcResult, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
+    PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult, SPFDomainScope, SpfResult,
+};
 use flate2::{Compression, write::GzEncoder};
 use mail_builder::{
     MessageBuilder,
     headers::{HeaderType, address::Address},
     mime::make_boundary,
 };
-
-use crate::report::{
-    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Disposition, DkimResult,
-    DmarcResult, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
-    PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult, SPFDomainScope, SpfResult,
-};
-
 use std::{
     borrow::Cow,
     fmt::{Display, Formatter, Write},

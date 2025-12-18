@@ -4,20 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use super::headers::{HeaderWriter, Writer};
+use crate::{
+    ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
+    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult,
+};
+use mail_builder::encoders::base64::base64_encode;
 use std::{
     borrow::Cow,
     fmt::{Display, Write},
     net::IpAddr,
 };
-
-use mail_builder::encoders::base64::base64_encode;
-
-use crate::{
-    ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
-    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult,
-};
-
-use super::headers::{HeaderWriter, Writer};
 
 impl<'x> AuthenticationResults<'x> {
     pub fn new(hostname: &'x str) -> Self {

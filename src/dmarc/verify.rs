@@ -4,18 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-};
-
+use super::{Alignment, Dmarc, URI};
 use crate::{
     AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
     MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt,
     common::cache::NoCache,
 };
-
-use super::{Alignment, Dmarc, URI};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+};
 
 pub struct DmarcParameters<'x, F>
 where

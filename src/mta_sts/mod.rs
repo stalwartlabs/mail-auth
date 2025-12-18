@@ -5,7 +5,6 @@
  */
 
 use serde::{Deserialize, Serialize};
-
 pub mod parse;
 
 #[derive(Debug, PartialEq, Eq)]

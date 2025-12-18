@@ -4,12 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::time::SystemTime;
-
-use mail_builder::encoders::base64::base64_encode;
-
 use super::{DkimSigner, Done, Signature, canonicalize::CanonicalHeaders};
-
 use crate::{
     Error,
     common::{
@@ -17,6 +12,8 @@ use crate::{
         headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream, Writable, Writer},
     },
 };
+use mail_builder::encoders::base64::base64_encode;
+use std::time::SystemTime;
 
 impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a message.
@@ -102,12 +99,6 @@ impl Writable for SignableMessage<'_> {
 #[cfg(test)]
 #[allow(unused)]
 pub mod test {
-    use core::str;
-    use std::time::{Duration, Instant};
-
-    use hickory_resolver::proto::op::ResponseCode;
-    use mail_parser::{MessageParser, decoders::base64::base64_decode};
-
     use crate::{
         AuthenticatedMessage, DkimOutput, DkimResult, MessageAuthenticator,
         common::{
@@ -119,6 +110,11 @@ pub mod test {
         },
         dkim::{Atps, Canonicalization, DkimSigner, DomainKeyReport, HashAlgorithm, Signature},
     };
+    use core::str;
+    use hickory_resolver::proto::op::ResponseCode;
+    use mail_parser::{MessageParser, decoders::base64::base64_decode};
+    use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
+    use std::time::{Duration, Instant};
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
 
@@ -142,7 +138,10 @@ pub mod test {
     #[test]
     fn dkim_sign() {
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         #[cfg(feature = "rust-crypto")]
         let pk = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         let signature = DkimSigner::from_key(pk)
@@ -248,7 +247,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         verify(
             &resolver,
             &caches,
@@ -283,7 +285,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         verify(
             &resolver,
             &caches,
@@ -303,7 +308,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         verify(
             &resolver,
             &caches,
@@ -325,7 +333,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         verify(
             &resolver,
             &caches,
@@ -352,7 +363,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         verify_with_opts(
             &resolver,
             &caches,
@@ -374,7 +388,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         verify_with_opts(
             &resolver,
             &caches,
@@ -396,7 +413,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         verify(
             &resolver,
             &caches,
@@ -416,7 +436,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         let r = verify(
             &resolver,
             &caches,
@@ -441,7 +464,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         verify(
             &resolver,
             &caches,
@@ -462,7 +488,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         caches.txt_add(
             "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.".to_string(),
             Atps::parse(b"v=ATPS1;").unwrap(),
@@ -488,7 +517,10 @@ pub mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
         caches.txt_add(
             "example.com._atps.example.com.".to_string(),
             Atps::parse(b"v=ATPS1;").unwrap(),

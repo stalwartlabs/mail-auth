@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::{Error, common::crypto::Ed25519Key};
 use mail_builder::encoders::base64::base64_encode;
 use rsa::{
     RsaPrivateKey, RsaPublicKey,
     pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey},
 };
-
-use crate::{Error, common::crypto::Ed25519Key};
 
 pub struct DkimKeyPair {
     private_key: Vec<u8>,

@@ -4,20 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::array::TryFromSliceError;
-use std::marker::PhantomData;
-
-use ed25519_dalek::Signer;
-use rsa::{Pkcs1v15Sign, RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
-use sha2::digest::Digest;
-
+use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
 use crate::{
     Error, Result,
     common::headers::{Writable, Writer},
     dkim::Canonicalization,
 };
-
-use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
+use ed25519_dalek::Signer;
+use rsa::{Pkcs1v15Sign, RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
+use sha2::digest::Digest;
+use std::array::TryFromSliceError;
+use std::marker::PhantomData;
 
 #[derive(Debug)]
 pub struct RsaKey<T> {

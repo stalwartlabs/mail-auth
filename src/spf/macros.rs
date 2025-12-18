@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{borrow::Cow, net::IpAddr, time::SystemTime};
-
 use super::{Macro, Variable, Variables};
+use std::{borrow::Cow, net::IpAddr, time::SystemTime};
 
 impl Macro {
     pub fn eval<'z, 'x: 'z>(

@@ -4,16 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::io;
-
+use super::TlsReport;
 use flate2::{Compression, write::GzEncoder};
 use mail_builder::{
     MessageBuilder,
     headers::{HeaderType, address::Address, content_type::ContentType},
     mime::{BodyPart, MimePart, make_boundary},
 };
-
-use super::TlsReport;
+use std::io;
 
 impl TlsReport {
     pub fn write_rfc5322<'x>(

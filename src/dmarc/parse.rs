@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::slice::Iter;
-
-use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
-
 use crate::{
     Error, Version,
     common::parse::{ItemParser, N, T, TagParser, TxtRecordParser, V, Y},
 };
+use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
+use std::slice::Iter;
 
 use super::{Alignment, Dmarc, Format, Policy, Psd, Report, URI};
 

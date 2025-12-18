@@ -12,6 +12,7 @@ use mail_auth::{
         headers::HeaderWriter,
     },
 };
+use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
 
 const TEST_MESSAGE: &str = include_str!("../resources/arc/001.txt");
 
@@ -54,7 +55,10 @@ async fn main() {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let arc_set = ArcSealer::from_key(pk_rsa)
             .domain("example.org")

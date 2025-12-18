@@ -4,21 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{
-    borrow::Cow,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-    time::Instant,
-};
-
-use hickory_resolver::{
-    Name, TokioResolver,
-    config::{ResolverConfig, ResolverOpts},
-    name_server::TokioConnectionProvider,
-    proto::{ProtoError, ProtoErrorKind},
-    system_conf::read_system_conf,
-};
-
+use super::{parse::TxtRecordParser, verify::DomainKey};
 use crate::{
     Error, IpLookupStrategy, MX, MessageAuthenticator, ResolverCache, Txt,
     dkim::{Atps, DomainKeyReport},
@@ -26,8 +12,19 @@ use crate::{
     mta_sts::{MtaSts, TlsRpt},
     spf::{Macro, Spf},
 };
-
-use super::{parse::TxtRecordParser, verify::DomainKey};
+use hickory_resolver::{
+    Name, TokioResolver,
+    config::{ResolverConfig, ResolverOpts},
+    name_server::TokioConnectionProvider,
+    proto::{ProtoError, ProtoErrorKind},
+    system_conf::read_system_conf,
+};
+use std::{
+    borrow::Cow,
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    sync::Arc,
+    time::Instant,
+};
 
 pub struct DnsEntry<T> {
     pub entry: T,

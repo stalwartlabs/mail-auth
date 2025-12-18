@@ -13,6 +13,7 @@ use mail_auth::{
     dkim::DkimSigner,
 };
 use mail_parser::decoders::base64::base64_decode;
+use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
 
 const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
 MIICXwIBAAKBgQDwIRP/UC3SBsEmGqZ9ZJW3/DkMoGeLnQg1fWn7/zYtIxN2SnFC
@@ -44,12 +45,11 @@ fn main() {
     // Sign an e-mail message using RSA-SHA256
     #[cfg(feature = "rust-crypto")]
     let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-    #[cfg(all(
-        feature = "ring",
-        feature = "rustls-pemfile",
-        not(feature = "rust-crypto")
-    ))]
-    let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+    #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+    let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+        PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+    ))
+    .unwrap();
 
     let signature_rsa = DkimSigner::from_key(pk_rsa)
         .domain("example.com")

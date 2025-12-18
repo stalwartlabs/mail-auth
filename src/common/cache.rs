@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::{MX, Parameters, ResolverCache, Txt};
 use std::{
     borrow::Borrow,
     hash::Hash,
@@ -11,8 +12,6 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
-
-use crate::{MX, Parameters, ResolverCache, Txt};
 
 pub struct NoCache<K, V>(PhantomData<(K, V)>);
 

@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::common::parse::{TagParser, TxtRecordParser, V};
-
 use super::{MtaSts, ReportUri, TlsRpt};
+use crate::common::parse::{TagParser, TxtRecordParser, V};
 
 const ID: u64 = (b'i' as u64) | ((b'd' as u64) << 8);
 const RUA: u64 = (b'r' as u64) | ((b'u' as u64) << 8) | ((b'a' as u64) << 16);

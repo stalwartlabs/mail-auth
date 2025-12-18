@@ -7,10 +7,8 @@
 pub mod arf;
 pub mod dmarc;
 pub mod tlsrpt;
-
-use std::{borrow::Cow, net::IpAddr};
-
 use serde::{Deserialize, Serialize};
+use std::{borrow::Cow, net::IpAddr};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[cfg_attr(

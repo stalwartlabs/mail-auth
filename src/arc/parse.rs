@@ -4,17 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use mail_parser::decoders::base64::base64_decode_stream;
-
+use super::{ChainValidation, Results, Seal, Signature};
+use crate::common::parse::*;
 use crate::{
     Error,
     common::{crypto::Algorithm, parse::TagParser},
     dkim::{Canonicalization, parse::SignatureParser},
 };
-
-use super::{ChainValidation, Results, Seal, Signature};
-
-use crate::common::parse::*;
+use mail_parser::decoders::base64::base64_decode_stream;
 
 pub(crate) const CV: u64 = (b'c' as u64) | ((b'v' as u64) << 8);
 

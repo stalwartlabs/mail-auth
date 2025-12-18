@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use mail_parser::{Address, HeaderName, HeaderValue, Message, parsers::MessageStream};
-
-use crate::{AuthenticatedMessage, arc, common::crypto::HashAlgorithm, dkim};
-
 use super::headers::{AuthenticatedHeader, Header, HeaderParser};
+use crate::{AuthenticatedMessage, arc, common::crypto::HashAlgorithm, dkim};
+use mail_parser::{Address, HeaderName, HeaderValue, Message, parsers::MessageStream};
 
 impl<'x> AuthenticatedMessage<'x> {
     pub fn parse(raw_message: &'x [u8]) -> Option<Self> {

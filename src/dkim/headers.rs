@@ -4,11 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::fmt::{Display, Formatter};
-
-use crate::common::headers::{HeaderWriter, Writer};
-
 use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
+use crate::common::headers::{HeaderWriter, Writer};
+use std::fmt::{Display, Formatter};
 
 impl Signature {
     pub fn write(&self, writer: &mut impl Writer, as_header: bool) {

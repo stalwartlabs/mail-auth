@@ -4,10 +4,9 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::net::IpAddr;
-
 use mail_parser::DateTime;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use std::net::IpAddr;
 
 pub mod generate;
 pub mod parse;

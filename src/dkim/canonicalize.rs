@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::common::headers::{HeaderStream, Writable, Writer};
-
 use super::{Canonicalization, Signature};
+use crate::common::headers::{HeaderStream, Writable, Writer};
 
 pub struct CanonicalBody<'a> {
     canonicalization: Canonicalization,
