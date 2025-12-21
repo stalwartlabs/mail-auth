@@ -63,7 +63,7 @@ impl<T: HashImpl> RsaKey<T> {
         let inner = match key_der {
             PrivateKeyDer::Pkcs1(der) => RsaKeyPair::from_der(der.secret_pkcs1_der())
                 .map_err(|err| Error::CryptoError(err.to_string()))?,
-            PrivateKeyDer::Pkcs8(der) => RsaKeyPair::from_der(der.secret_pkcs8_der())
+            PrivateKeyDer::Pkcs8(der) => RsaKeyPair::from_pkcs8(der.secret_pkcs8_der())
                 .map_err(|err| Error::CryptoError(err.to_string()))?,
             _ => return Err(Error::CryptoError("Unsupported RSA key format".to_string())),
         };
