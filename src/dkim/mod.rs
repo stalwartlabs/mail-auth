@@ -20,7 +20,10 @@ pub mod generate;
 pub mod headers;
 pub mod parse;
 pub mod sign;
+pub mod streaming;
 pub mod verify;
+
+pub use streaming::DkimSigningStream;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Canonicalization {

@@ -85,8 +85,8 @@ impl<T: SigningKey> DkimSigner<T, Done> {
 }
 
 pub(super) struct SignableMessage<'a> {
-    headers: CanonicalHeaders<'a>,
-    signature: &'a Signature,
+    pub(super) headers: CanonicalHeaders<'a>,
+    pub(super) signature: &'a Signature,
 }
 
 impl Writable for SignableMessage<'_> {
