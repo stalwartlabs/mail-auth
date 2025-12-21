@@ -63,7 +63,7 @@ impl<T: HashImpl> RsaKey<T> {
         let inner = match key_der {
             PrivateKeyDer::Pkcs1(der) => RsaKeyPair::from_der(der.secret_pkcs1_der())
                 .map_err(|err| Error::CryptoError(err.to_string()))?,
-            PrivateKeyDer::Pkcs8(der) => RsaKeyPair::from_der(der.secret_pkcs8_der())
+            PrivateKeyDer::Pkcs8(der) => RsaKeyPair::from_pkcs8(der.secret_pkcs8_der())
                 .map_err(|err| Error::CryptoError(err.to_string()))?,
             _ => return Err(Error::CryptoError("Unsupported RSA key format".to_string())),
         };
@@ -309,4 +309,82 @@ impl Writer for Context {
     fn write(&mut self, data: &[u8]) {
         self.update(data);
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn from_key_der_pkcs1() {
+        let key_der = PrivateKeyDer::from_pem_slice(PKCS1_PEM.as_bytes()).unwrap();
+        assert!(matches!(key_der, PrivateKeyDer::Pkcs1(_)));
+        RsaKey::<Sha256>::from_key_der(key_der).unwrap();
+    }
+
+    #[test]
+    fn from_key_der_pkcs8() {
+        let key_der = PrivateKeyDer::from_pem_slice(PKCS8_PEM.as_bytes()).unwrap();
+        assert!(matches!(key_der, PrivateKeyDer::Pkcs8(_)));
+        RsaKey::<Sha256>::from_key_der(key_der).unwrap();
+    }
+
+    const PKCS1_PEM: &str = r#"-----BEGIN RSA PRIVATE KEY-----
+MIIEoAIBAAKCAQEAplSshLNG7gYj7LckWBQ5Gg1mrFGj2soo3VuMKSbvfR6tMrnj
+khKUSl3TWQyKdkuOOf4EzAyxhJdq/hWGvMdwfwH2q4UzjjcaRHDP54oBH6WHxyAn
+UUkJTFfJo2i8jFE/um09igLr5sEaKMiHgjQIdUScuQRGqKhqS9e4tPpTnfP4ayvM
+zVvD1ptUnaV4O9+GkpEwx/vLVXItMO2KNXXKADYBuWcY9g+Dlpp637radmLJjnvj
+bCJipWjuVzUEQvIvf3x1dZ4b899Bycp4uScmdz5brfxkhLaA9vchnmr+F7aAuwwK
+N5X2Ep6n5d1M0XjA02Z9Zi2W4NkZiNBBmb/f6QIDAQABAoIBAAPzPANNGv4L98jx
++C3o/F/YbyE1sXmV9lP8I1nr1+FbETvEleQSHGL1aPpIVbZ6/gugXdP3E4qFqmUS
+ik1hQtRFWJVuDPwk5ghiPHxwIYLd+cRFHiHsT96isWzNJTiDinWpN/5XKkE5QfTe
+KaJc4tGJebEG1LhsgtUTxbTImCPxYvKUItDlApOusVvhARjqCnXunNEu5iDiADHH
+Wsv3eSPdWkdF5Jjgt/bI4I9XmagX3e1z6ZQiGvdBwCc8ccwkU6yTswXgWCPqyw/t
+lbTFqE19lEoHGTYYElKaHUo9hCmI3HZS69ShYKG7dMT9dVLhzRlNx7AzZcYWh8Mx
+Ptc8OY0CgYEA1LJe5EpfJ/XvzbiVtNiq07CGhlQj62DAH+XpyqtWHHrUNgMbnBZS
+29had9h2NyfIFDIZAKPGWRuSB6PSyDR6w5Sugh5nRoXshzaFr1pAHmo18s+QELjj
+XyccwivxRXurwmdDL5Bx0YCKII4LJyE3CBlJzq0/wOxvi+iKDRG+TIUCgYEAyDG8
+DXk+E6f9Vd4phaN3sLVDd228U/NNuEr+K74AFHwomgEv//KdK2i/EjFq0zGf31jE
+QMoVbnTDmmzVPfKRDlD3tk5XIz2TDzgGxOYBIWJLUiOlkXxckbLVJBR3NxKn561n
+id7vMR8ik+hAhEp9yZishZr+QrS/4AyHR3ahBRUCgYBYgoGKboh6kJVh/lYOE7vC
+q8rPS2RHJtPMclh/xhznbRWyBEkRAxkn8zhydtl6ykswXEibQ4veuOJj24BzX6NW
+kCCudQh1CHYNLlsjRWM5ROl+SXGiA85aYmRNSQv15ijrlR0YRfuXOu4/7dwmRGQq
+MpvMLbxCBCHHDtWj6qZOIQKBgF+3F7hBbaKsQP2bGLMicwlzwOwK9W4V9+TTRi7X
+yuYAbtEjHDX9Y5Prot8p7W9IXK3GnR51AEYtYZAl1NancR8tKyJo1lStDfDK0sG1
+TnkNrAF7tZ+XnBK1NB7qAg28x7aHO+e5RRdxUXDyLFaT3wxSCLpgXoy6KrsOgmdy
+mo35An9pYQ3Ik9ghh3PJsQ0r/TywuKIzmSvLJZfI/cuBOFkPDoWCleQGdzyQcxuc
+PSCtw8eXUj/Oc09qo5dRWXQkt5uW8sJB0k5fNnfCDqNReUXavDNXOHq31J5USy5R
+8ts1bmtZtK0oRci6A8PcgWChUvSfFUT5IrQM/x4rxabn8qIK
+-----END RSA PRIVATE KEY-----
+"#;
+
+    const PKCS8_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
+MIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDXxo5+n7aZ0psn
+dNjs53za9Af657AuG3sVnvWEBf24OvwwWClJ5vN+cWA7V2yIuuVvd40RxX1N4HLX
+QewaUBVw+XlHanskcYA8WTVuMTI6XNY6hIAtU1ETSWAPke5sH6DyrAzxIoC2R+IH
+ejqwjtdWdQ0MNVudqY3BO6mAH+zYblRzytMmcols+aqYNgZeAYuEie+EiJiTT65v
+y0mG24k0ALF5XLPahxhoUK/xuhjjG/Y/InD8s6C4BksO29bStnyqhMToSGMtUyOT
+PTyh1XgrUB4dlfEnpfX9F/wU8a7ijrD38Qtg935c08Qg9YcwVXzpFHWRw/ZF/auq
+lcazbMaHAgMBAAECggEAOKmhncrfLsHJkLD0jjGz7eOLfO3+q/z3c5QMsSDJoemL
+dD6SiR+m7ZtkQ/EPRVCfE4h3eSU9ZIf+YFylXbuOBd7dZE2oDMfpfu+GQmuU3xKm
+BzPoXP62GbR5D12pGKetokxgEaqX1kZGKuSEKP05uzB9vqj8aAiwev/p4QWBMsw6
+2stumeWMuZortwL9PZpXgzpJPHXDnFdsn3OIINBMFYFdqda8RhL3rWWsbV5nL1oR
+Q2/SMPLc1dQ8ZQKdPmbVhdfnPitVKVEkn8xIiFPWNS3SfYIi+wQj0lWdJbvUUJ1i
+7BIXvnXeeVLyYhekTpE5ZnGeGI4A5lix4PN+GIao8QKBgQDtuPW8BaXWfPHb93Kl
+mWBQNHz0I71p8GL9/+xRpA9SMuUtYS0jJ1whNgcwoSI4cOKo1UsIMDPAPpTU47Ul
+0D+vXr/GyiONL6+IsXAf5xhaQnUWRWKs4G9obadyGkT8aH6y8W+ddKD1JWQKUf4t
+Bmpeim+Ck0I8POhDbNNfThTLwwKBgQDoXZ70Pb6HViZAbzf+rEznNycgG8IqtTSc
+V7YoSMZe17u0AQjE9XZizBrhpz47N6/JvyYTBIh6VPQe880FTnHdUjvbqn8bmLE7
+QEYwvgF5hmHVXlWXUsyKbfMH5Dp8Uy74FV2VTd1hJ7UMSke7LQT41Hgyaz32x7Lm
+r0P63fgh7QKBgQDMrnCGz6YWo8XrS4efJgxTgp4D57HzQVM6t9xV/xhiAghppj4j
+AoTE46wVJug8CJZgICZWiopEgJ3NH7KdOE1dRguBshIiQmi1HXIZRfUl4grGfj+T
+8jp6g8+k4xF68s4EbPVZcU4VRXh5mldrlRaJCFEy8HAbRaYGR/FHIget2QKBgGd/
+o9h4VBAmAD29DDzkdBCc0VGM66xoL/nfW6SP3cPK5bFksIpCJywUa3jNLHvl7ue2
+u3fHEh8jDeVnhI9zhGYnRcAvLhSVq4OPunPlffSqNZN7RDZ1y+Nw28pNDvvndUlN
+AvUIzK2EqTDDOTYW9Fr9EFisydnM01PLB0WLbwV1AoGAGmaWcbNfPyPnJU1nIHGG
+fPlEpGn+3Oxr1ja02FPwexk/bg6CRVIqP2x7RtR1cH9fOqiDOoIqyfKswuZkwVj3
+EMeos/WHHrw+UzXem+IswmwG9rnUBMlMRCkJ9GhXk98bqoWeJpMhlj1L+oBQ3Spj
+j8T1spkdY4jj3CvmzQ0ha0U=
+-----END PRIVATE KEY-----
+"#;
 }
