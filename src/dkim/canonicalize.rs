@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use super::{Canonicalization, Signature};
 use crate::common::{
     crypto::HashContext,
     headers::{HeaderStream, Writable, Writer},
 };
-
-use super::{Canonicalization, Signature};
 
 /// Incremental body hasher for streaming DKIM signing.
 ///

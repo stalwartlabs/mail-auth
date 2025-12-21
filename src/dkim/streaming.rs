@@ -10,18 +10,14 @@ use std::time::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
 
-use super::{
-    canonicalize::BodyHasher,
-    sign::SignableMessage,
-    DkimSigner, Done, Signature,
-};
+use super::{DkimSigner, Done, Signature, canonicalize::BodyHasher, sign::SignableMessage};
 
 use crate::{
+    Error,
     common::{
         crypto::{HashContext, HashImpl, SigningKey},
         headers::HeaderIterator,
     },
-    Error,
 };
 
 /// A streaming DKIM signer that allows signing messages in chunks.
@@ -174,10 +170,7 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
                 // This handles the edge case of a message with no body
                 let (header_section, body_section) =
                     if let Some(boundary_pos) = find_header_boundary(&buffer) {
-                        (
-                            &buffer[..boundary_pos - 4],
-                            &buffer[boundary_pos..],
-                        )
+                        (&buffer[..boundary_pos - 4], &buffer[boundary_pos..])
                     } else {
                         // No boundary found - treat entire buffer as headers with empty body
                         (buffer.as_slice(), &[][..])
@@ -230,11 +223,7 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
             {
                 headers.push((name.as_slice(), value.as_slice()));
                 found_headers[pos] = true;
-                signed_headers.push(
-                    std::str::from_utf8(name)
-                        .unwrap_or_default()
-                        .to_string(),
-                );
+                signed_headers.push(std::str::from_utf8(name).unwrap_or_default().to_string());
             }
         }
 
@@ -293,7 +282,7 @@ fn parse_headers(header_section: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     // Add a fake body separator so HeaderIterator works correctly
     let mut with_separator = header_section.to_vec();
     with_separator.extend_from_slice(b"\r\n");
-    
+
     HeaderIterator::new(&with_separator)
         .map(|(name, value)| (name.to_vec(), value.to_vec()))
         .collect()
@@ -306,13 +295,11 @@ mod test {
         common::crypto::{RsaKey, Sha256},
         dkim::{Canonicalization, DkimSigner},
     };
+    #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+    use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
     #[test]
     fn streaming_sign_matches_regular_sign() {
         // Test that sign_streaming() produces same body hash as sign()
@@ -328,7 +315,10 @@ mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")
@@ -351,10 +341,6 @@ mod test {
         assert_eq!(sig1.b, sig2.b, "Signatures should match");
     }
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
     #[test]
     fn streaming_sign_multiple_chunks() {
         let header = "From: bill@example.com\r\nTo: jdoe@example.com\r\nSubject: Test\r\n\r\n";
@@ -363,7 +349,10 @@ mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")
@@ -380,13 +369,12 @@ mod test {
         stream.write(body.as_bytes());
         let streamed_sig = stream.finish().unwrap();
 
-        assert_eq!(reference_sig.bh, streamed_sig.bh, "Body hashes should match");
+        assert_eq!(
+            reference_sig.bh, streamed_sig.bh,
+            "Body hashes should match"
+        );
     }
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
     #[test]
     fn streaming_sign_chunked_body() {
         let message = concat!(
@@ -401,7 +389,10 @@ mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")
@@ -427,17 +418,16 @@ mod test {
         }
     }
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
     #[test]
     fn streaming_sign_split_header_boundary() {
         // Test where \r\n\r\n is split across chunks
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")
@@ -459,10 +449,6 @@ mod test {
         assert_eq!(reference_sig.bh, streamed_sig.bh);
     }
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
     #[test]
     fn streaming_sign_empty_body() {
         let message = "From: test@example.com\r\nSubject: Empty\r\n\r\n";
@@ -470,7 +456,10 @@ mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")
@@ -486,10 +475,6 @@ mod test {
         assert_eq!(reference_sig.bh, streamed_sig.bh);
     }
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
     #[test]
     fn streaming_sign_simple_canonicalization() {
         let message = concat!(
@@ -502,7 +487,10 @@ mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")
@@ -521,10 +509,6 @@ mod test {
         assert_eq!(reference_sig.b, streamed_sig.b);
     }
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
     #[test]
     fn streaming_sign_folded_headers() {
         // Test with folded (multi-line) headers
@@ -539,7 +523,10 @@ mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")
@@ -555,10 +542,6 @@ mod test {
         assert_eq!(reference_sig.bh, streamed_sig.bh);
     }
 
-    #[cfg(any(
-        feature = "rust-crypto",
-        all(feature = "ring", feature = "rustls-pemfile")
-    ))]
     #[test]
     fn streaming_sign_no_matching_headers_error() {
         let message = "X-Custom: value\r\n\r\nBody\r\n";
@@ -566,7 +549,10 @@ mod test {
         #[cfg(feature = "rust-crypto")]
         let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
         #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
-        let pk_rsa = RsaKey::<Sha256>::from_rsa_pem(RSA_PRIVATE_KEY).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
 
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")

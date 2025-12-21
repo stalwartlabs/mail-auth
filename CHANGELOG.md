@@ -1,3 +1,8 @@
+mail-auth 0.7.5
+================================
+- Fix decoding PKCS#8 key DER regression (#51).
+- Add streaming DKIM signing API to reduce memory usage for large emails (#47).
+
 mail-auth 0.7.4
 ================================
 - Parse PEM with `rustls-pki-types` (#49)
