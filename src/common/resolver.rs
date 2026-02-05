@@ -73,7 +73,7 @@ impl MessageAuthenticator {
         let mut result = vec![];
         for record in self
             .0
-            .txt_lookup(Name::from_str_relaxed(key.into_fqdn().as_ref())?)
+            .txt_lookup(Name::from_str_relaxed::<&str>(key.into_fqdn().as_ref())?)
             .await?
             .as_lookup()
             .record_iter()
@@ -94,7 +94,7 @@ impl MessageAuthenticator {
         cache: Option<&impl ResolverCache<String, Txt>>,
     ) -> crate::Result<Arc<T>> {
         let key = key.into_fqdn();
-        if let Some(value) = cache.as_ref().and_then(|c| c.get(key.as_ref())) {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return T::unwrap_txt(value);
         }
 
@@ -105,7 +105,7 @@ impl MessageAuthenticator {
 
         let txt_lookup = self
             .0
-            .txt_lookup(Name::from_str_relaxed(key.as_ref())?)
+            .txt_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
             .await?;
         let mut result = Err(Error::InvalidRecordType);
         let records = txt_lookup.as_lookup().record_iter().filter_map(|r| {
@@ -145,7 +145,7 @@ impl MessageAuthenticator {
         cache: Option<&impl ResolverCache<String, Arc<Vec<MX>>>>,
     ) -> crate::Result<Arc<Vec<MX>>> {
         let key = key.into_fqdn();
-        if let Some(value) = cache.as_ref().and_then(|c| c.get(key.as_ref())) {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
         }
 
@@ -156,7 +156,7 @@ impl MessageAuthenticator {
 
         let mx_lookup = self
             .0
-            .mx_lookup(Name::from_str_relaxed(key.as_ref())?)
+            .mx_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
             .await?;
         let mx_records = mx_lookup.as_lookup().records();
         let mut records: Vec<MX> = Vec::with_capacity(mx_records.len());
@@ -192,7 +192,7 @@ impl MessageAuthenticator {
         cache: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
     ) -> crate::Result<Arc<Vec<Ipv4Addr>>> {
         let key = key.into_fqdn();
-        if let Some(value) = cache.as_ref().and_then(|c| c.get(key.as_ref())) {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
         }
 
@@ -215,7 +215,10 @@ impl MessageAuthenticator {
             return mock_resolve(key);
         }
 
-        let ipv4_lookup = self.0.ipv4_lookup(Name::from_str_relaxed(key)?).await?;
+        let ipv4_lookup = self
+            .0
+            .ipv4_lookup(Name::from_str_relaxed::<&str>(key)?)
+            .await?;
         let ips: Arc<Vec<Ipv4Addr>> = ipv4_lookup
             .as_lookup()
             .record_iter()
@@ -235,7 +238,7 @@ impl MessageAuthenticator {
         cache: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
     ) -> crate::Result<Arc<Vec<Ipv6Addr>>> {
         let key = key.into_fqdn();
-        if let Some(value) = cache.as_ref().and_then(|c| c.get(key.as_ref())) {
+        if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
         }
 
@@ -258,7 +261,10 @@ impl MessageAuthenticator {
             return mock_resolve(key);
         }
 
-        let ipv6_lookup = self.0.ipv6_lookup(Name::from_str_relaxed(key)?).await?;
+        let ipv6_lookup = self
+            .0
+            .ipv6_lookup(Name::from_str_relaxed::<&str>(key)?)
+            .await?;
         let ips: Arc<Vec<Ipv6Addr>> = ipv6_lookup
             .as_lookup()
             .record_iter()
@@ -384,15 +390,15 @@ impl MessageAuthenticator {
     ) -> crate::Result<bool> {
         let key = key.into_fqdn();
 
-        if cache_ipv4.is_some_and(|c| c.get(key.as_ref()).is_some())
-            || cache_ipv6.is_some_and(|c| c.get(key.as_ref()).is_some())
+        if cache_ipv4.is_some_and(|c| c.get::<str>(key.as_ref()).is_some())
+            || cache_ipv6.is_some_and(|c| c.get::<str>(key.as_ref()).is_some())
         {
             return Ok(true);
         }
 
         match self
             .0
-            .lookup_ip(Name::from_str_relaxed(key.as_ref())?)
+            .lookup_ip(Name::from_str_relaxed::<&str>(key.as_ref())?)
             .await
         {
             Ok(result) => Ok(result.as_lookup().record_iter().any(|r| {

@@ -113,7 +113,7 @@ impl<'x> Variables<'x> {
 
     pub fn set_sender(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         let value = value.into();
-        for (pos, ch) in value.as_ref().iter().enumerate() {
+        for (pos, ch) in value.iter().enumerate() {
             if ch == &b'@' {
                 if pos > 0 {
                     self.vars[Variable::SenderLocalPart as usize] = match &value {
@@ -157,7 +157,7 @@ impl<'x> Variables<'x> {
         fqdn: bool,
         delimiters: u64,
     ) -> Cow<'_, [u8]> {
-        let var = self.vars[name as usize].as_ref();
+        let var: &[u8] = self.vars[name as usize].as_ref();
         if var.is_empty()
             || (num_parts == 0 && !reverse && !escape && delimiters == 1u64 << (b'.' - b'+'))
         {

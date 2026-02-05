@@ -112,7 +112,7 @@ pub struct Variables<'x> {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Macro {
-    Literal(Vec<u8>),
+    Literal(Box<[u8]>),
     Variable {
         letter: Variable,
         num_parts: u32,
@@ -120,17 +120,17 @@ pub enum Macro {
         escape: bool,
         delimiters: u64,
     },
-    List(Vec<Macro>),
+    List(Box<[Macro]>),
     None,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Spf {
     pub version: Version,
-    pub directives: Vec<Directive>,
+    pub directives: Box<[Directive]>,
     pub exp: Option<Macro>,
     pub redirect: Option<Macro>,
-    pub ra: Option<Vec<u8>>,
+    pub ra: Option<Box<[u8]>>,
     pub rp: u8,
     pub rr: u8,
 }

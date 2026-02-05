@@ -382,6 +382,18 @@ impl ItemParser for Vec<u8> {
     }
 }
 
+impl ItemParser for Box<[u8]> {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        Some(bytes.into())
+    }
+}
+
+impl ItemParser for Box<str> {
+    fn parse(bytes: &[u8]) -> Option<Self> {
+        Some(std::str::from_utf8(bytes).ok()?.into())
+    }
+}
+
 impl ItemParser for String {
     fn parse(bytes: &[u8]) -> Option<Self> {
         Some(String::from_utf8_lossy(bytes).into_owned())

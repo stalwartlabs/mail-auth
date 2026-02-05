@@ -62,15 +62,15 @@ impl<'x> Feedback<'x> {
                 BodyPart::Text(arf.into()),
             ),
         ];
-        if let Some(message) = self.message.as_ref() {
+        if let Some(message) = self.message.as_deref() {
             parts.push(MimePart::new(
                 ContentType::new("message/rfc822"),
-                BodyPart::Text(message.as_ref().into()),
+                BodyPart::Text(message.into()),
             ));
-        } else if let Some(headers) = self.headers.as_ref() {
+        } else if let Some(headers) = self.headers.as_deref() {
             parts.push(MimePart::new(
                 ContentType::new("text/rfc822-headers"),
-                BodyPart::Text(headers.as_ref().into()),
+                BodyPart::Text(headers.into()),
             ));
         }
 

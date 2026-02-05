@@ -58,7 +58,8 @@ impl TlsReport {
 
                     match rt {
                         ReportType::Gzip => {
-                            let mut file = GzDecoder::new(report.as_ref());
+                            let report: &[u8] = report.as_ref();
+                            let mut file = GzDecoder::new(report);
                             let mut buf = Vec::new();
                             file.read_to_end(&mut buf)
                                 .map_err(|err| Error::UncompressError(err.to_string()))?;
@@ -71,7 +72,7 @@ impl TlsReport {
                             }
                         }
                         ReportType::Zip => {
-                            let mut archive = ZipArchive::new(Cursor::new(report.as_ref()))
+                            let mut archive = ZipArchive::new(Cursor::new(report))
                                 .map_err(|err| Error::UncompressError(err.to_string()))?;
                             for i in 0..archive.len() {
                                 match archive.by_index(i) {

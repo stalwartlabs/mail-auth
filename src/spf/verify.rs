@@ -188,10 +188,7 @@ impl MessageAuthenticator {
 
                         let mut matches = false;
                         match self
-                            .mx_lookup(
-                                macro_string.eval(&vars, &domain, true).as_ref(),
-                                params.cache_mx,
-                            )
+                            .mx_lookup(&*macro_string.eval(&vars, &domain, true), params.cache_mx)
                             .await
                         {
                             Ok(records) => {
@@ -248,7 +245,7 @@ impl MessageAuthenticator {
 
                         let target_name = macro_string.eval(&vars, &domain, true);
                         match self
-                            .txt_lookup::<Spf>(target_name.as_ref(), params.cache_txt)
+                            .txt_lookup::<Spf>(&*target_name, params.cache_txt)
                             .await
                         {
                             Ok(included_spf) => {
@@ -326,7 +323,7 @@ impl MessageAuthenticator {
 
                         if let Ok(result) = self
                             .exists(
-                                macro_string.eval(&vars, &domain, true).as_ref(),
+                                &*macro_string.eval(&vars, &domain, true),
                                 params.cache_ipv4,
                                 params.cache_ipv6,
                             )
@@ -357,7 +354,7 @@ impl MessageAuthenticator {
 
                 let target_name = macro_string.eval(&vars, &domain, true);
                 match self
-                    .txt_lookup::<Spf>(target_name.as_ref(), params.cache_txt)
+                    .txt_lookup::<Spf>(&*target_name, params.cache_txt)
                     .await
                 {
                     Ok(redirect_spf) => {

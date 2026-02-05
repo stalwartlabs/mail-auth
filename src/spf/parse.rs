@@ -27,15 +27,12 @@ impl TxtRecordParser for Spf {
             return Err(Error::InvalidRecordType);
         }
 
-        let mut spf = Spf {
-            version: Version::V1,
-            directives: Vec::new(),
-            redirect: None,
-            exp: None,
-            ra: None,
-            rp: 100,
-            rr: u8::MAX,
-        };
+        let mut redirect = None;
+        let mut exp = None;
+        let mut ra = None;
+        let mut rp = 100;
+        let mut rr = u8::MAX;
+        let mut directives = Vec::new();
 
         while let Some((term, qualifier, mut stop_char)) = record.next_term() {
             match term {
@@ -65,7 +62,7 @@ impl TxtRecordParser for Spf {
                         _ => return Err(Error::ParseError),
                     }
 
-                    spf.directives.push(Directive::new(
+                    directives.push(Directive::new(
                         qualifier,
                         if term == A {
                             Mechanism::A {
@@ -84,8 +81,7 @@ impl TxtRecordParser for Spf {
                 }
                 ALL => {
                     if stop_char == b' ' {
-                        spf.directives
-                            .push(Directive::new(qualifier, Mechanism::All))
+                        directives.push(Directive::new(qualifier, Mechanism::All))
                     } else {
                         return Err(Error::ParseError);
                     }
@@ -96,7 +92,7 @@ impl TxtRecordParser for Spf {
                     }
                     let (macro_string, stop_char) = record.macro_string(false)?;
                     if stop_char == b' ' {
-                        spf.directives.push(Directive::new(
+                        directives.push(Directive::new(
                             qualifier,
                             if term == INCLUDE {
                                 Mechanism::Include { macro_string }
@@ -119,7 +115,7 @@ impl TxtRecordParser for Spf {
                     } else if stop_char != b' ' {
                         return Err(Error::ParseError);
                     }
-                    spf.directives.push(Directive::new(
+                    directives.push(Directive::new(
                         qualifier,
                         Mechanism::Ip4 {
                             addr,
@@ -138,7 +134,7 @@ impl TxtRecordParser for Spf {
                     } else if stop_char != b' ' {
                         return Err(Error::ParseError);
                     }
-                    spf.directives.push(Directive::new(
+                    directives.push(Directive::new(
                         qualifier,
                         Mechanism::Ip6 {
                             addr,
@@ -155,8 +151,7 @@ impl TxtRecordParser for Spf {
                     }
 
                     if stop_char == b' ' {
-                        spf.directives
-                            .push(Directive::new(qualifier, Mechanism::Ptr { macro_string }));
+                        directives.push(Directive::new(qualifier, Mechanism::Ptr { macro_string }));
                     } else {
                         return Err(Error::ParseError);
                     }
@@ -170,28 +165,28 @@ impl TxtRecordParser for Spf {
                         return Err(Error::ParseError);
                     }
                     if term == REDIRECT {
-                        if spf.redirect.is_none() {
-                            spf.redirect = macro_string.into()
+                        if redirect.is_none() {
+                            redirect = macro_string.into()
                         } else {
                             return Err(Error::ParseError);
                         }
-                    } else if spf.exp.is_none() {
-                        spf.exp = macro_string.into()
+                    } else if exp.is_none() {
+                        exp = macro_string.into()
                     } else {
                         return Err(Error::ParseError);
                     };
                 }
                 RA => {
-                    let ra = record.ra()?;
-                    if !ra.is_empty() {
-                        spf.ra = ra.into();
+                    let ra_ = record.ra()?;
+                    if !ra_.is_empty() {
+                        ra = ra_.into_boxed_slice().into();
                     }
                 }
                 RP => {
-                    spf.rp = std::cmp::min(record.cidr_length()?, 100);
+                    rp = std::cmp::min(record.cidr_length()?, 100);
                 }
                 RR => {
-                    spf.rr = record.rr()?;
+                    rr = record.rr()?;
                 }
                 _ => {
                     let (_, stop_char) = record.macro_string(false)?;
@@ -202,7 +197,15 @@ impl TxtRecordParser for Spf {
             }
         }
 
-        Ok(spf)
+        Ok(Spf {
+            version: Version::V1,
+            directives: directives.into_boxed_slice(),
+            redirect,
+            exp,
+            ra,
+            rp,
+            rr,
+        })
     }
 }
 
@@ -328,7 +331,7 @@ impl SPFParser for Iter<'_, u8> {
                 }
                 b'{' if last_is_pct => {
                     if !literal.is_empty() {
-                        macro_string.push(Macro::Literal(literal.to_vec()));
+                        macro_string.push(Macro::Literal(literal.as_slice().into()));
                         literal.clear();
                     }
 
@@ -400,13 +403,13 @@ impl SPFParser for Iter<'_, u8> {
         }
 
         if !literal.is_empty() {
-            macro_string.push(Macro::Literal(literal));
+            macro_string.push(Macro::Literal(literal.into_boxed_slice()));
         }
 
         match macro_string.len() {
             1 => Ok((macro_string.pop().unwrap(), stop_char)),
             0 => Err(Error::ParseError),
-            _ => Ok((Macro::List(macro_string), stop_char)),
+            _ => Ok((Macro::List(macro_string.into_boxed_slice()), stop_char)),
         }
     }
 
@@ -751,7 +754,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
@@ -763,13 +766,13 @@ mod test {
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::A {
-                                macro_string: Macro::Literal(b"colo.example.com".to_vec()),
+                                macro_string: Macro::Literal(b"colo.example.com".as_slice().into()),
                                 ip4_mask: u32::MAX << (32 - 28),
                                 ip6_mask: u128::MAX,
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -781,17 +784,17 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::A {
-                                macro_string: Macro::Literal(b"A.EXAMPLE.COM".to_vec()),
+                                macro_string: Macro::Literal(b"A.EXAMPLE.COM".as_slice().into()),
                                 ip4_mask: u32::MAX,
                                 ip6_mask: u128::MAX,
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -803,7 +806,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
@@ -813,7 +816,7 @@ mod test {
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -823,16 +826,16 @@ mod test {
                     ra: None,
                     rp: 100,
                     rr: u8::MAX,
-                    redirect: Macro::Literal(b"_spf.example.com".to_vec()).into(),
+                    redirect: Macro::Literal(b"_spf.example.com".as_slice().into()).into(),
                     exp: None,
-                    directives: vec![Directive::new(
+                    directives: Box::new([Directive::new(
                         Qualifier::Pass,
                         Mechanism::Mx {
                             macro_string: Macro::None,
                             ip4_mask: u32::MAX,
                             ip6_mask: u128::MAX,
                         },
-                    )],
+                    )]),
                 },
             ),
             (
@@ -844,7 +847,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::A {
@@ -862,7 +865,7 @@ mod test {
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -874,21 +877,21 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Include {
-                                macro_string: Macro::Literal(b"example.com".to_vec()),
+                                macro_string: Macro::Literal(b"example.com".as_slice().into()),
                             },
                         ),
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Include {
-                                macro_string: Macro::Literal(b"example.org".to_vec()),
+                                macro_string: Macro::Literal(b"example.org".as_slice().into()),
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -900,11 +903,11 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Exists {
-                                macro_string: Macro::List(vec![
+                                macro_string: Macro::List(Box::new([
                                     Macro::Variable {
                                         letter: Variable::Ip,
                                         num_parts: 0,
@@ -912,7 +915,7 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                    Macro::Literal(b".".to_vec()),
+                                    Macro::Literal(b".".as_slice().into()),
                                     Macro::Variable {
                                         letter: Variable::SenderLocalPart,
                                         num_parts: 1,
@@ -921,7 +924,7 @@ mod test {
                                         delimiters: (1u64 << (b'+' - b'+'))
                                             | (1u64 << (b'-' - b'+')),
                                     },
-                                    Macro::Literal(b"._spf.".to_vec()),
+                                    Macro::Literal(b"._spf.".as_slice().into()),
                                     Macro::Variable {
                                         letter: Variable::Domain,
                                         num_parts: 0,
@@ -929,11 +932,11 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                ]),
+                                ])),
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -943,8 +946,8 @@ mod test {
                     ra: None,
                     rp: 100,
                     rr: u8::MAX,
-                    exp: Macro::List(vec![
-                        Macro::Literal(b"explain._spf.".to_vec()),
+                    exp: Macro::List(Box::new([
+                        Macro::Literal(b"explain._spf.".as_slice().into()),
                         Macro::Variable {
                             letter: Variable::Domain,
                             num_parts: 0,
@@ -952,10 +955,10 @@ mod test {
                             escape: false,
                             delimiters: 1u64 << (b'.' - b'+'),
                         },
-                    ])
+                    ]))
                     .into(),
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
@@ -965,7 +968,7 @@ mod test {
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -977,7 +980,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Ip4 {
@@ -993,7 +996,7 @@ mod test {
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1005,7 +1008,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Ip4 {
@@ -1022,7 +1025,7 @@ mod test {
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1034,7 +1037,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
@@ -1046,13 +1049,13 @@ mod test {
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
-                                macro_string: Macro::Literal(b"example.org".to_vec()),
+                                macro_string: Macro::Literal(b"example.org".as_slice().into()),
                                 ip4_mask: u32::MAX << (32 - 30),
                                 ip6_mask: u128::MAX,
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1064,7 +1067,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Ptr {
@@ -1072,7 +1075,7 @@ mod test {
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1084,10 +1087,10 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![Directive::new(
+                    directives: Box::new([Directive::new(
                         Qualifier::Pass,
                         Mechanism::Exists {
-                            macro_string: Macro::List(vec![
+                            macro_string: Macro::List(Box::new([
                                 Macro::Variable {
                                     letter: Variable::SenderLocalPart,
                                     num_parts: 1,
@@ -1095,7 +1098,7 @@ mod test {
                                     escape: false,
                                     delimiters: 1u64 << (b'+' - b'+'),
                                 },
-                                Macro::Literal(b".".to_vec()),
+                                Macro::Literal(b".".as_slice().into()),
                                 Macro::Variable {
                                     letter: Variable::Domain,
                                     num_parts: 0,
@@ -1103,9 +1106,9 @@ mod test {
                                     escape: false,
                                     delimiters: 1u64 << (b'.' - b'+'),
                                 },
-                            ]),
+                            ])),
                         },
-                    )],
+                    )]),
                 },
             ),
             (
@@ -1117,10 +1120,10 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![Directive::new(
+                    directives: Box::new([Directive::new(
                         Qualifier::Pass,
                         Mechanism::Exists {
-                            macro_string: Macro::List(vec![
+                            macro_string: Macro::List(Box::new([
                                 Macro::Variable {
                                     letter: Variable::Ip,
                                     num_parts: 0,
@@ -1128,7 +1131,7 @@ mod test {
                                     escape: false,
                                     delimiters: 1u64 << (b'.' - b'+'),
                                 },
-                                Macro::Literal(b".".to_vec()),
+                                Macro::Literal(b".".as_slice().into()),
                                 Macro::Variable {
                                     letter: Variable::SenderLocalPart,
                                     num_parts: 1,
@@ -1136,7 +1139,7 @@ mod test {
                                     escape: false,
                                     delimiters: 1u64 << (b'+' - b'+'),
                                 },
-                                Macro::Literal(b".".to_vec()),
+                                Macro::Literal(b".".as_slice().into()),
                                 Macro::Variable {
                                     letter: Variable::Domain,
                                     num_parts: 0,
@@ -1144,9 +1147,9 @@ mod test {
                                     escape: false,
                                     delimiters: 1u64 << (b'.' - b'+'),
                                 },
-                            ]),
+                            ])),
                         },
-                    )],
+                    )]),
                 },
             ),
             (
@@ -1158,12 +1161,12 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Exists {
-                                macro_string: Macro::List(vec![
-                                    Macro::Literal(b"_h.".to_vec()),
+                                macro_string: Macro::List(Box::new([
+                                    Macro::Literal(b"_h.".as_slice().into()),
                                     Macro::Variable {
                                         letter: Variable::HeloDomain,
                                         num_parts: 0,
@@ -1171,7 +1174,7 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                    Macro::Literal(b"._l.".to_vec()),
+                                    Macro::Literal(b"._l.".as_slice().into()),
                                     Macro::Variable {
                                         letter: Variable::SenderLocalPart,
                                         num_parts: 0,
@@ -1179,7 +1182,7 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                    Macro::Literal(b"._o.".to_vec()),
+                                    Macro::Literal(b"._o.".as_slice().into()),
                                     Macro::Variable {
                                         letter: Variable::SenderDomainPart,
                                         num_parts: 0,
@@ -1187,7 +1190,7 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                    Macro::Literal(b"._i.".to_vec()),
+                                    Macro::Literal(b"._i.".as_slice().into()),
                                     Macro::Variable {
                                         letter: Variable::Ip,
                                         num_parts: 0,
@@ -1195,7 +1198,7 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                    Macro::Literal(b"._spf.".to_vec()),
+                                    Macro::Literal(b"._spf.".as_slice().into()),
                                     Macro::Variable {
                                         letter: Variable::Domain,
                                         num_parts: 0,
@@ -1203,11 +1206,11 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                ]),
+                                ])),
                             },
                         ),
                         Directive::new(Qualifier::Neutral, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1219,7 +1222,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
@@ -1231,7 +1234,7 @@ mod test {
                         Directive::new(
                             Qualifier::Neutral,
                             Mechanism::Exists {
-                                macro_string: Macro::List(vec![
+                                macro_string: Macro::List(Box::new([
                                     Macro::Variable {
                                         letter: Variable::Ip,
                                         num_parts: 0,
@@ -1239,12 +1242,12 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                    Macro::Literal(b".whitelist.example.org".to_vec()),
-                                ]),
+                                    Macro::Literal(b".whitelist.example.org".as_slice().into()),
+                                ])),
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1256,7 +1259,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
@@ -1268,7 +1271,7 @@ mod test {
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Exists {
-                                macro_string: Macro::List(vec![
+                                macro_string: Macro::List(Box::new([
                                     Macro::Variable {
                                         letter: Variable::SenderLocalPart,
                                         num_parts: 0,
@@ -1276,7 +1279,7 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                    Macro::Literal(b"._%20spf_ verify%.".to_vec()),
+                                    Macro::Literal(b"._%20spf_ verify%.".as_slice().into()),
                                     Macro::Variable {
                                         letter: Variable::Domain,
                                         num_parts: 0,
@@ -1284,11 +1287,11 @@ mod test {
                                         escape: false,
                                         delimiters: 1u64 << (b'.' - b'+'),
                                     },
-                                ]),
+                                ])),
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1299,7 +1302,7 @@ mod test {
                     rp: 100,
                     rr: u8::MAX,
                     exp: None,
-                    redirect: Macro::List(vec![
+                    redirect: Macro::List(Box::new([
                         Macro::Variable {
                             letter: Variable::SenderLocalPart,
                             num_parts: 1,
@@ -1307,7 +1310,7 @@ mod test {
                             escape: false,
                             delimiters: 1u64 << (b'+' - b'+'),
                         },
-                        Macro::Literal(b"._at_.".to_vec()),
+                        Macro::Literal(b"._at_.".as_slice().into()),
                         Macro::Variable {
                             letter: Variable::SenderDomainPart,
                             num_parts: 0,
@@ -1318,7 +1321,7 @@ mod test {
                                 | (1u64 << (b'_' - b'+'))
                                 | (1u64 << (b'/' - b'+')),
                         },
-                        Macro::Literal(b"._spf.".to_vec()),
+                        Macro::Literal(b"._spf.".as_slice().into()),
                         Macro::Variable {
                             letter: Variable::Domain,
                             num_parts: 0,
@@ -1326,16 +1329,16 @@ mod test {
                             escape: false,
                             delimiters: 1u64 << (b'.' - b'+'),
                         },
-                    ])
+                    ]))
                     .into(),
-                    directives: vec![Directive::new(
+                    directives: Box::new([Directive::new(
                         Qualifier::Pass,
                         Mechanism::Mx {
                             macro_string: Macro::None,
                             ip4_mask: u32::MAX,
                             ip6_mask: u128::MAX,
                         },
-                    )],
+                    )]),
                 },
             ),
             (
@@ -1347,7 +1350,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Fail,
                             Mechanism::Ip4 {
@@ -1364,7 +1367,7 @@ mod test {
                             },
                         ),
                         Directive::new(Qualifier::Pass, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1379,7 +1382,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
@@ -1391,7 +1394,7 @@ mod test {
                         Directive::new(
                             Qualifier::SoftFail,
                             Mechanism::A {
-                                macro_string: Macro::Literal(b"domain.com".to_vec()),
+                                macro_string: Macro::Literal(b"domain.com".as_slice().into()),
                                 ip4_mask: u32::MAX << (32 - 12),
                                 ip6_mask: u128::MAX << (128 - 123),
                             },
@@ -1417,29 +1420,29 @@ mod test {
                                 mask: u128::MAX << (128 - 96),
                             },
                         ),
-                    ],
+                    ]),
                 },
             ),
             (
                 "v=spf1 mx:example.org -all ra=postmaster rp=15 rr=e:f:s:n",
                 Spf {
                     version: Version::V1,
-                    ra: b"postmaster".to_vec().into(),
+                    ra: Some(b"postmaster".as_slice().into()),
                     rp: 15,
                     rr: RR_FAIL | RR_NEUTRAL_NONE | RR_SOFTFAIL | RR_TEMP_PERM_ERROR,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Mx {
-                                macro_string: Macro::Literal(b"example.org".to_vec()),
+                                macro_string: Macro::Literal(b"example.org".as_slice().into()),
                                 ip4_mask: u32::MAX,
                                 ip6_mask: u128::MAX,
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
             (
@@ -1451,7 +1454,7 @@ mod test {
                     rr: u8::MAX,
                     exp: None,
                     redirect: None,
-                    directives: vec![
+                    directives: Box::new([
                         Directive::new(
                             Qualifier::Pass,
                             Mechanism::Ip6 {
@@ -1460,7 +1463,7 @@ mod test {
                             },
                         ),
                         Directive::new(Qualifier::Fail, Mechanism::All),
-                    ],
+                    ]),
                 },
             ),
         ] {

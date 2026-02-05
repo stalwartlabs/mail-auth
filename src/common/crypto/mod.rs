@@ -149,6 +149,7 @@ impl AsRef<[u8]> for HashOutput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[repr(u8)]
 pub enum Algorithm {
     RsaSha1,
     #[default]

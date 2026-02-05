@@ -79,7 +79,8 @@ impl Report {
 
                     match rt {
                         ReportType::Gzip => {
-                            let mut file = GzDecoder::new(report.as_ref());
+                            let report: &[u8] = report.as_ref();
+                            let mut file = GzDecoder::new(report);
                             let mut buf = Vec::new();
                             file.read_to_end(&mut buf)
                                 .map_err(|err| Error::UncompressError(err.to_string()))?;
@@ -92,7 +93,7 @@ impl Report {
                             }
                         }
                         ReportType::Zip => {
-                            let mut archive = zip::ZipArchive::new(Cursor::new(report.as_ref()))
+                            let mut archive = zip::ZipArchive::new(Cursor::new(report))
                                 .map_err(|err| Error::UncompressError(err.to_string()))?;
                             for i in 0..archive.len() {
                                 match archive.by_index(i) {
@@ -725,7 +726,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
                     }
                 }
                 Ok(Event::GeneralRef(e)) => {
-                    let v = hashify::tiny_map!(e.as_ref(),
+                    let v = hashify::tiny_map!(&*e,
                         b"lt" => "<",
                         b"gt" => ">",
                         b"amp" => "&",
