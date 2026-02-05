@@ -1,3 +1,8 @@
+mail-auth 0.8.0
+================================
+- Removed `rust-crypto` backend.
+- Use boxed slices in caches to reduce memory usage.
+
 mail-auth 0.7.5
 ================================
 - Fix decoding PKCS#8 key DER regression (#51).

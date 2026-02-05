@@ -295,7 +295,7 @@ mod test {
         common::crypto::{RsaKey, Sha256},
         dkim::{Canonicalization, DkimSigner},
     };
-    #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
+
     use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
@@ -312,9 +312,6 @@ mod test {
             "So, if you could do that, that'd be great.\r\n"
         );
 
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -346,9 +343,6 @@ mod test {
         let header = "From: bill@example.com\r\nTo: jdoe@example.com\r\nSubject: Test\r\n\r\n";
         let body = "Hello World! This is the body.\r\n";
 
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -386,9 +380,6 @@ mod test {
             "Line 3\r\n",
         );
 
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -421,9 +412,6 @@ mod test {
     #[test]
     fn streaming_sign_split_header_boundary() {
         // Test where \r\n\r\n is split across chunks
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -452,10 +440,6 @@ mod test {
     #[test]
     fn streaming_sign_empty_body() {
         let message = "From: test@example.com\r\nSubject: Empty\r\n\r\n";
-
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -484,9 +468,6 @@ mod test {
             "Body with   spaces\r\n",
         );
 
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -519,10 +500,6 @@ mod test {
             "\r\n",
             "Body\r\n",
         );
-
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -546,9 +523,6 @@ mod test {
     fn streaming_sign_no_matching_headers_error() {
         let message = "X-Custom: value\r\n\r\nBody\r\n";
 
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))

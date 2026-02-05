@@ -69,11 +69,11 @@ impl MessageAuthenticator {
         &self.0
     }
 
-    pub async fn txt_raw_lookup(&self, key: impl IntoFqdn<'_>) -> crate::Result<Vec<u8>> {
+    pub async fn txt_raw_lookup(&self, key: impl ToFqdn) -> crate::Result<Vec<u8>> {
         let mut result = vec![];
         for record in self
             .0
-            .txt_lookup(Name::from_str_relaxed::<&str>(key.into_fqdn().as_ref())?)
+            .txt_lookup(Name::from_str_relaxed::<&str>(key.to_fqdn().as_ref())?)
             .await?
             .as_lookup()
             .record_iter()
@@ -88,12 +88,12 @@ impl MessageAuthenticator {
         Ok(result)
     }
 
-    pub async fn txt_lookup<'x, T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
+    pub async fn txt_lookup<T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
         &self,
-        key: impl IntoFqdn<'x>,
-        cache: Option<&impl ResolverCache<String, Txt>>,
+        key: impl ToFqdn,
+        cache: Option<&impl ResolverCache<Box<str>, Txt>>,
     ) -> crate::Result<Arc<T>> {
-        let key = key.into_fqdn();
+        let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return T::unwrap_txt(value);
         }
@@ -133,18 +133,18 @@ impl MessageAuthenticator {
         let result: Txt = result.into();
 
         if let Some(cache) = cache {
-            cache.insert(key.into_owned(), result.clone(), txt_lookup.valid_until());
+            cache.insert(key, result.clone(), txt_lookup.valid_until());
         }
 
         T::unwrap_txt(result)
     }
 
-    pub async fn mx_lookup<'x>(
+    pub async fn mx_lookup(
         &self,
-        key: impl IntoFqdn<'x>,
-        cache: Option<&impl ResolverCache<String, Arc<Vec<MX>>>>,
-    ) -> crate::Result<Arc<Vec<MX>>> {
-        let key = key.into_fqdn();
+        key: impl ToFqdn,
+        cache: Option<&impl ResolverCache<Box<str>, Arc<[MX]>>>,
+    ) -> crate::Result<Arc<[MX]>> {
+        let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
         }
@@ -159,39 +159,42 @@ impl MessageAuthenticator {
             .mx_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
             .await?;
         let mx_records = mx_lookup.as_lookup().records();
-        let mut records: Vec<MX> = Vec::with_capacity(mx_records.len());
+        let mut records: Vec<(u16, Vec<Box<str>>)> = Vec::with_capacity(mx_records.len());
         for mx_record in mx_records {
             if let Some(mx) = mx_record.data().as_mx() {
                 let preference = mx.preference();
-                let exchange = mx.exchange().to_lowercase().to_string();
+                let exchange = mx.exchange().to_lowercase().to_string().into_boxed_str();
 
-                if let Some(record) = records.iter_mut().find(|r| r.preference == preference) {
-                    record.exchanges.push(exchange);
+                if let Some(record) = records.iter_mut().find(|r| r.0 == preference) {
+                    record.1.push(exchange);
                 } else {
-                    records.push(MX {
-                        exchanges: vec![exchange],
-                        preference,
-                    });
+                    records.push((preference, vec![exchange]));
                 }
             }
         }
 
-        records.sort_unstable_by(|a, b| a.preference.cmp(&b.preference));
-        let records = Arc::new(records);
+        records.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        let records: Arc<[MX]> = records
+            .into_iter()
+            .map(|(preference, exchanges)| MX {
+                preference,
+                exchanges: exchanges.into_boxed_slice(),
+            })
+            .collect::<Arc<[MX]>>();
 
         if let Some(cache) = cache {
-            cache.insert(key.into_owned(), records.clone(), mx_lookup.valid_until());
+            cache.insert(key, records.clone(), mx_lookup.valid_until());
         }
 
         Ok(records)
     }
 
-    pub async fn ipv4_lookup<'x>(
+    pub async fn ipv4_lookup(
         &self,
-        key: impl IntoFqdn<'x>,
-        cache: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
-    ) -> crate::Result<Arc<Vec<Ipv4Addr>>> {
-        let key = key.into_fqdn();
+        key: impl ToFqdn,
+        cache: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
+    ) -> crate::Result<Arc<[Ipv4Addr]>> {
+        let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
         }
@@ -199,17 +202,13 @@ impl MessageAuthenticator {
         let ipv4_lookup = self.ipv4_lookup_raw(key.as_ref()).await?;
 
         if let Some(cache) = cache {
-            cache.insert(
-                key.into_owned(),
-                ipv4_lookup.entry.clone(),
-                ipv4_lookup.expires,
-            );
+            cache.insert(key, ipv4_lookup.entry.clone(), ipv4_lookup.expires);
         }
 
         Ok(ipv4_lookup.entry)
     }
 
-    pub async fn ipv4_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<Vec<Ipv4Addr>>>> {
+    pub async fn ipv4_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<[Ipv4Addr]>>> {
         #[cfg(any(test, feature = "test"))]
         if true {
             return mock_resolve(key);
@@ -219,7 +218,7 @@ impl MessageAuthenticator {
             .0
             .ipv4_lookup(Name::from_str_relaxed::<&str>(key)?)
             .await?;
-        let ips: Arc<Vec<Ipv4Addr>> = ipv4_lookup
+        let ips: Arc<[Ipv4Addr]> = ipv4_lookup
             .as_lookup()
             .record_iter()
             .filter_map(|r| r.data().as_a()?.0.into())
@@ -232,12 +231,12 @@ impl MessageAuthenticator {
         })
     }
 
-    pub async fn ipv6_lookup<'x>(
+    pub async fn ipv6_lookup(
         &self,
-        key: impl IntoFqdn<'x>,
-        cache: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
-    ) -> crate::Result<Arc<Vec<Ipv6Addr>>> {
-        let key = key.into_fqdn();
+        key: impl ToFqdn,
+        cache: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
+    ) -> crate::Result<Arc<[Ipv6Addr]>> {
+        let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
         }
@@ -245,17 +244,13 @@ impl MessageAuthenticator {
         let ipv6_lookup = self.ipv6_lookup_raw(key.as_ref()).await?;
 
         if let Some(cache) = cache {
-            cache.insert(
-                key.into_owned(),
-                ipv6_lookup.entry.clone(),
-                ipv6_lookup.expires,
-            );
+            cache.insert(key, ipv6_lookup.entry.clone(), ipv6_lookup.expires);
         }
 
         Ok(ipv6_lookup.entry)
     }
 
-    pub async fn ipv6_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<Vec<Ipv6Addr>>>> {
+    pub async fn ipv6_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<[Ipv6Addr]>>> {
         #[cfg(any(test, feature = "test"))]
         if true {
             return mock_resolve(key);
@@ -265,7 +260,7 @@ impl MessageAuthenticator {
             .0
             .ipv6_lookup(Name::from_str_relaxed::<&str>(key)?)
             .await?;
-        let ips: Arc<Vec<Ipv6Addr>> = ipv6_lookup
+        let ips: Arc<[Ipv6Addr]> = ipv6_lookup
             .as_lookup()
             .record_iter()
             .filter_map(|r| r.data().as_aaaa()?.0.into())
@@ -283,8 +278,8 @@ impl MessageAuthenticator {
         key: &str,
         mut strategy: IpLookupStrategy,
         max_results: usize,
-        cache_ipv4: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
-        cache_ipv6: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
     ) -> crate::Result<Vec<IpAddr>> {
         loop {
             match strategy {
@@ -327,8 +322,8 @@ impl MessageAuthenticator {
     pub async fn ptr_lookup(
         &self,
         addr: IpAddr,
-        cache: Option<&impl ResolverCache<IpAddr, Arc<Vec<String>>>>,
-    ) -> crate::Result<Arc<Vec<String>>> {
+        cache: Option<&impl ResolverCache<IpAddr, Arc<[Box<str>]>>>,
+    ) -> crate::Result<Arc<[Box<str>]>> {
         if let Some(value) = cache.as_ref().and_then(|c| c.get(&addr)) {
             return Ok(value);
         }
@@ -339,19 +334,18 @@ impl MessageAuthenticator {
         }
 
         let ptr_lookup = self.0.reverse_lookup(addr).await?;
-        let ptr: Arc<Vec<String>> = ptr_lookup
+        let ptr: Arc<[Box<str>]> = ptr_lookup
             .as_lookup()
             .record_iter()
             .filter_map(|r| {
                 let r = r.data().as_ptr()?;
                 if !r.is_empty() {
-                    r.to_lowercase().to_string().into()
+                    r.to_lowercase().to_string().into_boxed_str().into()
                 } else {
                     None
                 }
             })
-            .collect::<Vec<String>>()
-            .into();
+            .collect::<Arc<[Box<str>]>>();
 
         if let Some(cache) = cache {
             cache.insert(addr, ptr.clone(), ptr_lookup.valid_until());
@@ -361,17 +355,17 @@ impl MessageAuthenticator {
     }
 
     #[cfg(any(test, feature = "test"))]
-    pub async fn exists<'x>(
+    pub async fn exists(
         &self,
-        key: impl IntoFqdn<'x>,
-        cache_ipv4: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
-        cache_ipv6: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
+        key: impl ToFqdn,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
     ) -> crate::Result<bool> {
-        let key = key.into_fqdn().into_owned();
-        match self.ipv4_lookup(key.as_str(), cache_ipv4).await {
+        let key = key.to_fqdn();
+        match self.ipv4_lookup(key.as_ref(), cache_ipv4).await {
             Ok(_) => Ok(true),
             Err(Error::DnsRecordNotFound(_)) => {
-                match self.ipv6_lookup(key.as_str(), cache_ipv6).await {
+                match self.ipv6_lookup(key.as_ref(), cache_ipv6).await {
                     Ok(_) => Ok(true),
                     Err(Error::DnsRecordNotFound(_)) => Ok(false),
                     Err(err) => Err(err),
@@ -382,13 +376,13 @@ impl MessageAuthenticator {
     }
 
     #[cfg(not(any(test, feature = "test")))]
-    pub async fn exists<'x>(
+    pub async fn exists(
         &self,
-        key: impl IntoFqdn<'x>,
-        cache_ipv4: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
-        cache_ipv6: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
+        key: impl ToFqdn,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
     ) -> crate::Result<bool> {
-        let key = key.into_fqdn();
+        let key = key.to_fqdn();
 
         if cache_ipv4.is_some_and(|c| c.get::<str>(key.as_ref()).is_some())
             || cache_ipv6.is_some_and(|c| c.get::<str>(key.as_ref()).is_some())
@@ -568,36 +562,17 @@ impl UnwrapTxtRecord for TlsRpt {
     }
 }
 
-pub trait IntoFqdn<'x> {
-    fn into_fqdn(self) -> Cow<'x, str>;
+pub trait ToFqdn {
+    fn to_fqdn(&self) -> Box<str>;
 }
 
-impl<'x> IntoFqdn<'x> for String {
-    fn into_fqdn(self) -> Cow<'x, str> {
-        if self.ends_with('.') {
-            self.to_lowercase().into()
+impl<T: AsRef<str>> ToFqdn for T {
+    fn to_fqdn(&self) -> Box<str> {
+        let value = self.as_ref();
+        if value.ends_with('.') {
+            value.to_lowercase().into()
         } else {
-            format!("{}.", self.to_lowercase()).into()
-        }
-    }
-}
-
-impl<'x> IntoFqdn<'x> for &'x str {
-    fn into_fqdn(self) -> Cow<'x, str> {
-        if self.ends_with('.') {
-            self.to_lowercase().into()
-        } else {
-            format!("{}.", self.to_lowercase()).into()
-        }
-    }
-}
-
-impl<'x> IntoFqdn<'x> for &String {
-    fn into_fqdn(self) -> Cow<'x, str> {
-        if self.ends_with('.') {
-            self.to_lowercase().into()
-        } else {
-            format!("{}.", self.to_lowercase()).into()
+            format!("{}.", value.to_lowercase()).into()
         }
     }
 }

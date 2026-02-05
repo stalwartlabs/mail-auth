@@ -33,11 +33,11 @@ impl MessageAuthenticator {
         params: impl Into<Parameters<'x, DmarcParameters<'x, F>, TXT, MXX, IPV4, IPV6, PTR>>,
     ) -> DmarcOutput
     where
-        TXT: ResolverCache<String, Txt> + 'x,
-        MXX: ResolverCache<String, Arc<Vec<MX>>> + 'x,
-        IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>> + 'x,
-        IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>> + 'x,
-        PTR: ResolverCache<IpAddr, Arc<Vec<String>>> + 'x,
+        TXT: ResolverCache<Box<str>, Txt> + 'x,
+        MXX: ResolverCache<Box<str>, Arc<[MX]>> + 'x,
+        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>> + 'x,
+        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>> + 'x,
+        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>> + 'x,
         F: for<'y> Fn(&'y str) -> &'y str,
     {
         // Extract RFC5322.From domain
@@ -141,7 +141,7 @@ impl MessageAuthenticator {
         &self,
         domain: &str,
         addresses: &'x [URI],
-        txt_cache: Option<&impl ResolverCache<String, Txt>>,
+        txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
     ) -> Option<Vec<&'x URI>> {
         let mut result = Vec::with_capacity(addresses.len());
         for address in addresses {
@@ -176,7 +176,7 @@ impl MessageAuthenticator {
     async fn dmarc_tree_walk(
         &self,
         domain: &str,
-        txt_cache: Option<&impl ResolverCache<String, Txt>>,
+        txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
     ) -> crate::Result<Option<Arc<Dmarc>>> {
         let labels = domain.split('.').collect::<Vec<_>>();
         let mut x = labels.len();
@@ -255,11 +255,11 @@ impl<'x, F> From<DmarcParameters<'x, F>>
     for Parameters<
         'x,
         DmarcParameters<'x, F>,
-        NoCache<String, Txt>,
-        NoCache<String, Arc<Vec<MX>>>,
-        NoCache<String, Arc<Vec<Ipv4Addr>>>,
-        NoCache<String, Arc<Vec<Ipv6Addr>>>,
-        NoCache<IpAddr, Arc<Vec<String>>>,
+        NoCache<Box<str>, Txt>,
+        NoCache<Box<str>, Arc<[MX]>>,
+        NoCache<Box<str>, Arc<[Ipv4Addr]>>,
+        NoCache<Box<str>, Arc<[Ipv6Addr]>>,
+        NoCache<IpAddr, Arc<[Box<str>]>>,
     >
 where
     F: for<'y> Fn(&'y str) -> &'y str,

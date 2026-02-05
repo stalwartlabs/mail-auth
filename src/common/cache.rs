@@ -39,11 +39,11 @@ impl<P>
     Parameters<
         '_,
         P,
-        NoCache<String, Txt>,
-        NoCache<String, Arc<Vec<MX>>>,
-        NoCache<String, Arc<Vec<Ipv4Addr>>>,
-        NoCache<String, Arc<Vec<Ipv6Addr>>>,
-        NoCache<IpAddr, Arc<Vec<String>>>,
+        NoCache<Box<str>, Txt>,
+        NoCache<Box<str>, Arc<[MX]>>,
+        NoCache<Box<str>, Arc<[Ipv4Addr]>>,
+        NoCache<Box<str>, Arc<[Ipv6Addr]>>,
+        NoCache<IpAddr, Arc<[Box<str>]>>,
     >
 {
     pub fn new(params: P) -> Self {
@@ -60,13 +60,13 @@ impl<P>
 
 impl<'x, P, TXT, MXX, IPV4, IPV6, PTR> Parameters<'x, P, TXT, MXX, IPV4, IPV6, PTR>
 where
-    TXT: ResolverCache<String, Txt>,
-    MXX: ResolverCache<String, Arc<Vec<MX>>>,
-    IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>>,
-    IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>>,
-    PTR: ResolverCache<IpAddr, Arc<Vec<String>>>,
+    TXT: ResolverCache<Box<str>, Txt>,
+    MXX: ResolverCache<Box<str>, Arc<[MX]>>,
+    IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>,
+    IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>,
+    PTR: ResolverCache<IpAddr, Arc<[Box<str>]>>,
 {
-    pub fn with_txt_cache<NewTXT: ResolverCache<String, Txt>>(
+    pub fn with_txt_cache<NewTXT: ResolverCache<Box<str>, Txt>>(
         self,
         cache: &'x NewTXT,
     ) -> Parameters<'x, P, NewTXT, MXX, IPV4, IPV6, PTR> {
@@ -80,7 +80,7 @@ where
         }
     }
 
-    pub fn with_mx_cache<NewMX: ResolverCache<String, Arc<Vec<MX>>>>(
+    pub fn with_mx_cache<NewMX: ResolverCache<Box<str>, Arc<[MX]>>>(
         self,
         cache: &'x NewMX,
     ) -> Parameters<'x, P, TXT, NewMX, IPV4, IPV6, PTR> {
@@ -94,7 +94,7 @@ where
         }
     }
 
-    pub fn with_ptr_cache<NewPTR: ResolverCache<IpAddr, Arc<Vec<String>>>>(
+    pub fn with_ptr_cache<NewPTR: ResolverCache<IpAddr, Arc<[Box<str>]>>>(
         self,
         cache: &'x NewPTR,
     ) -> Parameters<'x, P, TXT, MXX, IPV4, IPV6, NewPTR> {
@@ -108,7 +108,7 @@ where
         }
     }
 
-    pub fn with_ipv4_cache<NewIPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>>>(
+    pub fn with_ipv4_cache<NewIPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>(
         self,
         cache: &'x NewIPV4,
     ) -> Parameters<'x, P, TXT, MXX, NewIPV4, IPV6, PTR> {
@@ -122,7 +122,7 @@ where
         }
     }
 
-    pub fn with_ipv6_cache<NewIPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>>>(
+    pub fn with_ipv6_cache<NewIPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>(
         self,
         cache: &'x NewIPV6,
     ) -> Parameters<'x, P, TXT, MXX, IPV4, NewIPV6, PTR> {
@@ -160,7 +160,7 @@ pub mod test {
         sync::Arc,
     };
 
-    use crate::{MX, Parameters, ResolverCache, Txt, common::resolver::IntoFqdn};
+    use crate::{MX, Parameters, ResolverCache, Txt, common::resolver::ToFqdn};
 
     pub(crate) struct DummyCache<K, V>(std::sync::Mutex<std::collections::HashMap<K, V>>);
 
@@ -193,11 +193,11 @@ pub mod test {
     }
 
     pub(crate) struct DummyCaches {
-        pub txt: DummyCache<String, Txt>,
-        pub mx: DummyCache<String, Arc<Vec<MX>>>,
-        pub ptr: DummyCache<IpAddr, Arc<Vec<String>>>,
-        pub ipv4: DummyCache<String, Arc<Vec<Ipv4Addr>>>,
-        pub ipv6: DummyCache<String, Arc<Vec<Ipv6Addr>>>,
+        pub txt: DummyCache<Box<str>, Txt>,
+        pub mx: DummyCache<Box<str>, Arc<[MX]>>,
+        pub ptr: DummyCache<IpAddr, Arc<[Box<str>]>>,
+        pub ipv4: DummyCache<Box<str>, Arc<[Ipv4Addr]>>,
+        pub ipv6: DummyCache<Box<str>, Arc<[Ipv6Addr]>>,
     }
 
     impl DummyCaches {
@@ -211,59 +211,62 @@ pub mod test {
             }
         }
 
-        pub fn with_txt<'x>(
+        pub fn with_txt(
             self,
-            name: impl IntoFqdn<'x>,
+            name: impl ToFqdn,
             value: impl Into<Txt>,
             valid_until: std::time::Instant,
         ) -> Self {
-            self.txt
-                .insert(name.into_fqdn().into_owned(), value.into(), valid_until);
+            self.txt.insert(name.to_fqdn(), value.into(), valid_until);
             self
         }
 
-        pub fn txt_add<'x>(
+        pub fn txt_add(
             &self,
-            name: impl IntoFqdn<'x>,
+            name: impl ToFqdn,
             value: impl Into<Txt>,
             valid_until: std::time::Instant,
         ) {
-            self.txt
-                .insert(name.into_fqdn().into_owned(), value.into(), valid_until);
+            self.txt.insert(name.to_fqdn(), value.into(), valid_until);
         }
 
-        pub fn ipv4_add<'x>(
+        pub fn ipv4_add(
             &self,
-            name: impl IntoFqdn<'x>,
+            name: impl ToFqdn,
             value: Vec<Ipv4Addr>,
             valid_until: std::time::Instant,
         ) {
-            self.ipv4
-                .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
+            self.ipv4.insert(
+                name.to_fqdn(),
+                Arc::from(value.into_boxed_slice()),
+                valid_until,
+            );
         }
 
-        pub fn ipv6_add<'x>(
+        pub fn ipv6_add(
             &self,
-            name: impl IntoFqdn<'x>,
+            name: impl ToFqdn,
             value: Vec<Ipv6Addr>,
             valid_until: std::time::Instant,
         ) {
-            self.ipv6
-                .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
+            self.ipv6.insert(
+                name.to_fqdn(),
+                Arc::from(value.into_boxed_slice()),
+                valid_until,
+            );
         }
 
-        pub fn ptr_add(&self, name: IpAddr, value: Vec<String>, valid_until: std::time::Instant) {
-            self.ptr.insert(name, Arc::new(value), valid_until);
+        pub fn ptr_add(&self, name: IpAddr, value: Vec<Box<str>>, valid_until: std::time::Instant) {
+            self.ptr
+                .insert(name, Arc::from(value.into_boxed_slice()), valid_until);
         }
 
-        pub fn mx_add<'x>(
-            &self,
-            name: impl IntoFqdn<'x>,
-            value: Vec<MX>,
-            valid_until: std::time::Instant,
-        ) {
-            self.mx
-                .insert(name.into_fqdn().into_owned(), Arc::new(value), valid_until);
+        pub fn mx_add(&self, name: impl ToFqdn, value: Vec<MX>, valid_until: std::time::Instant) {
+            self.mx.insert(
+                name.to_fqdn(),
+                Arc::from(value.into_boxed_slice()),
+                valid_until,
+            );
         }
 
         #[allow(clippy::type_complexity)]
@@ -273,11 +276,11 @@ pub mod test {
         ) -> Parameters<
             '_,
             T,
-            DummyCache<String, Txt>,
-            DummyCache<String, Arc<Vec<MX>>>,
-            DummyCache<String, Arc<Vec<Ipv4Addr>>>,
-            DummyCache<String, Arc<Vec<Ipv6Addr>>>,
-            DummyCache<IpAddr, Arc<Vec<String>>>,
+            DummyCache<Box<str>, Txt>,
+            DummyCache<Box<str>, Arc<[MX]>>,
+            DummyCache<Box<str>, Arc<[Ipv4Addr]>>,
+            DummyCache<Box<str>, Arc<[Ipv6Addr]>>,
+            DummyCache<IpAddr, Arc<[Box<str>]>>,
         > {
             Parameters::new(param)
                 .with_txt_cache(&self.txt)

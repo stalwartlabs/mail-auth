@@ -37,11 +37,11 @@ impl MessageAuthenticator {
         params: impl Into<Parameters<'x, SpfParameters<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
     ) -> SpfOutput
     where
-        TXT: ResolverCache<String, Txt> + 'x,
-        MXX: ResolverCache<String, Arc<Vec<MX>>> + 'x,
-        IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>> + 'x,
-        IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>> + 'x,
-        PTR: ResolverCache<IpAddr, Arc<Vec<String>>> + 'x,
+        TXT: ResolverCache<Box<str>, Txt> + 'x,
+        MXX: ResolverCache<Box<str>, Arc<[MX]>> + 'x,
+        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>> + 'x,
+        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>> + 'x,
+        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>> + 'x,
     {
         let params = params.into();
         match &params.params.sender {
@@ -78,11 +78,11 @@ impl MessageAuthenticator {
         params: Parameters<'x, SpfParameters<'x>, TXT, MXX, IPV4, IPV6, PTR>,
     ) -> SpfOutput
     where
-        TXT: ResolverCache<String, Txt>,
-        MXX: ResolverCache<String, Arc<Vec<MX>>>,
-        IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>>,
-        IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>>,
-        PTR: ResolverCache<IpAddr, Arc<Vec<String>>>,
+        TXT: ResolverCache<Box<str>, Txt>,
+        MXX: ResolverCache<Box<str>, Arc<[MX]>>,
+        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>,
+        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>,
+        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>>,
     {
         let domain = params.params.domain;
         let ip = params.params.ip;
@@ -301,10 +301,10 @@ impl MessageAuthenticator {
                                         )
                                         .await
                                 {
-                                    matches = record == &target_addr
+                                    matches = record.as_ref() == target_addr.as_str()
                                         || record
                                             .strip_suffix('.')
-                                            .unwrap_or(record.as_str())
+                                            .unwrap_or(record.as_ref())
                                             .ends_with(&target_sub_addr);
                                     if matches {
                                         break;
@@ -424,8 +424,8 @@ impl MessageAuthenticator {
         ip: IpAddr,
         ip4_mask: u32,
         ip6_mask: u128,
-        cache_ipv4: Option<&impl ResolverCache<String, Arc<Vec<Ipv4Addr>>>>,
-        cache_ipv6: Option<&impl ResolverCache<String, Arc<Vec<Ipv6Addr>>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
     ) -> crate::Result<bool> {
         Ok(match ip {
             IpAddr::V4(ip) => self
@@ -511,11 +511,11 @@ impl<'x> From<SpfParameters<'x>>
     for Parameters<
         'x,
         SpfParameters<'x>,
-        NoCache<String, Txt>,
-        NoCache<String, Arc<Vec<MX>>>,
-        NoCache<String, Arc<Vec<Ipv4Addr>>>,
-        NoCache<String, Arc<Vec<Ipv6Addr>>>,
-        NoCache<IpAddr, Arc<Vec<String>>>,
+        NoCache<Box<str>, Txt>,
+        NoCache<Box<str>, Arc<[MX]>>,
+        NoCache<Box<str>, Arc<[Ipv4Addr]>>,
+        NoCache<Box<str>, Arc<[Ipv6Addr]>>,
+        NoCache<IpAddr, Arc<[Box<str>]>>,
     >
 {
     fn from(params: SpfParameters<'x>) -> Self {
@@ -738,7 +738,7 @@ mod test {
                             name.trim().parse::<IpAddr>().unwrap(),
                             record
                                 .split(',')
-                                .map(|item| item.trim().to_string())
+                                .map(|item| Box::from(item.trim()))
                                 .collect(),
                             valid_until,
                         );
@@ -757,7 +757,7 @@ mod test {
                                 }
                             }
                             mxs.push(MX {
-                                exchanges: vec![mx_name],
+                                exchanges: Box::new([mx_name.into_boxed_str()]),
                                 preference: (pos + 1) as u16,
                             });
                         }

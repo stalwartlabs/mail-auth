@@ -43,11 +43,11 @@ pub struct MessageAuthenticator(pub TokioResolver);
 
 pub struct Parameters<'x, P, TXT, MXX, IPV4, IPV6, PTR>
 where
-    TXT: ResolverCache<String, Txt>,
-    MXX: ResolverCache<String, Arc<Vec<MX>>>,
-    IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>>,
-    IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>>,
-    PTR: ResolverCache<IpAddr, Arc<Vec<String>>>,
+    TXT: ResolverCache<Box<str>, Txt>,
+    MXX: ResolverCache<Box<str>, Arc<[MX]>>,
+    IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>,
+    IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>,
+    PTR: ResolverCache<IpAddr, Arc<[Box<str>]>>,
 {
     pub params: P,
     pub cache_txt: Option<&'x TXT>,
@@ -99,7 +99,7 @@ pub enum Txt {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MX {
-    pub exchanges: Vec<String>,
+    pub exchanges: Box<[Box<str>]>,
     pub preference: u16,
 }
 
@@ -197,7 +197,7 @@ pub enum DmarcResult {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct IprevOutput {
     pub result: IprevResult,
-    pub ptr: Option<Arc<Vec<String>>>,
+    pub ptr: Option<Arc<[Box<str>]>>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -352,13 +352,6 @@ impl From<io::Error> for Error {
 #[cfg(feature = "rsa")]
 impl From<rsa::errors::Error> for Error {
     fn from(err: rsa::errors::Error) -> Self {
-        Error::CryptoError(err.to_string())
-    }
-}
-
-#[cfg(feature = "ed25519-dalek")]
-impl From<ed25519_dalek::ed25519::Error> for Error {
-    fn from(err: ed25519_dalek::ed25519::Error) -> Self {
         Error::CryptoError(err.to_string())
     }
 }

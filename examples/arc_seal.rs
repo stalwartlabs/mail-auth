@@ -52,9 +52,6 @@ async fn main() {
     // Seal message
     if arc_result.can_be_sealed() {
         // Seal the e-mail message using RSA-SHA256
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))

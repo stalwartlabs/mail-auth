@@ -134,16 +134,13 @@ pub mod test {
     const ED25519_PUBLIC_KEY: &str =
         "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 
-    #[cfg(any(feature = "rust-crypto", feature = "ring"))]
     #[test]
     fn dkim_sign() {
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
         .unwrap();
-        #[cfg(feature = "rust-crypto")]
-        let pk = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+
         let signature = DkimSigner::from_key(pk)
             .domain("stalw.art")
             .selector("default")
@@ -179,7 +176,6 @@ pub mod test {
         );
     }
 
-    #[cfg(any(feature = "rust-crypto", feature = "ring"))]
     #[tokio::test]
     async fn dkim_sign_verify() {
         use crate::common::cache::test::DummyCaches;
@@ -214,10 +210,6 @@ pub mod test {
         );
 
         // Create private keys
-        #[cfg(feature = "rust-crypto")]
-        let pk_ed = Ed25519Key::from_bytes(&base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap())
-            .unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_ed = Ed25519Key::from_seed_and_public_key(
             &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
             &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
@@ -244,9 +236,6 @@ pub mod test {
             );
 
         dbg!("Test RSA-SHA256 relaxed/relaxed");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -282,9 +271,6 @@ pub mod test {
         .await;
 
         dbg!("Test RSA-SHA256 relaxed/relaxed with an empty message");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -305,9 +291,6 @@ pub mod test {
         .await;
 
         dbg!("Test RSA-SHA256 simple/simple with an empty message");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -330,9 +313,6 @@ pub mod test {
         .await;
 
         dbg!("Test RSA-SHA256 simple/simple with duplicated headers");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -360,9 +340,6 @@ pub mod test {
         .await;
 
         dbg!("Test RSA-SHA256 simple/relaxed with fixed body length (relaxed)");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -385,9 +362,6 @@ pub mod test {
         .await;
 
         dbg!("Test RSA-SHA256 simple/relaxed with fixed body length (strict)");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -410,9 +384,6 @@ pub mod test {
         .await;
 
         dbg!("Test AUID not matching domains");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -433,9 +404,6 @@ pub mod test {
         .await;
 
         dbg!("Test expired signature and reporting");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -461,9 +429,6 @@ pub mod test {
         assert_eq!(r.as_deref(), Some("dkim-failures@example.com"));
 
         dbg!("Verify ATPS (failure)");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -485,9 +450,6 @@ pub mod test {
         .await;
 
         dbg!("Verify ATPS (success)");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -514,9 +476,6 @@ pub mod test {
         .await;
 
         dbg!("Verify ATPS (success - no hash)");
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))

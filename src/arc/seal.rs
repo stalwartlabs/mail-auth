@@ -223,7 +223,6 @@ mod test {
     const ED25519_PUBLIC_KEY: &str =
         "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
 
-    #[cfg(any(feature = "rust-crypto", feature = "ring"))]
     #[tokio::test]
     async fn arc_seal() {
         use crate::common::cache::test::DummyCaches;
@@ -257,9 +256,6 @@ mod test {
         let pk_ed_private = base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap();
 
         // Create DKIM-signed message
-        #[cfg(feature = "rust-crypto")]
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -275,9 +271,6 @@ mod test {
 
         // Verify and seal the message 50 times
         for _ in 0..25 {
-            #[cfg(feature = "rust-crypto")]
-            let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-            #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
             let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
                 PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
             ))
@@ -289,9 +282,6 @@ mod test {
                 &raw_message,
                 "scamorza.org",
                 "ed",
-                #[cfg(feature = "rust-crypto")]
-                Ed25519Key::from_bytes(&pk_ed_private).unwrap(),
-                #[cfg(all(feature = "ring", not(feature = "rust-crypto")))]
                 Ed25519Key::from_seed_and_public_key(&pk_ed_private, &pk_ed_public).unwrap(),
             )
             .await;

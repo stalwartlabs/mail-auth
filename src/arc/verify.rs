@@ -30,11 +30,11 @@ impl MessageAuthenticator {
         params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
     ) -> ArcOutput<'x>
     where
-        TXT: ResolverCache<String, Txt> + 'x,
-        MXX: ResolverCache<String, Arc<Vec<MX>>> + 'x,
-        IPV4: ResolverCache<String, Arc<Vec<Ipv4Addr>>> + 'x,
-        IPV6: ResolverCache<String, Arc<Vec<Ipv6Addr>>> + 'x,
-        PTR: ResolverCache<IpAddr, Arc<Vec<String>>> + 'x,
+        TXT: ResolverCache<Box<str>, Txt> + 'x,
+        MXX: ResolverCache<Box<str>, Arc<[MX]>> + 'x,
+        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>> + 'x,
+        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>> + 'x,
+        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>> + 'x,
     {
         let params = params.into();
         let message = params.params;
