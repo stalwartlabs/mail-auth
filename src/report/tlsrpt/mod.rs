@@ -240,3 +240,12 @@ impl FailureDetails {
         self
     }
 }
+
+impl DateRange {
+    pub fn from_timestamps(start_datetime: i64, end_datetime: i64) -> Self {
+        Self {
+            start_datetime: DateTime::from_timestamp(start_datetime),
+            end_datetime: DateTime::from_timestamp(end_datetime),
+        }
+    }
+}
