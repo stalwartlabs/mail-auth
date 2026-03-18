@@ -231,3 +231,9 @@ impl Display for Policy {
         })
     }
 }
+
+impl AsRef<str> for URI {
+    fn as_ref(&self) -> &str {
+        &self.uri
+    }
+}

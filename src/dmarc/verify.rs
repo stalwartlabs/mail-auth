@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{Alignment, Dmarc, URI};
+use super::{Alignment, Dmarc};
 use crate::{
     AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
     MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt,
@@ -137,22 +137,22 @@ impl MessageAuthenticator {
     }
 
     /// Validates the external report e-mail addresses of a DMARC record
-    pub async fn verify_dmarc_report_address<'x>(
+    pub async fn verify_dmarc_report_address<'x, T: AsRef<str>>(
         &self,
         domain: &str,
-        addresses: &'x [URI],
+        addresses: &'x [T],
         txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
-    ) -> Option<Vec<&'x URI>> {
+    ) -> Option<Vec<&'x T>> {
         let mut result = Vec::with_capacity(addresses.len());
         for address in addresses {
-            if address.uri.ends_with(domain)
+            let address_ref = address.as_ref();
+            if address_ref.ends_with(domain)
                 || match self
                     .txt_lookup::<Dmarc>(
                         format!(
                             "{}._report._dmarc.{}.",
                             domain,
-                            address
-                                .uri
+                            address_ref
                                 .rsplit_once('@')
                                 .map(|(_, d)| d)
                                 .unwrap_or_default()
