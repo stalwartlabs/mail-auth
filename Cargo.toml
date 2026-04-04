@@ -33,7 +33,7 @@ rsa = { version = "0.9.8", optional = true }
 rustls-pki-types = "1.14"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-hickory-resolver = { version = "=0.26.0-alpha.1", features = ["tls-ring", "dnssec-aws-lc-rs"] }
+hickory-resolver = { version = "=0.26.0-alpha.1", features = ["tls-aws-lc-rs", "dnssec-aws-lc-rs"] }
 zip = { version = "8.5", optional = true, default-features = false, features = ["deflate-flate2"] }
 rand = { version = "0.8.5", optional = true }
 rkyv = { version = "0.8", optional = true }
