@@ -7,11 +7,11 @@
 use super::headers::{Writable, Writer};
 use crate::{Result, dkim::Canonicalization};
 
-#[cfg(feature = "ring")]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 mod ring_impls;
-#[cfg(feature = "ring")]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 pub use ring_impls::{Ed25519Key, RsaKey};
-#[cfg(feature = "ring")]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 pub(crate) use ring_impls::{Ed25519PublicKey, RsaPublicKey};
 
 pub trait SigningKey {
@@ -49,9 +49,9 @@ impl VerifyingKeyType {
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
         match self {
-            #[cfg(feature = "ring")]
+            #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
             Self::Rsa => RsaPublicKey::verifying_key_from_bytes(bytes),
-            #[cfg(feature = "ring")]
+            #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
             Self::Ed25519 => Ed25519PublicKey::verifying_key_from_bytes(bytes),
         }
     }
@@ -80,19 +80,27 @@ pub enum HashAlgorithm {
     Sha256 = R_HASH_SHA256,
 }
 
+#[cfg(feature = "aws-lc-rs")]
+use aws_lc_rs as crypto_backend;
+#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+use ring as crypto_backend;
+
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 impl HashAlgorithm {
     pub fn hash(&self, data: impl Writable) -> HashOutput {
         match self {
             Self::Sha1 => {
-                let mut hasher =
-                    ring::digest::Context::new(&ring::digest::SHA1_FOR_LEGACY_USE_ONLY);
+                let mut hasher = crypto_backend::digest::Context::new(
+                    &crypto_backend::digest::SHA1_FOR_LEGACY_USE_ONLY,
+                );
                 data.write(&mut hasher);
-                HashOutput::Ring(hasher.finish())
+                HashOutput::Digest(hasher.finish())
             }
             Self::Sha256 => {
-                let mut hasher = ring::digest::Context::new(&ring::digest::SHA256);
+                let mut hasher =
+                    crypto_backend::digest::Context::new(&crypto_backend::digest::SHA256);
                 data.write(&mut hasher);
-                HashOutput::Ring(hasher.finish())
+                HashOutput::Digest(hasher.finish())
             }
         }
     }
@@ -100,15 +108,15 @@ impl HashAlgorithm {
 
 #[non_exhaustive]
 pub enum HashOutput {
-    #[cfg(feature = "ring")]
-    Ring(ring::digest::Digest),
+    #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+    Digest(crypto_backend::digest::Digest),
 }
 
 impl AsRef<[u8]> for HashOutput {
     fn as_ref(&self) -> &[u8] {
         match self {
-            #[cfg(feature = "ring")]
-            Self::Ring(output) => output.as_ref(),
+            #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+            Self::Digest(output) => output.as_ref(),
         }
     }
 }

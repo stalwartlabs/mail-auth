@@ -1,7 +1,8 @@
 mail-auth 0.8.0
 ================================
+- Added `aws-lc-rs` backend.
 - Removed `rust-crypto` backend.
-- Use boxed slices in caches to reduce memory usage.
+- Use boxed slices in caches to slightly reduce memory usage.
 
 mail-auth 0.7.5
 ================================

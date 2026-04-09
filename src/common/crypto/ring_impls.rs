@@ -10,9 +10,14 @@ use crate::{
     common::headers::{Writable, Writer},
     dkim::Canonicalization,
 };
-use ring::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
-use ring::rand::SystemRandom;
-use ring::signature::{
+#[cfg(feature = "aws-lc-rs")]
+use aws_lc_rs as crypto_backend;
+#[cfg(all(feature = "ring", not(feature = "aws-lc-rs")))]
+use ring as crypto_backend;
+
+use crypto_backend::digest::{Context, SHA1_FOR_LEGACY_USE_ONLY, SHA256};
+use crypto_backend::rand::SystemRandom;
+use crypto_backend::signature::{
     ED25519, Ed25519KeyPair, KeyPair, RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
     RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY, RSA_PKCS1_SHA256, RsaKeyPair,
     UnparsedPublicKey,
@@ -77,7 +82,7 @@ impl<T: HashImpl> RsaKey<T> {
 
     /// Returns the public key of the RSA key pair.
     pub fn public_key(&self) -> Vec<u8> {
-        self.inner.public().as_ref().to_vec()
+        self.inner.public_key().as_ref().to_vec()
     }
 }
 
@@ -88,7 +93,7 @@ impl SigningKey for RsaKey<Sha256> {
         let mut data = Vec::with_capacity(256);
         input.write(&mut data);
 
-        let mut signature = vec![0; self.inner.public().modulus_len()];
+        let mut signature = vec![0; self.inner.public_key().modulus_len()];
         self.inner
             .sign(&RSA_PKCS1_SHA256, &self.rng, &data, &mut signature)
             .map_err(|err| Error::CryptoError(err.to_string()))?;
@@ -301,7 +306,7 @@ impl HashImpl for Sha256 {
 
 impl HashContext for Context {
     fn complete(self) -> HashOutput {
-        HashOutput::Ring(self.finish())
+        HashOutput::Digest(self.finish())
     }
 }
 
