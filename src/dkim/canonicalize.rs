@@ -317,7 +317,7 @@ impl Signature {
         let body = message.body();
         let body_len = body.len();
         let canonical_headers = self.ch.canonical_headers(headers);
-        let canonical_body = self.ch.canonical_body(body, u64::MAX);
+        let canonical_body = self.cb.canonical_body(body, u64::MAX);
 
         // Add any missing headers
         signed_headers.reverse();
