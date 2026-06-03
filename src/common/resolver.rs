@@ -15,10 +15,7 @@ use crate::{
 use hickory_resolver::{
     TokioResolver,
     config::{CLOUDFLARE, GOOGLE, QUAD9, ResolverConfig, ResolverOpts},
-    net::{
-        DnsError, NetError,
-        runtime::TokioRuntimeProvider,
-    },
+    net::{DnsError, NetError, runtime::TokioRuntimeProvider},
     proto::{
         ProtoError,
         rr::{Name, RData},

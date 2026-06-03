@@ -46,13 +46,13 @@ impl<'x> AuthenticationResults<'x> {
         if let Some(signature) = &dkim.signature {
             if !signature.i.is_empty() {
                 self.auth_results.push_str(" header.i=");
-                self.auth_results.push_str(&signature.i);
+                push_quoted_pvalue(&mut self.auth_results, &signature.i);
             } else {
                 self.auth_results.push_str(" header.d=");
-                self.auth_results.push_str(&signature.d);
+                push_pvalue(&mut self.auth_results, &signature.d);
             }
             self.auth_results.push_str(" header.s=");
-            self.auth_results.push_str(&signature.s);
+            push_pvalue(&mut self.auth_results, &signature.s);
             if signature.b.len() >= 6 {
                 self.auth_results.push_str(" header.b=");
                 self.auth_results.push_str(
@@ -63,7 +63,8 @@ impl<'x> AuthenticationResults<'x> {
         }
 
         if dkim.is_atps {
-            write!(self.auth_results, " header.from={header_from}").ok();
+            self.auth_results.push_str(" header.from=");
+            push_quoted_pvalue(&mut self.auth_results, header_from);
         }
     }
 
@@ -73,6 +74,7 @@ impl<'x> AuthenticationResults<'x> {
         ip_addr: IpAddr,
         ehlo_domain: &str,
     ) -> Self {
+        let ehlo_domain = sanitize_pvalue(ehlo_domain);
         self.auth_results.push_str(";\r\n\tspf=");
         spf.result.as_spf_result(
             &mut self.auth_results,
@@ -91,10 +93,11 @@ impl<'x> AuthenticationResults<'x> {
         from: &str,
         ehlo_domain: &str,
     ) -> Self {
-        let (mail_from, addr) = if !from.is_empty() {
-            (Cow::from(from), from)
+        let ehlo_domain = sanitize_pvalue(ehlo_domain);
+        let mail_from = if !from.is_empty() {
+            sanitize_pvalue(from)
         } else {
-            (format!("postmaster@{ehlo_domain}").into(), "<>")
+            Cow::Owned(format!("postmaster@{ehlo_domain}"))
         };
         self.auth_results.push_str(";\r\n\tspf=");
         spf.result.as_spf_result(
@@ -103,7 +106,12 @@ impl<'x> AuthenticationResults<'x> {
             mail_from.as_ref(),
             ip_addr,
         );
-        write!(self.auth_results, " smtp.mailfrom={addr}").ok();
+        self.auth_results.push_str(" smtp.mailfrom=");
+        if !from.is_empty() {
+            push_quoted_pvalue(&mut self.auth_results, from);
+        } else {
+            self.auth_results.push_str("<>");
+        }
         self
     }
 
@@ -129,7 +137,8 @@ impl<'x> AuthenticationResults<'x> {
         write!(
             self.auth_results,
             " header.from={} policy.dmarc={}",
-            dmarc.domain, dmarc.policy
+            sanitize_pvalue(&dmarc.domain),
+            dmarc.policy
         )
         .ok();
         self
@@ -181,20 +190,24 @@ impl ReceivedSpf {
         hostname: &str,
     ) -> Self {
         let mut received_spf = String::with_capacity(64);
-        let mail_from = if !mail_from.is_empty() {
-            Cow::from(mail_from)
+        let helo = sanitize_pvalue(helo);
+        let envelope_from = if !mail_from.is_empty() {
+            Cow::Borrowed(mail_from)
         } else {
-            format!("postmaster@{helo}").into()
+            Cow::Owned(format!("postmaster@{helo}"))
         };
+        let mail_from = sanitize_pvalue(&envelope_from);
 
         spf.result
             .as_spf_result(&mut received_spf, hostname, mail_from.as_ref(), ip_addr);
 
         write!(
             received_spf,
-            "\r\n\treceiver={hostname}; client-ip={ip_addr}; envelope-from=\"{mail_from}\"; helo={helo};",
+            "\r\n\treceiver={hostname}; client-ip={ip_addr}; envelope-from=\""
         )
         .ok();
+        push_qcontent(&mut received_spf, &envelope_from);
+        write!(received_spf, "\"; helo={helo};").ok();
 
         ReceivedSpf { received_spf }
     }
@@ -355,6 +368,50 @@ fn format_ip_as_pvalue(w: &mut impl Write, ip: IpAddr) -> std::fmt::Result {
     match ip {
         IpAddr::V4(addr) => write!(w, "{addr}"),
         IpAddr::V6(addr) => write!(w, "\"{addr}\""),
+    }
+}
+
+#[inline]
+fn is_pvalue_safe(ch: char) -> bool {
+    !matches!(ch, '\0'..=' ' | '\u{7f}'..='\u{9f}' | '(' | ')' | ';' | '=' | '"' | '\\')
+}
+
+#[inline]
+fn sanitize_pvalue(value: &str) -> Cow<'_, str> {
+    if value.chars().all(is_pvalue_safe) {
+        Cow::Borrowed(value)
+    } else {
+        Cow::Owned(value.chars().filter(|&ch| is_pvalue_safe(ch)).collect())
+    }
+}
+
+#[inline]
+fn push_pvalue(header: &mut String, value: &str) {
+    header.extend(value.chars().filter(|&ch| is_pvalue_safe(ch)));
+}
+
+#[inline]
+fn push_quoted_pvalue(header: &mut String, value: &str) {
+    if !value.is_empty() && value.chars().all(is_pvalue_safe) {
+        header.push_str(value);
+    } else {
+        header.push('"');
+        push_qcontent(header, value);
+        header.push('"');
+    }
+}
+
+#[inline]
+fn push_qcontent(header: &mut String, value: &str) {
+    for ch in value.chars() {
+        match ch {
+            '"' | '\\' => {
+                header.push('\\');
+                header.push(ch);
+            }
+            '\0'..='\u{1f}' | '\u{7f}'..='\u{9f}' => {}
+            ch => header.push(ch),
+        }
     }
 }
 
@@ -597,5 +654,139 @@ mod test {
                 expected_auth_results
             );
         }
+    }
+
+    #[test]
+    fn dkim_result_header_injection() {
+        let signature = Signature {
+            i: "u@evil.test\r\nReply-To: attacker@evil.test\r\nX-Injected: yes".into(),
+            d: "evil.test\r\nX-Injected-D: yes".into(),
+            s: "sel\r\nX-Injected-S: yes".into(),
+            b: b"123456".to_vec(),
+            ..Default::default()
+        };
+        let output = DkimOutput {
+            result: DkimResult::Fail(Error::FailedVerification),
+            signature: Some(&signature),
+            report: None,
+            is_atps: false,
+        };
+        let auth_results = AuthenticationResults::new("mx.example.org")
+            .with_dkim_result(&output, "from@example.org");
+
+        assert_eq!(auth_results.auth_results.matches("\r\n").count(), 1);
+        let value = auth_results.auth_results.split_once("header.i=").unwrap().1;
+        assert!(!value.contains('\r') && !value.contains('\n'));
+        assert!(value.starts_with("\"u@evil.test"));
+        assert!(value.contains("Reply-To: attacker@evil.test"));
+    }
+
+    #[test]
+    fn dkim_result_header_i_quoted_local_part() {
+        let signature = Signature {
+            i: "a;b=c (note)\"x@example.org".into(),
+            d: "example.org".into(),
+            s: "sel".into(),
+            ..Default::default()
+        };
+        let output = DkimOutput {
+            result: DkimResult::Pass,
+            signature: Some(&signature),
+            report: None,
+            is_atps: false,
+        };
+        let auth_results = AuthenticationResults::new("mx.example.org")
+            .with_dkim_result(&output, "from@example.org");
+        let value = auth_results.auth_results.split_once("header.i=").unwrap().1;
+
+        assert!(value.starts_with("\"a;b=c (note)\\\"x@example.org\""));
+        assert_eq!(value.matches('"').count(), 3);
+    }
+
+    #[test]
+    fn dkim_result_header_d_injection() {
+        let signature = Signature {
+            d: "evil.test\r\nX-Injected: yes".into(),
+            s: "sel\"; smtp.bogus=1".into(),
+            ..Default::default()
+        };
+        let output = DkimOutput {
+            result: DkimResult::Fail(Error::FailedVerification),
+            signature: Some(&signature),
+            report: None,
+            is_atps: false,
+        };
+        let auth_results = AuthenticationResults::new("mx.example.org")
+            .with_dkim_result(&output, "from@example.org");
+
+        assert_eq!(auth_results.auth_results.matches("\r\n").count(), 1);
+        let value = auth_results.auth_results.split_once("header.d=").unwrap().1;
+        assert!(!value.contains('\r') && !value.contains('\n'));
+        assert!(!value.contains('"') && !value.contains(';'));
+    }
+
+    #[test]
+    fn spf_result_header_injection() {
+        let spf = SpfOutput {
+            result: SpfResult::Pass,
+            domain: String::new(),
+            report: None,
+            explanation: None,
+        };
+        let auth_results = AuthenticationResults::new("mx.example.org").with_spf_mailfrom_result(
+            &spf,
+            "192.168.1.1".parse().unwrap(),
+            "a@evil.test\r\nX-Injected: yes",
+            "helo.test\r\nX-Injected-Helo: yes",
+        );
+        assert_eq!(auth_results.auth_results.matches("\r\n").count(), 1);
+
+        let auth_results = AuthenticationResults::new("mx.example.org").with_spf_ehlo_result(
+            &spf,
+            "192.168.1.1".parse().unwrap(),
+            "helo.test\r\nX-Injected: yes",
+        );
+        assert_eq!(auth_results.auth_results.matches("\r\n").count(), 1);
+    }
+
+    #[test]
+    fn dmarc_result_header_injection() {
+        let auth_results =
+            AuthenticationResults::new("mx.example.org").with_dmarc_result(&DmarcOutput {
+                spf_result: DmarcResult::Pass,
+                dkim_result: DmarcResult::None,
+                domain: "evil.test\r\nX-Injected: yes".to_string(),
+                policy: Policy::None,
+                record: None,
+            });
+        assert_eq!(auth_results.auth_results.matches("\r\n").count(), 1);
+        let value = auth_results
+            .auth_results
+            .split_once("header.from=")
+            .unwrap()
+            .1;
+        assert!(!value.contains('\r') && !value.contains('\n'));
+    }
+
+    #[test]
+    fn received_spf_header_injection() {
+        let spf = SpfOutput {
+            result: SpfResult::Pass,
+            domain: String::new(),
+            report: None,
+            explanation: None,
+        };
+        let received_spf = ReceivedSpf::new(
+            &spf,
+            "192.168.1.1".parse().unwrap(),
+            "helo.test\r\nX-Injected-Helo: yes",
+            "a@evil.test\r\nX-Injected: yes\r\nReply-To: attacker@evil.test",
+            "mx.example.org",
+        );
+        assert_eq!(received_spf.received_spf.matches("\r\n").count(), 1);
+        assert!(
+            !received_spf.received_spf.contains('"')
+                || received_spf.received_spf.matches('"').count() == 2
+        );
     }
 }

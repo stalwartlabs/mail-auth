@@ -1,3 +1,7 @@
+mail-auth 0.9.1
+================================
+- Fix: Security Header injection in `Authentication-Results`.
+
 mail-auth 0.9.0
 ================================
 - Bump `hickory-resolver` to 0.26.
