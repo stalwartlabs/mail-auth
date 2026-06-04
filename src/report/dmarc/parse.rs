@@ -12,6 +12,7 @@ use crate::report::{
 };
 use flate2::read::GzDecoder;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
+use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use std::borrow::Cow;
@@ -310,12 +311,14 @@ impl Extension {
                 b"extension" => {
                     let mut e = Extension::default();
                     if let Ok(Some(attr)) = tag.try_get_attribute("name")
-                        && let Ok(attr) = attr.decode_and_unescape_value(decoder)
+                        && let Ok(attr) =
+                            attr.decoded_and_normalized_value(XmlVersion::Implicit1_0, decoder)
                     {
                         e.name = attr.to_string();
                     }
                     if let Ok(Some(attr)) = tag.try_get_attribute("definition")
-                        && let Ok(attr) = attr.decode_and_unescape_value(decoder)
+                        && let Ok(attr) =
+                            attr.decoded_and_normalized_value(XmlVersion::Implicit1_0, decoder)
                     {
                         e.definition = attr.to_string();
                     }
@@ -712,7 +715,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
         loop {
             match self.read_event_into(buf) {
                 Ok(Event::Text(e)) => {
-                    let v = e.xml_content().map_err(|e| {
+                    let v = e.xml_content(XmlVersion::Implicit1_0).map_err(|e| {
                         format!(
                             "Failed to decode text value at position {}: {}",
                             self.buffer_position(),
@@ -740,7 +743,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
                             .flatten()
                             .map(|v| Cow::Owned(v.to_string()))
                     })
-                    .unwrap_or_else(|| e.xml_content().unwrap_or_default());
+                    .unwrap_or_else(|| e.xml_content(XmlVersion::Implicit1_0).unwrap_or_default());
 
                     if let Some(value) = &mut value {
                         value.push_str(&v);

@@ -70,11 +70,13 @@ impl DkimKeyPair {
 #[cfg(test)]
 mod test {
     use crate::dkim::sign::test::verify;
+    use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer};
     use std::time::{Duration, Instant};
 
     use crate::{
         MessageAuthenticator,
         common::{
+            cache::test::DummyCaches,
             crypto::{Ed25519Key, RsaKey, Sha256},
             parse::TxtRecordParser,
             verify::DomainKey,
@@ -91,28 +93,29 @@ mod test {
         let ed_public = format!("v=DKIM1; k=ed25519; p={}", ed_pkcs.encoded_public_key());
 
         let pk_ed = Ed25519Key::from_pkcs8_der(&ed_pkcs.private_key).unwrap();
-        let pk_rsa = RsaKey::<Sha256>::from_der(&rsa_pkcs.private_key).unwrap();
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from(rsa_pkcs.private_key.as_slice()),
+        ))
+        .unwrap();
 
         // Create resolver
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        #[cfg(any(test, feature = "test"))]
-        {
-            resolver.txt_add(
-                "default._domainkey.example.com.".to_string(),
-                DomainKey::parse(rsa_public.as_bytes()).unwrap(),
-                Instant::now() + Duration::new(3600, 0),
-            );
-            resolver.txt_add(
-                "ed._domainkey.example.com.".to_string(),
-                DomainKey::parse(ed_public.as_bytes()).unwrap(),
-                Instant::now() + Duration::new(3600, 0),
-            );
-            resolver.txt_add(
-                "_report._domainkey.example.com.".to_string(),
-                DomainKeyReport::parse("ra=dkim-failures; rp=100; rr=x".as_bytes()).unwrap(),
-                Instant::now() + Duration::new(3600, 0),
-            );
-        }
+        let caches = DummyCaches::new();
+        caches.txt_add(
+            "default._domainkey.example.com.".to_string(),
+            DomainKey::parse(rsa_public.as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
+        caches.txt_add(
+            "ed._domainkey.example.com.".to_string(),
+            DomainKey::parse(ed_public.as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
+        caches.txt_add(
+            "_report._domainkey.example.com.".to_string(),
+            DomainKeyReport::parse("ra=dkim-failures; rp=100; rr=x".as_bytes()).unwrap(),
+            Instant::now() + Duration::new(3600, 0),
+        );
 
         let message = concat!(
             "From: bill@example.com\r\n",
@@ -126,6 +129,7 @@ mod test {
         dbg!("Test generated RSA key");
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_rsa)
                 .domain("example.com")
                 .selector("default")
@@ -141,6 +145,7 @@ mod test {
         dbg!("Test ED25519 generated key");
         verify(
             &resolver,
+            &caches,
             DkimSigner::from_key(pk_ed)
                 .domain("example.com")
                 .selector("ed")
