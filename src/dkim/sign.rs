@@ -383,6 +383,57 @@ pub mod test {
         )
         .await;
 
+        let message_whitespace = concat!(
+            "From: bill@example.com\r\n",
+            "To: jdoe@example.com\r\n",
+            "Subject: TPS Report\r\n",
+            "\r\n",
+            "I'm going to need    those TPS reports ASAP.   \r\n",
+            "So,  if you could do that,  that'd be great.  \r\n"
+        );
+
+        dbg!("Test RSA-SHA256 relaxed/simple (mismatched header/body canonicalization)");
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
+        verify(
+            &resolver,
+            &caches,
+            DkimSigner::from_key(pk_rsa)
+                .domain("example.com")
+                .selector("default")
+                .headers(["From", "To", "Subject"])
+                .header_canonicalization(Canonicalization::Relaxed)
+                .body_canonicalization(Canonicalization::Simple)
+                .sign(message_whitespace.as_bytes())
+                .unwrap(),
+            message_whitespace,
+            Ok(()),
+        )
+        .await;
+
+        dbg!("Test RSA-SHA256 simple/relaxed (mismatched header/body canonicalization)");
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
+        verify(
+            &resolver,
+            &caches,
+            DkimSigner::from_key(pk_rsa)
+                .domain("example.com")
+                .selector("default")
+                .headers(["From", "To", "Subject"])
+                .header_canonicalization(Canonicalization::Simple)
+                .body_canonicalization(Canonicalization::Relaxed)
+                .sign(message_whitespace.as_bytes())
+                .unwrap(),
+            message_whitespace,
+            Ok(()),
+        )
+        .await;
+
         dbg!("Test AUID not matching domains");
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),

@@ -1,3 +1,8 @@
+mail-auth 0.9.2
+================================
+- Fix: Body canonicalization uses header canonicalization settings.
+- Use `rustls-platform-verifier` in `hickory-resolver`.
+
 mail-auth 0.9.1
 ================================
 - Fix: Security Header injection in `Authentication-Results`.
