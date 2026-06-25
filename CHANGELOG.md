@@ -1,3 +1,7 @@
+mail-auth 0.10.0
+================================
+- Include DNSSEC status in cache entries.
+
 mail-auth 0.9.2
 ================================
 - Fix: Body canonicalization uses header canonicalization settings.

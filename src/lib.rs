@@ -44,10 +44,10 @@ pub struct MessageAuthenticator(pub TokioResolver);
 pub struct Parameters<'x, P, TXT, MXX, IPV4, IPV6, PTR>
 where
     TXT: ResolverCache<Box<str>, Txt>,
-    MXX: ResolverCache<Box<str>, Arc<[MX]>>,
-    IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>,
-    IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>,
-    PTR: ResolverCache<IpAddr, Arc<[Box<str>]>>,
+    MXX: ResolverCache<Box<str>, RecordSet<MX>>,
+    IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>>,
+    IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>>,
+    PTR: ResolverCache<IpAddr, RecordSet<Box<str>>>,
 {
     pub params: P,
     pub cache_txt: Option<&'x TXT>,
@@ -98,9 +98,25 @@ pub enum Txt {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordSet<T> {
+    pub rrset: Arc<[T]>,
+    pub dnssec_status: DnssecStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MX {
     pub exchanges: Box<[Box<str>]>,
     pub preference: u16,
+}
+
+#[derive(Debug, Clone, Copy, Default, Hash, PartialEq, Eq)]
+#[repr(u16)]
+pub enum DnssecStatus {
+    Secure,
+    Insecure,
+    Bogus,
+    #[default]
+    Indeterminate,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

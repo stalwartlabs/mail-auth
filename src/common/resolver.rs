@@ -6,7 +6,7 @@
 
 use super::{parse::TxtRecordParser, verify::DomainKey};
 use crate::{
-    Error, IpLookupStrategy, MX, MessageAuthenticator, ResolverCache, Txt,
+    DnssecStatus, Error, IpLookupStrategy, MX, MessageAuthenticator, RecordSet, ResolverCache, Txt,
     dkim::{Atps, DomainKeyReport},
     dmarc::Dmarc,
     mta_sts::{MtaSts, TlsRpt},
@@ -153,8 +153,8 @@ impl MessageAuthenticator {
     pub async fn mx_lookup(
         &self,
         key: impl ToFqdn,
-        cache: Option<&impl ResolverCache<Box<str>, Arc<[MX]>>>,
-    ) -> crate::Result<Arc<[MX]>> {
+        cache: Option<&impl ResolverCache<Box<str>, RecordSet<MX>>>,
+    ) -> crate::Result<RecordSet<MX>> {
         let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
@@ -192,6 +192,10 @@ impl MessageAuthenticator {
                 exchanges: exchanges.into_boxed_slice(),
             })
             .collect::<Arc<[MX]>>();
+        let records = RecordSet {
+            rrset: records,
+            dnssec_status: DnssecStatus::Indeterminate,
+        };
 
         if let Some(cache) = cache {
             cache.insert(key, records.clone(), mx_lookup.valid_until());
@@ -203,20 +207,24 @@ impl MessageAuthenticator {
     pub async fn ipv4_lookup(
         &self,
         key: impl ToFqdn,
-        cache: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
-    ) -> crate::Result<Arc<[Ipv4Addr]>> {
+        cache: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
+    ) -> crate::Result<RecordSet<Ipv4Addr>> {
         let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
         }
 
         let ipv4_lookup = self.ipv4_lookup_raw(key.as_ref()).await?;
+        let records = RecordSet {
+            rrset: ipv4_lookup.entry,
+            dnssec_status: DnssecStatus::Indeterminate,
+        };
 
         if let Some(cache) = cache {
-            cache.insert(key, ipv4_lookup.entry.clone(), ipv4_lookup.expires);
+            cache.insert(key, records.clone(), ipv4_lookup.expires);
         }
 
-        Ok(ipv4_lookup.entry)
+        Ok(records)
     }
 
     pub async fn ipv4_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<[Ipv4Addr]>>> {
@@ -251,20 +259,24 @@ impl MessageAuthenticator {
     pub async fn ipv6_lookup(
         &self,
         key: impl ToFqdn,
-        cache: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
-    ) -> crate::Result<Arc<[Ipv6Addr]>> {
+        cache: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
+    ) -> crate::Result<RecordSet<Ipv6Addr>> {
         let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
             return Ok(value);
         }
 
         let ipv6_lookup = self.ipv6_lookup_raw(key.as_ref()).await?;
+        let records = RecordSet {
+            rrset: ipv6_lookup.entry,
+            dnssec_status: DnssecStatus::Indeterminate,
+        };
 
         if let Some(cache) = cache {
-            cache.insert(key, ipv6_lookup.entry.clone(), ipv6_lookup.expires);
+            cache.insert(key, records.clone(), ipv6_lookup.expires);
         }
 
-        Ok(ipv6_lookup.entry)
+        Ok(records)
     }
 
     pub async fn ipv6_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<[Ipv6Addr]>>> {
@@ -301,8 +313,8 @@ impl MessageAuthenticator {
         key: &str,
         mut strategy: IpLookupStrategy,
         max_results: usize,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
-        cache_ipv6: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
     ) -> crate::Result<Vec<IpAddr>> {
         loop {
             match strategy {
@@ -310,6 +322,7 @@ impl MessageAuthenticator {
                     match (self.ipv4_lookup(key, cache_ipv4).await, strategy) {
                         (Ok(result), _) => {
                             return Ok(result
+                                .rrset
                                 .iter()
                                 .take(max_results)
                                 .copied()
@@ -326,6 +339,7 @@ impl MessageAuthenticator {
                     match (self.ipv6_lookup(key, cache_ipv6).await, strategy) {
                         (Ok(result), _) => {
                             return Ok(result
+                                .rrset
                                 .iter()
                                 .take(max_results)
                                 .copied()
@@ -345,8 +359,8 @@ impl MessageAuthenticator {
     pub async fn ptr_lookup(
         &self,
         addr: IpAddr,
-        cache: Option<&impl ResolverCache<IpAddr, Arc<[Box<str>]>>>,
-    ) -> crate::Result<Arc<[Box<str>]>> {
+        cache: Option<&impl ResolverCache<IpAddr, RecordSet<Box<str>>>>,
+    ) -> crate::Result<RecordSet<Box<str>>> {
         if let Some(value) = cache.as_ref().and_then(|c| c.get(&addr)) {
             return Ok(value);
         }
@@ -371,6 +385,10 @@ impl MessageAuthenticator {
                 }
             })
             .collect::<Arc<[Box<str>]>>();
+        let ptr = RecordSet {
+            rrset: ptr,
+            dnssec_status: DnssecStatus::Indeterminate,
+        };
 
         if let Some(cache) = cache {
             cache.insert(addr, ptr.clone(), ptr_lookup.valid_until());
@@ -383,8 +401,8 @@ impl MessageAuthenticator {
     pub async fn exists(
         &self,
         key: impl ToFqdn,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
-        cache_ipv6: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
     ) -> crate::Result<bool> {
         let key = key.to_fqdn();
         match self.ipv4_lookup(key.as_ref(), cache_ipv4).await {
@@ -404,8 +422,8 @@ impl MessageAuthenticator {
     pub async fn exists(
         &self,
         key: impl ToFqdn,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
-        cache_ipv6: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
     ) -> crate::Result<bool> {
         let key = key.to_fqdn();
 

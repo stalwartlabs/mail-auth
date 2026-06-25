@@ -6,7 +6,7 @@
 
 use crate::{
     AuthenticatedMessage, DkimOutput, DkimResult, Error, MX, MessageAuthenticator, Parameters,
-    ResolverCache, Txt,
+    RecordSet, ResolverCache, Txt,
     common::{
         base32::Base32Writer,
         cache::NoCache,
@@ -17,7 +17,6 @@ use crate::{
 };
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
     time::SystemTime,
 };
 
@@ -35,10 +34,10 @@ impl MessageAuthenticator {
     ) -> Vec<DkimOutput<'x>>
     where
         TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, Arc<[MX]>> + 'x,
-        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>> + 'x,
-        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>> + 'x,
-        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>> + 'x,
+        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
+        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
+        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
+        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
     {
         self.verify_dkim_(
             params.into(),
@@ -56,10 +55,10 @@ impl MessageAuthenticator {
     ) -> Vec<DkimOutput<'x>>
     where
         TXT: ResolverCache<Box<str>, Txt>,
-        MXX: ResolverCache<Box<str>, Arc<[MX]>>,
-        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>,
-        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>,
-        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>>,
+        MXX: ResolverCache<Box<str>, RecordSet<MX>>,
+        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>>,
+        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>>,
+        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>>,
     {
         let message = params.params;
         let mut output = Vec::with_capacity(message.dkim_headers.len());
@@ -413,10 +412,10 @@ impl<'x> From<&'x AuthenticatedMessage<'x>>
         'x,
         &'x AuthenticatedMessage<'x>,
         NoCache<Box<str>, Txt>,
-        NoCache<Box<str>, Arc<[MX]>>,
-        NoCache<Box<str>, Arc<[Ipv4Addr]>>,
-        NoCache<Box<str>, Arc<[Ipv6Addr]>>,
-        NoCache<IpAddr, Arc<[Box<str>]>>,
+        NoCache<Box<str>, RecordSet<MX>>,
+        NoCache<Box<str>, RecordSet<Ipv4Addr>>,
+        NoCache<Box<str>, RecordSet<Ipv6Addr>>,
+        NoCache<IpAddr, RecordSet<Box<str>>>,
     >
 {
     fn from(params: &'x AuthenticatedMessage<'x>) -> Self {

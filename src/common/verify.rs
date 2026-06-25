@@ -9,13 +9,10 @@ use super::{
     crypto::{Algorithm, VerifyingKey},
 };
 use crate::{
-    Error, IprevOutput, IprevResult, MX, MessageAuthenticator, Parameters, ResolverCache, Txt,
-    dkim::Canonicalization,
+    Error, IprevOutput, IprevResult, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache,
+    Txt, dkim::Canonicalization,
 };
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct DomainKey {
     pub p: Box<dyn VerifyingKey + Send + Sync>,
@@ -29,23 +26,23 @@ impl MessageAuthenticator {
     ) -> IprevOutput
     where
         TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, Arc<[MX]>> + 'x,
-        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>> + 'x,
-        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>> + 'x,
-        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>> + 'x,
+        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
+        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
+        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
+        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
     {
         let params = params.into();
         match self.ptr_lookup(params.params, params.cache_ptr).await {
             Ok(ptr) => {
                 let mut last_err = None;
-                for host in ptr.iter().take(2) {
+                for host in ptr.rrset.iter().take(2) {
                     match &params.params {
                         IpAddr::V4(ip) => match self.ipv4_lookup(host, params.cache_ipv4).await {
                             Ok(ips) => {
-                                if ips.iter().any(|cip| cip == ip) {
+                                if ips.rrset.iter().any(|cip| cip == ip) {
                                     return IprevOutput {
                                         result: IprevResult::Pass,
-                                        ptr: ptr.into(),
+                                        ptr: Some(ptr.rrset.clone()),
                                     };
                                 }
                             }
@@ -55,10 +52,10 @@ impl MessageAuthenticator {
                         },
                         IpAddr::V6(ip) => match self.ipv6_lookup(host, params.cache_ipv6).await {
                             Ok(ips) => {
-                                if ips.iter().any(|cip| cip == ip) {
+                                if ips.rrset.iter().any(|cip| cip == ip) {
                                     return IprevOutput {
                                         result: IprevResult::Pass,
-                                        ptr: ptr.into(),
+                                        ptr: Some(ptr.rrset.clone()),
                                     };
                                 }
                             }
@@ -75,7 +72,7 @@ impl MessageAuthenticator {
                     } else {
                         IprevResult::Fail(Error::NotAligned)
                     },
-                    ptr: ptr.into(),
+                    ptr: Some(ptr.rrset.clone()),
                 }
             }
             Err(err) => IprevOutput {
@@ -91,10 +88,10 @@ impl From<IpAddr>
         '_,
         IpAddr,
         NoCache<Box<str>, Txt>,
-        NoCache<Box<str>, Arc<[MX]>>,
-        NoCache<Box<str>, Arc<[Ipv4Addr]>>,
-        NoCache<Box<str>, Arc<[Ipv6Addr]>>,
-        NoCache<IpAddr, Arc<[Box<str>]>>,
+        NoCache<Box<str>, RecordSet<MX>>,
+        NoCache<Box<str>, RecordSet<Ipv4Addr>>,
+        NoCache<Box<str>, RecordSet<Ipv6Addr>>,
+        NoCache<IpAddr, RecordSet<Box<str>>>,
     >
 {
     fn from(params: IpAddr) -> Self {

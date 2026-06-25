@@ -4,15 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-    time::SystemTime,
-};
-
+use super::{ChainValidation, Set};
 use crate::{
     ArcOutput, AuthenticatedMessage, DkimResult, Error, MX, MessageAuthenticator, Parameters,
-    ResolverCache, Txt,
+    RecordSet, ResolverCache, Txt,
     common::{
         crypto::HashAlgorithm,
         headers::Header,
@@ -20,8 +15,10 @@ use crate::{
     },
     dkim::{Canonicalization, verify::Verifier},
 };
-
-use super::{ChainValidation, Set};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    time::SystemTime,
+};
 
 impl MessageAuthenticator {
     /// Verifies ARC headers of an RFC5322 message.
@@ -31,10 +28,10 @@ impl MessageAuthenticator {
     ) -> ArcOutput<'x>
     where
         TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, Arc<[MX]>> + 'x,
-        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>> + 'x,
-        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>> + 'x,
-        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>> + 'x,
+        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
+        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
+        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
+        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
     {
         let params = params.into();
         let message = params.params;

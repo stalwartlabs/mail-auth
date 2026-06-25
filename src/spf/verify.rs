@@ -6,12 +6,11 @@
 
 use super::{Macro, Mechanism, Qualifier, Spf, Variables};
 use crate::{
-    Error, MX, MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt,
-    common::cache::NoCache,
+    Error, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult,
+    Txt, common::cache::NoCache,
 };
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
     time::Instant,
 };
 
@@ -38,10 +37,10 @@ impl MessageAuthenticator {
     ) -> SpfOutput
     where
         TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, Arc<[MX]>> + 'x,
-        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>> + 'x,
-        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>> + 'x,
-        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>> + 'x,
+        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
+        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
+        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
+        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
     {
         let params = params.into();
         match &params.params.sender {
@@ -79,10 +78,10 @@ impl MessageAuthenticator {
     ) -> SpfOutput
     where
         TXT: ResolverCache<Box<str>, Txt>,
-        MXX: ResolverCache<Box<str>, Arc<[MX]>>,
-        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>,
-        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>,
-        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>>,
+        MXX: ResolverCache<Box<str>, RecordSet<MX>>,
+        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>>,
+        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>>,
+        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>>,
     {
         let domain = params.params.domain;
         let ip = params.params.ip;
@@ -134,7 +133,7 @@ impl MessageAuthenticator {
                         .ptr_lookup(ip, params.cache_ptr)
                         .await
                         .ok()
-                        .and_then(|ptrs| ptrs.first().map(|ptr| ptr.as_bytes().to_vec()))
+                        .and_then(|ptrs| ptrs.rrset.first().map(|ptr| ptr.as_bytes().to_vec()))
                     {
                         vars.set_validated_domain(ptr);
                     }
@@ -193,6 +192,7 @@ impl MessageAuthenticator {
                         {
                             Ok(records) => {
                                 for (mx_num, exchange) in records
+                                    .rrset
                                     .iter()
                                     .flat_map(|mx| mx.exchanges.iter())
                                     .enumerate()
@@ -288,7 +288,7 @@ impl MessageAuthenticator {
                         let mut matches = false;
 
                         if let Ok(records) = self.ptr_lookup(ip, params.cache_ptr).await {
-                            for record in records.iter() {
+                            for record in records.rrset.iter() {
                                 if lookup_limit.can_lookup()
                                     && let Ok(true) = self
                                         .ip_matches(
@@ -424,18 +424,20 @@ impl MessageAuthenticator {
         ip: IpAddr,
         ip4_mask: u32,
         ip6_mask: u128,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>,
-        cache_ipv6: Option<&impl ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
     ) -> crate::Result<bool> {
         Ok(match ip {
             IpAddr::V4(ip) => self
                 .ipv4_lookup(target_name, cache_ipv4)
                 .await?
+                .rrset
                 .iter()
                 .any(|addr| ip.matches_ipv4_mask(addr, ip4_mask)),
             IpAddr::V6(ip) => self
                 .ipv6_lookup(target_name, cache_ipv6)
                 .await?
+                .rrset
                 .iter()
                 .any(|addr| ip.matches_ipv6_mask(addr, ip6_mask)),
         })
@@ -512,10 +514,10 @@ impl<'x> From<SpfParameters<'x>>
         'x,
         SpfParameters<'x>,
         NoCache<Box<str>, Txt>,
-        NoCache<Box<str>, Arc<[MX]>>,
-        NoCache<Box<str>, Arc<[Ipv4Addr]>>,
-        NoCache<Box<str>, Arc<[Ipv6Addr]>>,
-        NoCache<IpAddr, Arc<[Box<str>]>>,
+        NoCache<Box<str>, RecordSet<MX>>,
+        NoCache<Box<str>, RecordSet<Ipv4Addr>>,
+        NoCache<Box<str>, RecordSet<Ipv6Addr>>,
+        NoCache<IpAddr, RecordSet<Box<str>>>,
     >
 {
     fn from(params: SpfParameters<'x>) -> Self {

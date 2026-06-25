@@ -7,7 +7,7 @@
 use super::{Alignment, Dmarc};
 use crate::{
     AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
-    MessageAuthenticator, Parameters, ResolverCache, SpfOutput, SpfResult, Txt,
+    MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult, Txt,
     common::cache::NoCache,
 };
 use std::{
@@ -34,10 +34,10 @@ impl MessageAuthenticator {
     ) -> DmarcOutput
     where
         TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, Arc<[MX]>> + 'x,
-        IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>> + 'x,
-        IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>> + 'x,
-        PTR: ResolverCache<IpAddr, Arc<[Box<str>]>> + 'x,
+        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
+        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
+        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
+        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
         F: for<'y> Fn(&'y str) -> &'y str,
     {
         // Extract RFC5322.From domain
@@ -256,10 +256,10 @@ impl<'x, F> From<DmarcParameters<'x, F>>
         'x,
         DmarcParameters<'x, F>,
         NoCache<Box<str>, Txt>,
-        NoCache<Box<str>, Arc<[MX]>>,
-        NoCache<Box<str>, Arc<[Ipv4Addr]>>,
-        NoCache<Box<str>, Arc<[Ipv6Addr]>>,
-        NoCache<IpAddr, Arc<[Box<str>]>>,
+        NoCache<Box<str>, RecordSet<MX>>,
+        NoCache<Box<str>, RecordSet<Ipv4Addr>>,
+        NoCache<Box<str>, RecordSet<Ipv6Addr>>,
+        NoCache<IpAddr, RecordSet<Box<str>>>,
     >
 where
     F: for<'y> Fn(&'y str) -> &'y str,

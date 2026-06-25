@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::{MX, Parameters, ResolverCache, Txt};
+use crate::{MX, Parameters, RecordSet, ResolverCache, Txt};
 use std::{
     borrow::Borrow,
     hash::Hash,
     marker::PhantomData,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
 };
 
 pub struct NoCache<K, V>(PhantomData<(K, V)>);
@@ -40,10 +39,10 @@ impl<P>
         '_,
         P,
         NoCache<Box<str>, Txt>,
-        NoCache<Box<str>, Arc<[MX]>>,
-        NoCache<Box<str>, Arc<[Ipv4Addr]>>,
-        NoCache<Box<str>, Arc<[Ipv6Addr]>>,
-        NoCache<IpAddr, Arc<[Box<str>]>>,
+        NoCache<Box<str>, RecordSet<MX>>,
+        NoCache<Box<str>, RecordSet<Ipv4Addr>>,
+        NoCache<Box<str>, RecordSet<Ipv6Addr>>,
+        NoCache<IpAddr, RecordSet<Box<str>>>,
     >
 {
     pub fn new(params: P) -> Self {
@@ -61,10 +60,10 @@ impl<P>
 impl<'x, P, TXT, MXX, IPV4, IPV6, PTR> Parameters<'x, P, TXT, MXX, IPV4, IPV6, PTR>
 where
     TXT: ResolverCache<Box<str>, Txt>,
-    MXX: ResolverCache<Box<str>, Arc<[MX]>>,
-    IPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>,
-    IPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>,
-    PTR: ResolverCache<IpAddr, Arc<[Box<str>]>>,
+    MXX: ResolverCache<Box<str>, RecordSet<MX>>,
+    IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>>,
+    IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>>,
+    PTR: ResolverCache<IpAddr, RecordSet<Box<str>>>,
 {
     pub fn with_txt_cache<NewTXT: ResolverCache<Box<str>, Txt>>(
         self,
@@ -80,7 +79,7 @@ where
         }
     }
 
-    pub fn with_mx_cache<NewMX: ResolverCache<Box<str>, Arc<[MX]>>>(
+    pub fn with_mx_cache<NewMX: ResolverCache<Box<str>, RecordSet<MX>>>(
         self,
         cache: &'x NewMX,
     ) -> Parameters<'x, P, TXT, NewMX, IPV4, IPV6, PTR> {
@@ -94,7 +93,7 @@ where
         }
     }
 
-    pub fn with_ptr_cache<NewPTR: ResolverCache<IpAddr, Arc<[Box<str>]>>>(
+    pub fn with_ptr_cache<NewPTR: ResolverCache<IpAddr, RecordSet<Box<str>>>>(
         self,
         cache: &'x NewPTR,
     ) -> Parameters<'x, P, TXT, MXX, IPV4, IPV6, NewPTR> {
@@ -108,7 +107,7 @@ where
         }
     }
 
-    pub fn with_ipv4_cache<NewIPV4: ResolverCache<Box<str>, Arc<[Ipv4Addr]>>>(
+    pub fn with_ipv4_cache<NewIPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>(
         self,
         cache: &'x NewIPV4,
     ) -> Parameters<'x, P, TXT, MXX, NewIPV4, IPV6, PTR> {
@@ -122,7 +121,7 @@ where
         }
     }
 
-    pub fn with_ipv6_cache<NewIPV6: ResolverCache<Box<str>, Arc<[Ipv6Addr]>>>(
+    pub fn with_ipv6_cache<NewIPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>(
         self,
         cache: &'x NewIPV6,
     ) -> Parameters<'x, P, TXT, MXX, IPV4, NewIPV6, PTR> {
@@ -153,14 +152,15 @@ where
 
 #[cfg(test)]
 pub mod test {
+    use crate::{
+        DnssecStatus, MX, Parameters, RecordSet, ResolverCache, Txt, common::resolver::ToFqdn,
+    };
     use std::{
         borrow::Borrow,
         hash::Hash,
         net::{IpAddr, Ipv4Addr, Ipv6Addr},
         sync::Arc,
     };
-
-    use crate::{MX, Parameters, ResolverCache, Txt, common::resolver::ToFqdn};
 
     pub(crate) struct DummyCache<K, V>(std::sync::Mutex<std::collections::HashMap<K, V>>);
 
@@ -194,10 +194,10 @@ pub mod test {
 
     pub(crate) struct DummyCaches {
         pub txt: DummyCache<Box<str>, Txt>,
-        pub mx: DummyCache<Box<str>, Arc<[MX]>>,
-        pub ptr: DummyCache<IpAddr, Arc<[Box<str>]>>,
-        pub ipv4: DummyCache<Box<str>, Arc<[Ipv4Addr]>>,
-        pub ipv6: DummyCache<Box<str>, Arc<[Ipv6Addr]>>,
+        pub mx: DummyCache<Box<str>, RecordSet<MX>>,
+        pub ptr: DummyCache<IpAddr, RecordSet<Box<str>>>,
+        pub ipv4: DummyCache<Box<str>, RecordSet<Ipv4Addr>>,
+        pub ipv6: DummyCache<Box<str>, RecordSet<Ipv6Addr>>,
     }
 
     impl DummyCaches {
@@ -238,7 +238,10 @@ pub mod test {
         ) {
             self.ipv4.insert(
                 name.to_fqdn(),
-                Arc::from(value.into_boxed_slice()),
+                RecordSet {
+                    rrset: Arc::from(value.into_boxed_slice()),
+                    dnssec_status: DnssecStatus::Indeterminate,
+                },
                 valid_until,
             );
         }
@@ -251,20 +254,32 @@ pub mod test {
         ) {
             self.ipv6.insert(
                 name.to_fqdn(),
-                Arc::from(value.into_boxed_slice()),
+                RecordSet {
+                    rrset: Arc::from(value.into_boxed_slice()),
+                    dnssec_status: DnssecStatus::Indeterminate,
+                },
                 valid_until,
             );
         }
 
         pub fn ptr_add(&self, name: IpAddr, value: Vec<Box<str>>, valid_until: std::time::Instant) {
-            self.ptr
-                .insert(name, Arc::from(value.into_boxed_slice()), valid_until);
+            self.ptr.insert(
+                name,
+                RecordSet {
+                    rrset: Arc::from(value.into_boxed_slice()),
+                    dnssec_status: DnssecStatus::Indeterminate,
+                },
+                valid_until,
+            );
         }
 
         pub fn mx_add(&self, name: impl ToFqdn, value: Vec<MX>, valid_until: std::time::Instant) {
             self.mx.insert(
                 name.to_fqdn(),
-                Arc::from(value.into_boxed_slice()),
+                RecordSet {
+                    rrset: Arc::from(value.into_boxed_slice()),
+                    dnssec_status: DnssecStatus::Indeterminate,
+                },
                 valid_until,
             );
         }
@@ -277,10 +292,10 @@ pub mod test {
             '_,
             T,
             DummyCache<Box<str>, Txt>,
-            DummyCache<Box<str>, Arc<[MX]>>,
-            DummyCache<Box<str>, Arc<[Ipv4Addr]>>,
-            DummyCache<Box<str>, Arc<[Ipv6Addr]>>,
-            DummyCache<IpAddr, Arc<[Box<str>]>>,
+            DummyCache<Box<str>, RecordSet<MX>>,
+            DummyCache<Box<str>, RecordSet<Ipv4Addr>>,
+            DummyCache<Box<str>, RecordSet<Ipv6Addr>>,
+            DummyCache<IpAddr, RecordSet<Box<str>>>,
         > {
             Parameters::new(param)
                 .with_txt_cache(&self.txt)
