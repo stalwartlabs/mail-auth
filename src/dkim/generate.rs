@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::common::crypto::CryptoError;
 use crate::{Error, common::crypto::Ed25519Key};
 use mail_builder::encoders::base64::base64_encode;
 use rsa::{
@@ -21,18 +22,18 @@ impl DkimKeyPair {
     pub fn generate_rsa(bits: usize) -> crate::Result<Self> {
         //TODO: Use `ring` once it supports RSA key generation
         let priv_key = RsaPrivateKey::new(&mut rand::thread_rng(), bits)
-            .map_err(|err| Error::CryptoError(err.to_string()))?;
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
         let pub_key = RsaPublicKey::from(&priv_key);
 
         Ok(DkimKeyPair {
             private_key: priv_key
                 .to_pkcs1_der()
-                .map_err(|err| Error::CryptoError(err.to_string()))?
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?
                 .as_bytes()
                 .to_vec(),
             public_key: pub_key
                 .to_pkcs1_der()
-                .map_err(|err| Error::CryptoError(err.to_string()))?
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?
                 .as_bytes()
                 .to_vec(),
         })
@@ -40,8 +41,8 @@ impl DkimKeyPair {
 
     /// Generates a new Ed25519 key pair encoded in PKCS#8 DER format
     pub fn generate_ed25519() -> crate::Result<Self> {
-        let pkcs8_der =
-            Ed25519Key::generate_pkcs8().map_err(|err| Error::CryptoError(err.to_string()))?;
+        let pkcs8_der = Ed25519Key::generate_pkcs8()
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
         let key = Ed25519Key::from_pkcs8_der(&pkcs8_der).unwrap();
 
         Ok(DkimKeyPair {

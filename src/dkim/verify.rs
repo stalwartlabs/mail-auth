@@ -15,14 +15,15 @@ use crate::{
     },
     is_within_pct,
 };
+use crate::{DnsError, common::crypto::CryptoError};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     time::SystemTime,
 };
 
 use super::{
-    Atps, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_EXPIRATION, RR_OTHER, RR_SIGNATURE,
-    RR_VERIFICATION, Signature,
+    Atps, DkimError, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_EXPIRATION, RR_OTHER,
+    RR_SIGNATURE, RR_VERIFICATION, Signature,
 };
 
 impl MessageAuthenticator {
@@ -77,7 +78,8 @@ impl MessageAuthenticator {
                         signature
                     } else {
                         output.push(
-                            DkimOutput::neutral(Error::SignatureExpired).with_signature(signature),
+                            DkimOutput::neutral(Error::Dkim(DkimError::SignatureExpired))
+                                .with_signature(signature),
                         );
                         continue;
                     }
@@ -99,7 +101,8 @@ impl MessageAuthenticator {
 
             if bh != &signature.bh {
                 output.push(
-                    DkimOutput::neutral(Error::FailedBodyHashMatch).with_signature(signature),
+                    DkimOutput::neutral(Error::Dkim(DkimError::FailedBodyHashMatch))
+                        .with_signature(signature),
                 );
                 continue;
             }
@@ -118,7 +121,10 @@ impl MessageAuthenticator {
 
             // Enforce t=s flag
             if !signature.validate_auid(&record) {
-                output.push(DkimOutput::fail(Error::FailedAuidMatch).with_signature(signature));
+                output.push(
+                    DkimOutput::fail(Error::Dkim(DkimError::FailedAuidMatch))
+                        .with_signature(signature),
+                );
                 continue;
             }
 
@@ -221,32 +227,35 @@ impl MessageAuthenticator {
                     | DkimResult::PermError(err)
                     | DkimResult::TempError(err) => {
                         let send_report = match err {
-                            Error::CryptoError(_)
+                            Error::Crypto(CryptoError::Library(_))
                             | Error::Io(_)
-                            | Error::FailedVerification
-                            | Error::FailedBodyHashMatch
-                            | Error::FailedAuidMatch => (record.rr & RR_VERIFICATION) != 0,
+                            | Error::Crypto(CryptoError::FailedVerification)
+                            | Error::Dkim(DkimError::FailedBodyHashMatch)
+                            | Error::Dkim(DkimError::FailedAuidMatch) => {
+                                (record.rr & RR_VERIFICATION) != 0
+                            }
                             Error::Base64
-                            | Error::UnsupportedVersion
-                            | Error::UnsupportedAlgorithm
-                            | Error::UnsupportedCanonicalization
-                            | Error::UnsupportedKeyType
-                            | Error::IncompatibleAlgorithms => (record.rr & RR_SIGNATURE) != 0,
-                            Error::SignatureExpired => (record.rr & RR_EXPIRATION) != 0,
-                            Error::DnsError(_)
-                            | Error::DnsRecordNotFound(_)
-                            | Error::InvalidRecordType
+                            | Error::Dkim(DkimError::UnsupportedVersion)
+                            | Error::Dkim(DkimError::UnsupportedAlgorithm)
+                            | Error::Dkim(DkimError::UnsupportedCanonicalization)
+                            | Error::Dkim(DkimError::UnsupportedKeyType)
+                            | Error::Crypto(CryptoError::IncompatibleAlgorithms) => {
+                                (record.rr & RR_SIGNATURE) != 0
+                            }
+                            Error::Dkim(DkimError::SignatureExpired) => {
+                                (record.rr & RR_EXPIRATION) != 0
+                            }
+                            Error::Dns(DnsError::Resolver(_))
+                            | Error::Dns(DnsError::RecordNotFound(_))
+                            | Error::Dns(DnsError::InvalidRecordType)
                             | Error::ParseError
-                            | Error::RevokedPublicKey => (record.rr & RR_DNS) != 0,
+                            | Error::Dkim(DkimError::RevokedPublicKey) => (record.rr & RR_DNS) != 0,
                             Error::MissingParameters
                             | Error::NoHeadersFound
-                            | Error::ArcChainTooLong
-                            | Error::ArcInvalidInstance(_)
-                            | Error::ArcInvalidCV
-                            | Error::ArcHasHeaderTag
-                            | Error::ArcBrokenChain
-                            | Error::SignatureLength
-                            | Error::NotAligned => (record.rr & RR_OTHER) != 0,
+                            | Error::Arc(_)
+                            | Error::Dkim(DkimError::SignatureLength)
+                            | Error::NotAligned
+                            | Error::Dkim2(_) => (record.rr & RR_OTHER) != 0,
                         };
 
                         if send_report {
@@ -292,7 +301,7 @@ impl<'x> AuthenticatedMessage<'x> {
             return Ok(data);
         }
         // Return not ok
-        Err(Error::FailedBodyHashMatch)
+        Err(Error::Dkim(DkimError::FailedBodyHashMatch))
     }
 
     pub fn signed_headers<'z: 'x>(

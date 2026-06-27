@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{ArcSealer, ArcSet, ChainValidation, Signature};
+use super::{ArcError, ArcSealer, ArcSet, ChainValidation, Signature};
 use crate::{
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
     common::{
@@ -24,7 +24,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         arc_output: &ArcOutput,
     ) -> crate::Result<ArcSet<'x>> {
         if !arc_output.can_be_sealed() {
-            return Err(Error::ArcInvalidCV);
+            return Err(Error::Arc(ArcError::InvalidCV));
         }
 
         // Create set

@@ -8,6 +8,7 @@ use super::{
     Directive, Macro, Mechanism, Qualifier, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
     RR_TEMP_PERM_ERROR, Spf, Variable,
 };
+use crate::DnsError;
 use crate::{
     Error, Version,
     common::parse::{TagParser, TxtRecordParser, V},
@@ -24,7 +25,7 @@ impl TxtRecordParser for Spf {
             || !record.match_bytes(b"spf1")
             || record.next().is_some_and(|v| !v.is_ascii_whitespace())
         {
-            return Err(Error::InvalidRecordType);
+            return Err(Error::Dns(DnsError::InvalidRecordType));
         }
 
         let mut redirect = None;

@@ -5,6 +5,7 @@
  */
 
 use super::{Macro, Mechanism, Qualifier, Spf, Variables};
+use crate::DnsError;
 use crate::{
     Error, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult,
     Txt, common::cache::NoCache,
@@ -166,7 +167,7 @@ impl MessageAuthenticator {
                             .await
                         {
                             Ok(true) => true,
-                            Ok(false) | Err(Error::DnsRecordNotFound(_)) => false,
+                            Ok(false) | Err(Error::Dns(DnsError::RecordNotFound(_))) => false,
                             Err(_) => {
                                 return output
                                     .with_result(SpfResult::TempError)
@@ -218,7 +219,8 @@ impl MessageAuthenticator {
                                             matches = true;
                                             break;
                                         }
-                                        Ok(false) | Err(Error::DnsRecordNotFound(_)) => (),
+                                        Ok(false)
+                                        | Err(Error::Dns(DnsError::RecordNotFound(_))) => (),
                                         Err(_) => {
                                             return output
                                                 .with_result(SpfResult::TempError)
@@ -227,7 +229,7 @@ impl MessageAuthenticator {
                                     }
                                 }
                             }
-                            Err(Error::DnsRecordNotFound(_)) => (),
+                            Err(Error::Dns(DnsError::RecordNotFound(_))) => (),
                             Err(_) => {
                                 return output
                                     .with_result(SpfResult::TempError)
@@ -261,8 +263,8 @@ impl MessageAuthenticator {
                                 continue;
                             }
                             Err(
-                                Error::DnsRecordNotFound(_)
-                                | Error::InvalidRecordType
+                                Error::Dns(DnsError::RecordNotFound(_))
+                                | Error::Dns(DnsError::InvalidRecordType)
                                 | Error::ParseError,
                             ) => {
                                 return output
@@ -366,7 +368,9 @@ impl MessageAuthenticator {
                         continue;
                     }
                     Err(
-                        Error::DnsRecordNotFound(_) | Error::InvalidRecordType | Error::ParseError,
+                        Error::Dns(DnsError::RecordNotFound(_))
+                        | Error::Dns(DnsError::InvalidRecordType)
+                        | Error::ParseError,
                     ) => {
                         return output
                             .with_result(SpfResult::PermError)
@@ -588,7 +592,9 @@ impl From<&Qualifier> for SpfResult {
 impl From<Error> for SpfResult {
     fn from(err: Error) -> Self {
         match err {
-            Error::DnsRecordNotFound(_) | Error::InvalidRecordType => SpfResult::None,
+            Error::Dns(DnsError::RecordNotFound(_)) | Error::Dns(DnsError::InvalidRecordType) => {
+                SpfResult::None
+            }
             Error::ParseError => SpfResult::PermError,
             _ => SpfResult::TempError,
         }

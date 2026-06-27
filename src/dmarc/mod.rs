@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::DnsError;
 use crate::{DmarcOutput, DmarcResult, Error, Version};
 use serde::{Deserialize, Serialize};
 use std::{fmt::Display, sync::Arc};
@@ -102,7 +103,7 @@ impl URI {
 
 impl From<Error> for DmarcResult {
     fn from(err: Error) -> Self {
-        if matches!(&err, Error::DnsError(_)) {
+        if matches!(&err, Error::Dns(DnsError::Resolver(_))) {
             DmarcResult::TempError(err)
         } else {
             DmarcResult::PermError(err)

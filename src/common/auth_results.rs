@@ -7,8 +7,9 @@
 use super::headers::{HeaderWriter, Writer};
 use crate::{
     ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
-    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult,
+    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, arc::ArcError, dkim::DkimError,
 };
+use crate::{DnsError, common::crypto::CryptoError};
 use mail_builder::encoders::base64::base64_encode;
 use std::{
     borrow::Cow,
@@ -327,32 +328,43 @@ impl AsAuthResult for Error {
             Error::ParseError => "dns record parse error",
             Error::MissingParameters => "missing parameters",
             Error::NoHeadersFound => "no headers found",
-            Error::CryptoError(_) => "verification failed",
+            Error::Crypto(CryptoError::Library(_)) => "verification failed",
             Error::Io(_) => "i/o error",
             Error::Base64 => "base64 error",
-            Error::UnsupportedVersion => "unsupported version",
-            Error::UnsupportedAlgorithm => "unsupported algorithm",
-            Error::UnsupportedCanonicalization => "unsupported canonicalization",
-            Error::UnsupportedKeyType => "unsupported key type",
-            Error::FailedBodyHashMatch => "body hash did not verify",
-            Error::FailedVerification => "verification failed",
-            Error::FailedAuidMatch => "auid does not match",
-            Error::RevokedPublicKey => "revoked public key",
-            Error::IncompatibleAlgorithms => "incompatible record/signature algorithms",
-            Error::SignatureExpired => "signature error",
-            Error::DnsError(_) => "dns error",
-            Error::DnsRecordNotFound(_) => "dns record not found",
-            Error::ArcInvalidInstance(i) => {
+            Error::Dkim(DkimError::UnsupportedAlgorithm) => "unsupported algorithm",
+            Error::Dkim(DkimError::UnsupportedCanonicalization) => "unsupported canonicalization",
+            Error::Dkim(DkimError::UnsupportedKeyType) => "unsupported key type",
+            Error::Crypto(CryptoError::FailedVerification) => "verification failed",
+            Error::Crypto(CryptoError::IncompatibleAlgorithms) => {
+                "incompatible record/signature algorithms"
+            }
+            Error::Dns(DnsError::Resolver(_)) => "dns error",
+            Error::Dns(DnsError::RecordNotFound(_)) => "dns record not found",
+            Error::Dkim(DkimError::UnsupportedVersion) => "unsupported version",
+            Error::Dkim(DkimError::FailedBodyHashMatch)
+            | Error::Arc(ArcError::FailedBodyHashMatch) => "body hash did not verify",
+            Error::Dkim(DkimError::FailedAuidMatch) => "auid does not match",
+            Error::Dkim(DkimError::RevokedPublicKey) => "revoked public key",
+            Error::Dkim(DkimError::SignatureExpired) | Error::Arc(ArcError::SignatureExpired) => {
+                "signature error"
+            }
+            Error::Dkim(DkimError::SignatureLength) | Error::Arc(ArcError::SignatureLength) => {
+                "signature length ignored due to security risk"
+            }
+            Error::Arc(ArcError::InvalidInstance(i)) => {
                 write!(header, "invalid ARC instance {i})").ok();
                 return;
             }
-            Error::ArcInvalidCV => "invalid ARC cv",
-            Error::ArcChainTooLong => "too many ARC headers",
-            Error::ArcHasHeaderTag => "ARC has header tag",
-            Error::ArcBrokenChain => "broken ARC chain",
+            Error::Arc(ArcError::InvalidCV) => "invalid ARC cv",
+            Error::Arc(ArcError::ChainTooLong) => "too many ARC headers",
+            Error::Arc(ArcError::HasHeaderTag) => "ARC has header tag",
+            Error::Arc(ArcError::BrokenChain) => "broken ARC chain",
             Error::NotAligned => "policy not aligned",
-            Error::InvalidRecordType => "invalid dns record type",
-            Error::SignatureLength => "signature length ignored due to security risk",
+            Error::Dns(DnsError::InvalidRecordType) => "invalid dns record type",
+            Error::Dkim2(e) => {
+                write!(header, "{e})").ok();
+                return;
+            }
         });
         header.push(')');
     }
@@ -418,9 +430,9 @@ fn push_qcontent(header: &mut String, value: &str) {
 #[cfg(test)]
 mod test {
     use crate::{
-        ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
-        IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, dkim::Signature,
-        dmarc::Policy,
+        ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult,
+        DnsError, Error, IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult,
+        arc::ArcError, common::crypto::CryptoError, dkim::Signature, dmarc::Policy,
     };
 
     #[test]
@@ -448,7 +460,7 @@ mod test {
                     "header.s=myselector header.b=MTIzNDU2"
                 ),
                 DkimOutput {
-                    result: DkimResult::Fail(Error::FailedVerification),
+                    result: DkimResult::Fail(Error::Crypto(CryptoError::FailedVerification)),
                     signature: (&Signature {
                         d: "example.org".into(),
                         s: "myselector".into(),
@@ -466,7 +478,7 @@ mod test {
                     "header.s=otherselctor header.b=YWJjZGVm header.from=jdoe@example.org"
                 ),
                 DkimOutput {
-                    result: DkimResult::TempError(Error::DnsError("".to_string())),
+                    result: DkimResult::TempError(Error::Dns(DnsError::Resolver("".to_string()))),
                     signature: (&Signature {
                         d: "atps.example.org".into(),
                         s: "otherselctor".into(),
@@ -613,7 +625,7 @@ mod test {
             ),
             (
                 "arc=neutral (body hash did not verify) smtp.remote-ip=\"1:2:3::a\"",
-                DkimResult::Neutral(Error::FailedBodyHashMatch),
+                DkimResult::Neutral(Error::Arc(ArcError::FailedBodyHashMatch)),
                 "1:2:3::a".parse().unwrap(),
             ),
         ] {
@@ -666,7 +678,7 @@ mod test {
             ..Default::default()
         };
         let output = DkimOutput {
-            result: DkimResult::Fail(Error::FailedVerification),
+            result: DkimResult::Fail(Error::Crypto(CryptoError::FailedVerification)),
             signature: Some(&signature),
             report: None,
             is_atps: false,
@@ -711,7 +723,7 @@ mod test {
             ..Default::default()
         };
         let output = DkimOutput {
-            result: DkimResult::Fail(Error::FailedVerification),
+            result: DkimResult::Fail(Error::Crypto(CryptoError::FailedVerification)),
             signature: Some(&signature),
             report: None,
             is_atps: false,

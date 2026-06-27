@@ -5,6 +5,7 @@
  */
 
 use super::{MtaSts, ReportUri, TlsRpt};
+use crate::DnsError;
 use crate::common::parse::{TagParser, TxtRecordParser, V};
 
 const ID: u64 = (b'i' as u64) | ((b'd' as u64) << 8);
@@ -33,7 +34,7 @@ impl TxtRecordParser for MtaSts {
             match key {
                 V => {
                     if !record.match_bytes(b"STSv1") || !record.seek_tag_end() {
-                        return Err(crate::Error::InvalidRecordType);
+                        return Err(crate::Error::Dns(DnsError::InvalidRecordType));
                     }
                     has_version = true;
                 }
@@ -51,7 +52,7 @@ impl TxtRecordParser for MtaSts {
         {
             return Ok(MtaSts { id });
         }
-        Err(crate::Error::InvalidRecordType)
+        Err(crate::Error::Dns(DnsError::InvalidRecordType))
     }
 }
 
@@ -64,7 +65,7 @@ impl TxtRecordParser for TlsRpt {
             || !record.match_bytes(b"TLSRPTv1")
             || !record.seek_tag_end()
         {
-            return Err(crate::Error::InvalidRecordType);
+            return Err(crate::Error::Dns(DnsError::InvalidRecordType));
         }
 
         let mut rua = Vec::new();
@@ -102,7 +103,7 @@ impl TxtRecordParser for TlsRpt {
         if !rua.is_empty() {
             Ok(TlsRpt { rua })
         } else {
-            Err(crate::Error::InvalidRecordType)
+            Err(crate::Error::Dns(DnsError::InvalidRecordType))
         }
     }
 }

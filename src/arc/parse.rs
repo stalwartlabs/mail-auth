@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{ChainValidation, Results, Seal, Signature};
+use super::{ArcError, ChainValidation, Results, Seal, Signature};
 use crate::common::parse::*;
 use crate::{
     Error,
@@ -41,7 +41,7 @@ impl Signature {
                 I => {
                     signature.i = header.number().unwrap_or(0) as u32;
                     if !(1..=50).contains(&signature.i) {
-                        return Err(Error::ArcInvalidInstance(signature.i));
+                        return Err(Error::Arc(ArcError::InvalidInstance(signature.i)));
                     }
                 }
                 A => {
@@ -126,22 +126,22 @@ impl Seal {
                         b'p' | b'P' if header.match_bytes(b"ass") => {
                             cv = ChainValidation::Pass.into();
                         }
-                        _ => return Err(Error::ArcInvalidCV),
+                        _ => return Err(Error::Arc(ArcError::InvalidCV)),
                     }
                     if !header.seek_tag_end() {
-                        return Err(Error::ArcInvalidCV);
+                        return Err(Error::Arc(ArcError::InvalidCV));
                     }
                 }
                 H => {
-                    return Err(Error::ArcHasHeaderTag);
+                    return Err(Error::Arc(ArcError::HasHeaderTag));
                 }
                 _ => header.ignore(),
             }
         }
-        seal.cv = cv.ok_or(Error::ArcInvalidCV)?;
+        seal.cv = cv.ok_or(Error::Arc(ArcError::InvalidCV))?;
 
         if !(1..=50).contains(&seal.i) {
-            Err(Error::ArcInvalidInstance(seal.i))
+            Err(Error::Arc(ArcError::InvalidInstance(seal.i)))
         } else if !seal.d.is_empty() && !seal.s.is_empty() && !seal.b.is_empty() {
             Ok(seal)
         } else {
@@ -169,7 +169,7 @@ impl Results {
         if (1..=50).contains(&results.i) {
             Ok(results)
         } else {
-            Err(Error::ArcInvalidInstance(results.i))
+            Err(Error::Arc(ArcError::InvalidInstance(results.i)))
         }
     }
 }

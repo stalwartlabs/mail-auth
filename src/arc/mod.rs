@@ -20,6 +20,35 @@ use crate::{
     dkim::{Canonicalization, NeedDomain},
 };
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ArcError {
+    ChainTooLong,
+    InvalidInstance(u32),
+    InvalidCV,
+    HasHeaderTag,
+    BrokenChain,
+    FailedBodyHashMatch,
+    SignatureExpired,
+    SignatureLength,
+}
+
+impl std::fmt::Display for ArcError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ArcError::InvalidInstance(i) => write!(f, "Invalid 'i={i}' value found in ARC header"),
+            ArcError::InvalidCV => write!(f, "Invalid 'cv=' value found in ARC header"),
+            ArcError::HasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal"),
+            ArcError::BrokenChain => write!(f, "Broken or missing ARC chain"),
+            ArcError::ChainTooLong => write!(f, "Too many ARC headers"),
+            ArcError::FailedBodyHashMatch => {
+                write!(f, "Calculated body hash does not match signature hash")
+            }
+            ArcError::SignatureExpired => write!(f, "Signature expired"),
+            ArcError::SignatureLength => write!(f, "Insecure 'l=' tag found in Signature"),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct ArcSealer<T: SigningKey<Hasher = Sha256>, State = NeedDomain> {
     _state: std::marker::PhantomData<State>,

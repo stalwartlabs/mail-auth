@@ -5,9 +5,10 @@
  */
 
 use super::{
-    Algorithm, Atps, Canonicalization, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_OTHER,
-    RR_POLICY, Service, Signature, Version,
+    Algorithm, Atps, Canonicalization, DkimError, DomainKeyReport, Flag, HashAlgorithm, RR_DNS,
+    RR_OTHER, RR_POLICY, Service, Signature, Version,
 };
+use crate::DnsError;
 use crate::{
     Error,
     common::{crypto::VerifyingKeyType, parse::*, verify::DomainKey},
@@ -69,7 +70,7 @@ impl Signature {
                 V => {
                     signature.v = header.number().unwrap_or(0) as u32;
                     if signature.v != 1 {
-                        return Err(Error::UnsupportedVersion);
+                        return Err(Error::Dkim(DkimError::UnsupportedVersion));
                     }
                 }
                 A => {
@@ -155,14 +156,14 @@ impl SignatureParser for Iter<'_, u8> {
                     if self.match_bytes(b"imple") {
                         c = Canonicalization::Simple.into();
                     } else {
-                        return Err(Error::UnsupportedCanonicalization);
+                        return Err(Error::Dkim(DkimError::UnsupportedCanonicalization));
                     }
                 }
                 (b'r' | b'R', None) => {
                     if self.match_bytes(b"elaxed") {
                         c = Canonicalization::Relaxed.into();
                     } else {
-                        return Err(Error::UnsupportedCanonicalization);
+                        return Err(Error::Dkim(DkimError::UnsupportedCanonicalization));
                     }
                 }
                 (b'/', Some(c_)) => {
@@ -175,7 +176,7 @@ impl SignatureParser for Iter<'_, u8> {
                 }
                 (_, _) => {
                     if !char.is_ascii_whitespace() {
-                        return Err(Error::UnsupportedCanonicalization);
+                        return Err(Error::Dkim(DkimError::UnsupportedCanonicalization));
                     }
                 }
             }
@@ -209,7 +210,7 @@ impl SignatureParser for Iter<'_, u8> {
                             }
                             _ => {
                                 if !ch.is_ascii_whitespace() {
-                                    return Err(Error::UnsupportedAlgorithm);
+                                    return Err(Error::Dkim(DkimError::UnsupportedAlgorithm));
                                 }
                             }
                         }
@@ -218,20 +219,20 @@ impl SignatureParser for Iter<'_, u8> {
                     match algo {
                         256 => Ok(Algorithm::RsaSha256),
                         1 => Ok(Algorithm::RsaSha1),
-                        _ => Err(Error::UnsupportedAlgorithm),
+                        _ => Err(Error::Dkim(DkimError::UnsupportedAlgorithm)),
                     }
                 } else {
-                    Err(Error::UnsupportedAlgorithm)
+                    Err(Error::Dkim(DkimError::UnsupportedAlgorithm))
                 }
             }
             b'e' | b'E' => {
                 if self.match_bytes(b"d25519-sha256") && self.seek_tag_end() {
                     Ok(Algorithm::Ed25519Sha256)
                 } else {
-                    Err(Error::UnsupportedAlgorithm)
+                    Err(Error::Dkim(DkimError::UnsupportedAlgorithm))
                 }
             }
-            _ => Err(Error::UnsupportedAlgorithm),
+            _ => Err(Error::Dkim(DkimError::UnsupportedAlgorithm)),
         }
     }
 }
@@ -249,7 +250,7 @@ impl TxtRecordParser for DomainKey {
             match key {
                 V => {
                     if !header.match_bytes(b"DKIM1") || !header.seek_tag_end() {
-                        return Err(Error::InvalidRecordType);
+                        return Err(Error::Dns(DnsError::InvalidRecordType));
                     }
                 }
                 H => flags |= header.flags::<HashAlgorithm>(),
@@ -273,7 +274,7 @@ impl TxtRecordParser for DomainKey {
                             }
                             b';' => (),
                             _ => {
-                                return Err(Error::UnsupportedKeyType);
+                                return Err(Error::Dkim(DkimError::UnsupportedKeyType));
                             }
                         }
                     }
@@ -289,7 +290,7 @@ impl TxtRecordParser for DomainKey {
                 p: key_type.verifying_key(&public_key)?,
                 f: flags,
             }),
-            _ => Err(Error::InvalidRecordType),
+            _ => Err(Error::Dns(DnsError::InvalidRecordType)),
         }
     }
 }
@@ -363,7 +364,7 @@ impl TxtRecordParser for DomainKeyReport {
         if !record.ra.is_empty() {
             Ok(record)
         } else {
-            Err(Error::InvalidRecordType)
+            Err(Error::Dns(DnsError::InvalidRecordType))
         }
     }
 }
@@ -382,7 +383,7 @@ impl TxtRecordParser for Atps {
             match key {
                 V => {
                     if !header.match_bytes(b"ATPS1") || !header.seek_tag_end() {
-                        return Err(Error::InvalidRecordType);
+                        return Err(Error::Dns(DnsError::InvalidRecordType));
                     }
                     has_version = true;
                 }
@@ -396,7 +397,7 @@ impl TxtRecordParser for Atps {
         }
 
         if !has_version {
-            return Err(Error::InvalidRecordType);
+            return Err(Error::Dns(DnsError::InvalidRecordType));
         }
 
         Ok(record)

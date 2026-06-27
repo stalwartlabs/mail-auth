@@ -5,6 +5,7 @@
  */
 
 use super::{Alignment, Dmarc};
+use crate::DnsError;
 use crate::{
     AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
     MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult, Txt,
@@ -162,7 +163,7 @@ impl MessageAuthenticator {
                     .await
                 {
                     Ok(_) => true,
-                    Err(Error::DnsError(_)) => return None,
+                    Err(Error::Dns(DnsError::Resolver(_))) => return None,
                     _ => false,
                 }
             {
@@ -198,7 +199,8 @@ impl MessageAuthenticator {
                 Ok(dmarc) => {
                     return Ok(Some(dmarc));
                 }
-                Err(Error::DnsRecordNotFound(_)) | Err(Error::InvalidRecordType) => (),
+                Err(Error::Dns(DnsError::RecordNotFound(_)))
+                | Err(Error::Dns(DnsError::InvalidRecordType)) => (),
                 Err(err) => return Err(err),
             }
 
@@ -280,7 +282,7 @@ mod test {
         AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, Error, MessageAuthenticator,
         SpfOutput, SpfResult,
         common::{cache::test::DummyCaches, parse::TxtRecordParser},
-        dkim::Signature,
+        dkim::{DkimError, Signature},
         dmarc::{Dmarc, Policy, URI},
     };
 
@@ -409,7 +411,7 @@ mod test {
                 "From: hello@example.org\r\n\r\n",
                 "example.org",
                 "example.org",
-                DkimResult::Fail(Error::SignatureExpired),
+                DkimResult::Fail(Error::Dkim(DkimError::SignatureExpired)),
                 SpfResult::Fail,
                 DmarcResult::None,
                 DmarcResult::None,

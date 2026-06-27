@@ -378,7 +378,7 @@ pub mod test {
                 .sign(message.as_bytes())
                 .unwrap(),
             &(message.to_string() + "\r\n----- Mailing list"),
-            Err(super::Error::SignatureLength),
+            Err(super::Error::Dkim(crate::dkim::DkimError::SignatureLength)),
             true,
         )
         .await;
@@ -450,7 +450,7 @@ pub mod test {
                 .sign(message.as_bytes())
                 .unwrap(),
             message,
-            Err(super::Error::FailedAuidMatch),
+            Err(super::Error::Dkim(crate::dkim::DkimError::FailedAuidMatch)),
         )
         .await;
 
@@ -471,7 +471,7 @@ pub mod test {
                 .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
             message,
-            Err(super::Error::SignatureExpired),
+            Err(super::Error::Dkim(crate::dkim::DkimError::SignatureExpired)),
         )
         .await
         .pop()
@@ -496,7 +496,9 @@ pub mod test {
                 .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
             message,
-            Err(super::Error::DnsRecordNotFound(ResponseCode::NXDomain)),
+            Err(super::Error::Dns(crate::DnsError::RecordNotFound(
+                ResponseCode::NXDomain,
+            ))),
         )
         .await;
 

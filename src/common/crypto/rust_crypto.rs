@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
+use super::{
+    Algorithm, CryptoError, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey,
+    VerifyingKey,
+};
 use crate::{
     Error, Result,
     common::headers::{Writable, Writer},
@@ -26,7 +29,7 @@ impl<T: HashImpl> RsaKey<T> {
     /// Creates a new RSA private key from a PKCS1 PEM string.
     pub fn from_pkcs1_pem(private_key_pem: &str) -> Result<Self> {
         let inner = RsaPrivateKey::from_pkcs1_pem(private_key_pem)
-            .map_err(|err| Error::CryptoError(err.to_string()))?;
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
 
         Ok(RsaKey {
             inner,
@@ -37,7 +40,7 @@ impl<T: HashImpl> RsaKey<T> {
     /// Creates a new RSA private key from a PKCS1 binary slice.
     pub fn from_pkcs1_der(private_key_bytes: &[u8]) -> Result<Self> {
         let inner = RsaPrivateKey::from_pkcs1_der(private_key_bytes)
-            .map_err(|err| Error::CryptoError(err.to_string()))?;
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
 
         Ok(RsaKey {
             inner,
@@ -56,7 +59,7 @@ impl SigningKey for RsaKey<Sha1> {
                 Pkcs1v15Sign::new::<<Self::Hasher as HashImpl>::Context>(),
                 hash.as_ref(),
             )
-            .map_err(|err| Error::CryptoError(err.to_string()))
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))
     }
 
     fn algorithm(&self) -> Algorithm {
@@ -74,7 +77,7 @@ impl SigningKey for RsaKey<Sha256> {
                 Pkcs1v15Sign::new::<<Self::Hasher as HashImpl>::Context>(),
                 hash.as_ref(),
             )
-            .map_err(|err| Error::CryptoError(err.to_string()))
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))
     }
 
     fn algorithm(&self) -> Algorithm {
@@ -93,7 +96,7 @@ impl Ed25519Key {
             inner: ed25519_dalek::SigningKey::from_bytes(
                 private_key_bytes
                     .try_into()
-                    .map_err(|err: TryFromSliceError| Error::CryptoError(err.to_string()))?,
+                    .map_err(|err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())))?,
             ),
         })
     }
@@ -123,7 +126,7 @@ impl RsaPublicKey {
         Ok(Box::new(RsaPublicKey {
             inner: <rsa::RsaPublicKey as rsa::pkcs8::DecodePublicKey>::from_public_key_der(bytes)
                 .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(bytes))
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         }))
     }
 }
@@ -148,7 +151,7 @@ impl VerifyingKey for RsaPublicKey {
                         hash.as_ref(),
                         signature,
                     )
-                    .map_err(|_| Error::FailedVerification)
+                    .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
             }
             Algorithm::RsaSha1 => {
                 let mut hasher = sha1::Sha1::new();
@@ -157,9 +160,9 @@ impl VerifyingKey for RsaPublicKey {
 
                 self.inner
                     .verify(Pkcs1v15Sign::new::<sha1::Sha1>(), hash.as_ref(), signature)
-                    .map_err(|_| Error::FailedVerification)
+                    .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
             }
-            Algorithm::Ed25519Sha256 => Err(Error::IncompatibleAlgorithms),
+            Algorithm::Ed25519Sha256 => Err(Error::Crypto(CryptoError::IncompatibleAlgorithms)),
         }
     }
 }
@@ -176,9 +179,9 @@ impl Ed25519PublicKey {
             inner: ed25519_dalek::VerifyingKey::from_bytes(
                 bytes
                     .try_into()
-                    .map_err(|err: TryFromSliceError| Error::CryptoError(err.to_string()))?,
+                    .map_err(|err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())))?,
             )
-            .map_err(|err| Error::CryptoError(err.to_string()))?,
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         }))
     }
 }
@@ -192,7 +195,7 @@ impl VerifyingKey for Ed25519PublicKey {
         algorithm: Algorithm,
     ) -> Result<()> {
         if !matches!(algorithm, Algorithm::Ed25519Sha256) {
-            return Err(Error::IncompatibleAlgorithms);
+            return Err(Error::Crypto(CryptoError::IncompatibleAlgorithms));
         }
 
         let mut hasher = sha2::Sha256::new();
@@ -205,10 +208,10 @@ impl VerifyingKey for Ed25519PublicKey {
                 &ed25519_dalek::Signature::from_bytes(
                     signature
                         .try_into()
-                        .map_err(|err: TryFromSliceError| Error::CryptoError(err.to_string()))?,
+                        .map_err(|err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())))?,
                 ),
             )
-            .map_err(|_| Error::FailedVerification)
+            .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
     }
 }
 

@@ -9,8 +9,8 @@ use super::{
     crypto::{Algorithm, VerifyingKey},
 };
 use crate::{
-    Error, IprevOutput, IprevResult, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache,
-    Txt, dkim::Canonicalization,
+    Error, IprevOutput, IprevResult, MX, MessageAuthenticator, Parameters, RecordSet,
+    ResolverCache, Txt, dkim::Canonicalization,
 };
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 

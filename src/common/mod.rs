@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::DnsError;
 use crate::{Error, IprevResult};
 
 pub mod auth_results;
@@ -18,7 +19,7 @@ pub mod verify;
 
 impl From<Error> for IprevResult {
     fn from(err: Error) -> Self {
-        if matches!(&err, Error::DnsError(_)) {
+        if matches!(&err, Error::Dns(DnsError::Resolver(_))) {
             IprevResult::TempError(err)
         } else {
             IprevResult::PermError(err)

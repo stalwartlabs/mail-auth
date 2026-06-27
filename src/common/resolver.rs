@@ -115,7 +115,7 @@ impl MessageAuthenticator {
             .0
             .txt_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
             .await?;
-        let mut result = Err(Error::InvalidRecordType);
+        let mut result = Err(Error::Dns(crate::DnsError::InvalidRecordType));
         let records = txt_lookup.answers().iter().filter_map(|r| {
             let RData::TXT(txt) = &r.data else {
                 return None;
@@ -407,10 +407,10 @@ impl MessageAuthenticator {
         let key = key.to_fqdn();
         match self.ipv4_lookup(key.as_ref(), cache_ipv4).await {
             Ok(_) => Ok(true),
-            Err(Error::DnsRecordNotFound(_)) => {
+            Err(Error::Dns(crate::DnsError::RecordNotFound(_))) => {
                 match self.ipv6_lookup(key.as_ref(), cache_ipv6).await {
                     Ok(_) => Ok(true),
-                    Err(Error::DnsRecordNotFound(_)) => Ok(false),
+                    Err(Error::Dns(crate::DnsError::RecordNotFound(_))) => Ok(false),
                     Err(err) => Err(err),
                 }
             }
@@ -453,7 +453,7 @@ impl MessageAuthenticator {
 
 impl From<ProtoError> for Error {
     fn from(err: ProtoError) -> Self {
-        Error::DnsError(err.to_string())
+        Error::Dns(crate::DnsError::Resolver(err.to_string()))
     }
 }
 
@@ -461,9 +461,9 @@ impl From<NetError> for Error {
     fn from(err: NetError) -> Self {
         match &err {
             NetError::Dns(DnsError::NoRecordsFound(no_records)) => {
-                Error::DnsRecordNotFound(no_records.response_code)
+                Error::Dns(crate::DnsError::RecordNotFound(no_records.response_code))
             }
-            _ => Error::DnsError(err.to_string()),
+            _ => Error::Dns(crate::DnsError::Resolver(err.to_string())),
         }
     }
 }
@@ -664,11 +664,13 @@ pub fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     Err(if domain.contains("_parse_error.") {
         Error::ParseError
     } else if domain.contains("_invalid_record.") {
-        Error::InvalidRecordType
+        Error::Dns(crate::DnsError::InvalidRecordType)
     } else if domain.contains("_dns_error.") {
-        Error::DnsError("".to_string())
+        Error::Dns(crate::DnsError::Resolver("".to_string()))
     } else {
-        Error::DnsRecordNotFound(hickory_resolver::proto::op::ResponseCode::NXDomain)
+        Error::Dns(crate::DnsError::RecordNotFound(
+            hickory_resolver::proto::op::ResponseCode::NXDomain,
+        ))
     })
 }
 

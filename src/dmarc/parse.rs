@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::DnsError;
 use crate::{
     Error, Version,
     common::parse::{ItemParser, N, T, TagParser, TxtRecordParser, V, Y},
@@ -20,7 +21,7 @@ impl TxtRecordParser for Dmarc {
             || !record.match_bytes(b"DMARC1")
             || !record.seek_tag_end()
         {
-            return Err(Error::InvalidRecordType);
+            return Err(Error::Dns(DnsError::InvalidRecordType));
         }
 
         let mut dmarc = Dmarc {

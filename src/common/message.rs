@@ -130,7 +130,7 @@ impl<'x> AuthenticatedMessage<'x> {
                 }
                 Ok(signature)
             }
-            Ok(_) => Err(crate::Error::SignatureLength),
+            Ok(_) => Err(crate::Error::Dkim(dkim::DkimError::SignatureLength)),
             Err(err) => Err(err),
         };
 
@@ -161,7 +161,7 @@ impl<'x> AuthenticatedMessage<'x> {
             }
             Ok(_) => {
                 self.has_arc_errors = true;
-                Err(crate::Error::SignatureLength)
+                Err(crate::Error::Arc(arc::ArcError::SignatureLength))
             }
             Err(err) => {
                 self.has_arc_errors = true;

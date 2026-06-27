@@ -414,8 +414,13 @@ impl From<&crate::DkimResult> for AuthFailureType {
             | crate::DkimResult::Fail(err)
             | crate::DkimResult::PermError(err)
             | crate::DkimResult::TempError(err) => match err {
-                crate::Error::FailedBodyHashMatch => AuthFailureType::BodyHash,
-                crate::Error::RevokedPublicKey => AuthFailureType::Revoked,
+                crate::Error::Dkim(crate::dkim::DkimError::FailedBodyHashMatch)
+                | crate::Error::Arc(crate::arc::ArcError::FailedBodyHashMatch) => {
+                    AuthFailureType::BodyHash
+                }
+                crate::Error::Dkim(crate::dkim::DkimError::RevokedPublicKey) => {
+                    AuthFailureType::Revoked
+                }
                 _ => AuthFailureType::Signature,
             },
             crate::DkimResult::Pass | crate::DkimResult::None => AuthFailureType::Signature,

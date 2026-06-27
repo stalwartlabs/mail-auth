@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{Algorithm, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey, VerifyingKey};
+use super::{
+    Algorithm, CryptoError, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey,
+    VerifyingKey,
+};
 use crate::{
     Error, Result,
     common::headers::{Writable, Writer},
@@ -37,7 +40,7 @@ impl<T: HashImpl> RsaKey<T> {
     pub fn from_pkcs8_pem(pkcs8_pem: &str) -> Result<Self> {
         Self::from_key_der(PrivateKeyDer::Pkcs8(
             PrivatePkcs8KeyDer::from_pem_slice(pkcs8_pem.as_bytes())
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         ))
     }
 
@@ -51,7 +54,7 @@ impl<T: HashImpl> RsaKey<T> {
     pub fn from_rsa_pem(rsa_pem: &str) -> Result<Self> {
         Self::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(rsa_pem.as_bytes())
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         ))
     }
 
@@ -67,10 +70,14 @@ impl<T: HashImpl> RsaKey<T> {
     pub fn from_key_der(key_der: PrivateKeyDer<'_>) -> Result<Self> {
         let inner = match key_der {
             PrivateKeyDer::Pkcs1(der) => RsaKeyPair::from_der(der.secret_pkcs1_der())
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
             PrivateKeyDer::Pkcs8(der) => RsaKeyPair::from_pkcs8(der.secret_pkcs8_der())
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
-            _ => return Err(Error::CryptoError("Unsupported RSA key format".to_string())),
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
+            _ => {
+                return Err(Error::Crypto(CryptoError::Library(
+                    "Unsupported RSA key format".to_string(),
+                )));
+            }
         };
 
         Ok(Self {
@@ -96,7 +103,7 @@ impl SigningKey for RsaKey<Sha256> {
         let mut signature = vec![0; self.inner.public_key().modulus_len()];
         self.inner
             .sign(&RSA_PKCS1_SHA256, &self.rng, &data, &mut signature)
-            .map_err(|err| Error::CryptoError(err.to_string()))?;
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
         Ok(signature)
     }
 
@@ -112,7 +119,7 @@ pub struct Ed25519Key {
 impl Ed25519Key {
     pub fn generate_pkcs8() -> Result<Vec<u8>> {
         Ok(Ed25519KeyPair::generate_pkcs8(&SystemRandom::new())
-            .map_err(|err| Error::CryptoError(err.to_string()))?
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?
             .as_ref()
             .to_vec())
     }
@@ -120,21 +127,21 @@ impl Ed25519Key {
     pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self> {
         Ok(Self {
             inner: Ed25519KeyPair::from_pkcs8(pkcs8_der)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         })
     }
 
     pub fn from_pkcs8_maybe_unchecked_der(pkcs8_der: &[u8]) -> Result<Self> {
         Ok(Self {
             inner: Ed25519KeyPair::from_pkcs8_maybe_unchecked(pkcs8_der)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         })
     }
 
     pub fn from_seed_and_public_key(seed: &[u8], public_key: &[u8]) -> Result<Self> {
         Ok(Self {
             inner: Ed25519KeyPair::from_seed_and_public_key(seed, public_key)
-                .map_err(|err| Error::CryptoError(err.to_string()))?,
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         })
     }
 
@@ -244,12 +251,12 @@ impl VerifyingKey for RsaPublicKey {
             Algorithm::RsaSha256 => self
                 .sha2
                 .verify(&data, signature)
-                .map_err(|_| Error::FailedVerification),
+                .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
             Algorithm::RsaSha1 => self
                 .sha1
                 .verify(&data, signature)
-                .map_err(|_| Error::FailedVerification),
-            Algorithm::Ed25519Sha256 => Err(Error::IncompatibleAlgorithms),
+                .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
+            Algorithm::Ed25519Sha256 => Err(Error::Crypto(CryptoError::IncompatibleAlgorithms)),
         }
     }
 }
@@ -277,14 +284,14 @@ impl VerifyingKey for Ed25519PublicKey {
         algorithm: Algorithm,
     ) -> Result<()> {
         if !matches!(algorithm, Algorithm::Ed25519Sha256) {
-            return Err(Error::IncompatibleAlgorithms);
+            return Err(Error::Crypto(CryptoError::IncompatibleAlgorithms));
         }
 
         let mut hasher = Sha256::hasher();
         canonicalization.canonicalize_headers(headers, &mut hasher);
         self.inner
             .verify(hasher.complete().as_ref(), signature)
-            .map_err(|err| Error::CryptoError(err.to_string()))
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))
     }
 }
 

@@ -7,7 +7,11 @@
 #![doc = include_str!("../README.md")]
 
 use arc::Set;
-use common::{crypto::HashAlgorithm, headers::Header, verify::DomainKey};
+use common::{
+    crypto::{CryptoError, HashAlgorithm},
+    headers::Header,
+    verify::DomainKey,
+};
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
 use hickory_resolver::{TokioResolver, proto::op::ResponseCode};
@@ -27,6 +31,7 @@ use std::{
 pub mod arc;
 pub mod common;
 pub mod dkim;
+pub mod dkim2;
 pub mod dmarc;
 pub mod mta_sts;
 #[cfg(feature = "report")]
@@ -127,6 +132,8 @@ pub struct AuthenticatedMessage<'x> {
     pub body_offset: u32,
     pub body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
     pub dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature>>>,
+    pub dkim2_signatures: Vec<Header<'x, crate::Result<dkim2::Signature>>>,
+    pub dkim2_instances: Vec<Header<'x, crate::Result<dkim2::MessageInstance>>>,
     pub ams_headers: Vec<Header<'x, crate::Result<arc::Signature>>>,
     pub as_headers: Vec<Header<'x, crate::Result<arc::Seal>>>,
     pub aar_headers: Vec<Header<'x, crate::Result<arc::Results>>>,
@@ -157,6 +164,25 @@ pub enum DkimResult {
     PermError(crate::Error),
     TempError(crate::Error),
     None,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum Dkim2Result {
+    Pass,
+    Fail(crate::Error),
+    PermError(crate::Error),
+    TempError(crate::Error),
+    None,
+}
+
+impl From<Error> for Dkim2Result {
+    fn from(err: Error) -> Self {
+        if matches!(&err, Error::Dns(DnsError::Resolver(_))) {
+            Dkim2Result::TempError(err)
+        } else {
+            Dkim2Result::PermError(err)
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -231,33 +257,35 @@ pub enum Version {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DnsError {
+    Resolver(String),
+    RecordNotFound(ResponseCode),
+    InvalidRecordType,
+}
+
+impl Display for DnsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DnsError::Resolver(err) => write!(f, "DNS resolution error: {err}"),
+            DnsError::RecordNotFound(code) => write!(f, "DNS record not found: {code}"),
+            DnsError::InvalidRecordType => write!(f, "Invalid record"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     ParseError,
     MissingParameters,
     NoHeadersFound,
-    CryptoError(String),
-    Io(String),
     Base64,
-    UnsupportedVersion,
-    UnsupportedAlgorithm,
-    UnsupportedCanonicalization,
-    UnsupportedKeyType,
-    FailedBodyHashMatch,
-    FailedVerification,
-    FailedAuidMatch,
-    RevokedPublicKey,
-    IncompatibleAlgorithms,
-    SignatureExpired,
-    SignatureLength,
-    DnsError(String),
-    DnsRecordNotFound(ResponseCode),
-    ArcChainTooLong,
-    ArcInvalidInstance(u32),
-    ArcInvalidCV,
-    ArcHasHeaderTag,
-    ArcBrokenChain,
     NotAligned,
-    InvalidRecordType,
+    Io(String),
+    Crypto(CryptoError),
+    Dns(DnsError),
+    Dkim(crate::dkim::DkimError),
+    Arc(crate::arc::ArcError),
+    Dkim2(crate::dkim2::Dkim2Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -270,40 +298,14 @@ impl Display for Error {
             Error::ParseError => write!(f, "Parse error"),
             Error::MissingParameters => write!(f, "Missing parameters"),
             Error::NoHeadersFound => write!(f, "No headers found"),
-            Error::CryptoError(err) => write!(f, "Cryptography layer error: {err}"),
             Error::Io(e) => write!(f, "I/O error: {e}"),
             Error::Base64 => write!(f, "Base64 encode or decode error."),
-            Error::UnsupportedVersion => write!(f, "Unsupported version in DKIM Signature"),
-            Error::UnsupportedAlgorithm => write!(f, "Unsupported algorithm in DKIM Signature"),
-            Error::UnsupportedCanonicalization => {
-                write!(f, "Unsupported canonicalization method in DKIM Signature")
-            }
-            Error::UnsupportedKeyType => {
-                write!(f, "Unsupported key type in DKIM DNS record")
-            }
-            Error::FailedBodyHashMatch => {
-                write!(f, "Calculated body hash does not match signature hash")
-            }
-            Error::RevokedPublicKey => write!(f, "Public key for this signature has been revoked"),
-            Error::IncompatibleAlgorithms => write!(
-                f,
-                "Incompatible algorithms used in signature and DKIM DNS record"
-            ),
-            Error::FailedVerification => write!(f, "Signature verification failed"),
-            Error::SignatureExpired => write!(f, "Signature expired"),
-            Error::SignatureLength => write!(f, "Insecure 'l=' tag found in Signature"),
-            Error::FailedAuidMatch => write!(f, "AUID does not match domain name"),
-            Error::ArcInvalidInstance(i) => {
-                write!(f, "Invalid 'i={i}' value found in ARC header")
-            }
-            Error::ArcInvalidCV => write!(f, "Invalid 'cv=' value found in ARC header"),
-            Error::ArcHasHeaderTag => write!(f, "Invalid 'h=' tag present in ARC-Seal"),
-            Error::ArcBrokenChain => write!(f, "Broken or missing ARC chain"),
-            Error::ArcChainTooLong => write!(f, "Too many ARC headers"),
-            Error::InvalidRecordType => write!(f, "Invalid record"),
-            Error::DnsError(err) => write!(f, "DNS resolution error: {err}"),
-            Error::DnsRecordNotFound(code) => write!(f, "DNS record not found: {code}"),
             Error::NotAligned => write!(f, "Policy not aligned"),
+            Error::Crypto(e) => e.fmt(f),
+            Error::Dns(e) => e.fmt(f),
+            Error::Dkim(e) => e.fmt(f),
+            Error::Arc(e) => e.fmt(f),
+            Error::Dkim2(e) => e.fmt(f),
         }
     }
 }
@@ -368,7 +370,7 @@ impl From<io::Error> for Error {
 #[cfg(feature = "rsa")]
 impl From<rsa::errors::Error> for Error {
     fn from(err: rsa::errors::Error) -> Self {
-        Error::CryptoError(err.to_string())
+        Error::Crypto(CryptoError::Library(err.to_string()))
     }
 }
 

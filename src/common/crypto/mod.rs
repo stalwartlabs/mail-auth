@@ -7,6 +7,26 @@
 use super::headers::{Writable, Writer};
 use crate::{Result, dkim::Canonicalization};
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum CryptoError {
+    Library(String),
+    FailedVerification,
+    IncompatibleAlgorithms,
+}
+
+impl std::fmt::Display for CryptoError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CryptoError::Library(err) => write!(f, "Cryptography layer error: {err}"),
+            CryptoError::FailedVerification => write!(f, "Signature verification failed"),
+            CryptoError::IncompatibleAlgorithms => write!(
+                f,
+                "Incompatible algorithms used in signature and DKIM DNS record"
+            ),
+        }
+    }
+}
+
 #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 mod ring_impls;
 #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]

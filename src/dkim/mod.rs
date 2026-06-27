@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::DnsError;
 use crate::{
     ArcOutput, DkimOutput, DkimResult, Error, Version,
     arc::Set,
@@ -30,6 +31,43 @@ pub enum Canonicalization {
     #[default]
     Relaxed,
     Simple,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum DkimError {
+    UnsupportedVersion,
+    UnsupportedAlgorithm,
+    UnsupportedCanonicalization,
+    UnsupportedKeyType,
+    FailedBodyHashMatch,
+    FailedAuidMatch,
+    RevokedPublicKey,
+    SignatureExpired,
+    SignatureLength,
+}
+
+impl std::fmt::Display for DkimError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DkimError::UnsupportedVersion => write!(f, "Unsupported version in DKIM Signature"),
+            DkimError::UnsupportedAlgorithm => {
+                write!(f, "Unsupported algorithm in DKIM Signature")
+            }
+            DkimError::UnsupportedCanonicalization => {
+                write!(f, "Unsupported canonicalization method in DKIM Signature")
+            }
+            DkimError::UnsupportedKeyType => write!(f, "Unsupported key type in DKIM DNS record"),
+            DkimError::FailedBodyHashMatch => {
+                write!(f, "Calculated body hash does not match signature hash")
+            }
+            DkimError::FailedAuidMatch => write!(f, "AUID does not match domain name"),
+            DkimError::RevokedPublicKey => {
+                write!(f, "Public key for this signature has been revoked")
+            }
+            DkimError::SignatureExpired => write!(f, "Signature expired"),
+            DkimError::SignatureLength => write!(f, "Insecure 'l=' tag found in Signature"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -204,7 +242,7 @@ impl<'x> DkimOutput<'x> {
     }
 
     pub fn dns_error(err: Error) -> Self {
-        if matches!(&err, Error::DnsError(_)) {
+        if matches!(&err, Error::Dns(DnsError::Resolver(_))) {
             DkimOutput::temp_err(err)
         } else {
             DkimOutput::perm_err(err)
@@ -251,7 +289,7 @@ impl ArcOutput<'_> {
 
 impl From<Error> for DkimResult {
     fn from(err: Error) -> Self {
-        if matches!(&err, Error::DnsError(_)) {
+        if matches!(&err, Error::Dns(DnsError::Resolver(_))) {
             DkimResult::TempError(err)
         } else {
             DkimResult::PermError(err)

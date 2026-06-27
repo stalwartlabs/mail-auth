@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{ChainValidation, Set};
+use super::{ArcError, ChainValidation, Set};
 use crate::{
     ArcOutput, AuthenticatedMessage, DkimResult, Error, MX, MessageAuthenticator, Parameters,
     RecordSet, ResolverCache, Txt,
@@ -39,11 +39,13 @@ impl MessageAuthenticator {
         if arc_headers == 0 {
             return ArcOutput::default();
         } else if arc_headers > 50 {
-            return ArcOutput::default().with_result(DkimResult::Fail(Error::ArcChainTooLong));
+            return ArcOutput::default()
+                .with_result(DkimResult::Fail(Error::Arc(ArcError::ChainTooLong)));
         } else if (arc_headers != message.as_headers.len())
             || (arc_headers != message.aar_headers.len())
         {
-            return ArcOutput::default().with_result(DkimResult::Fail(Error::ArcBrokenChain));
+            return ArcOutput::default()
+                .with_result(DkimResult::Fail(Error::Arc(ArcError::BrokenChain)));
         }
 
         let now = SystemTime::now()
@@ -82,11 +84,12 @@ impl MessageAuthenticator {
                     || (signature.i as usize != (pos + 1))
                     || (results.i as usize != (pos + 1))
                 {
-                    output.result = DkimResult::Fail(Error::ArcInvalidInstance((pos + 1) as u32));
+                    output.result =
+                        DkimResult::Fail(Error::Arc(ArcError::InvalidInstance((pos + 1) as u32)));
                 } else if (pos == 0 && seal.cv != ChainValidation::None)
                     || (pos > 0 && seal.cv != ChainValidation::Pass)
                 {
-                    output.result = DkimResult::Fail(Error::ArcInvalidCV);
+                    output.result = DkimResult::Fail(Error::Arc(ArcError::InvalidCV));
                 } else if pos == arc_headers - 1 {
                     // Validate last signature in the chain
                     if signature.x == 0 || (signature.x > signature.t && signature.x > now) {
@@ -101,10 +104,11 @@ impl MessageAuthenticator {
                             .unwrap()
                             .3;
                         if bh != &signature.bh {
-                            output.result = DkimResult::Neutral(Error::FailedBodyHashMatch);
+                            output.result =
+                                DkimResult::Neutral(Error::Arc(ArcError::FailedBodyHashMatch));
                         }
                     } else {
-                        output.result = DkimResult::Neutral(Error::SignatureExpired);
+                        output.result = DkimResult::Neutral(Error::Arc(ArcError::SignatureExpired));
                     }
                 }
             }
