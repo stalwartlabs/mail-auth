@@ -5,7 +5,7 @@
  */
 
 use super::headers::{AuthenticatedHeader, Header, HeaderParser};
-use crate::{AuthenticatedMessage, arc, common::crypto::HashAlgorithm, dkim};
+use crate::{AuthenticatedMessage, Error, arc, common::crypto::HashAlgorithm, dkim, dkim2};
 use mail_parser::{Address, HeaderName, HeaderValue, Message, parsers::MessageStream};
 
 impl<'x> AuthenticatedMessage<'x> {
@@ -53,6 +53,12 @@ impl<'x> AuthenticatedMessage<'x> {
                 HeaderName::ArcMessageSignature => {
                     message.parse_ams(name, value, strict);
                 }
+                HeaderName::Other(other) if other.eq_ignore_ascii_case("DKIM2-Signature") => {
+                    message.parse_dkim2_signature(name, value);
+                }
+                HeaderName::Other(other) if other.eq_ignore_ascii_case("Message-Instance") => {
+                    message.parse_dkim2_instance(name, value);
+                }
                 _ => (),
             }
 
@@ -74,6 +80,14 @@ impl<'x> AuthenticatedMessage<'x> {
             let name = match header {
                 AuthenticatedHeader::Ds(name) => {
                     message.parse_dkim(name, value, strict);
+                    name
+                }
+                AuthenticatedHeader::D2s(name) => {
+                    message.parse_dkim2_signature(name, value);
+                    name
+                }
+                AuthenticatedHeader::D2i(name) => {
+                    message.parse_dkim2_instance(name, value);
                     name
                 }
                 AuthenticatedHeader::Aar(name) => {
@@ -117,7 +131,7 @@ impl<'x> AuthenticatedMessage<'x> {
     }
 
     fn parse_dkim(&mut self, name: &'x [u8], value: &'x [u8], strict: bool) {
-        let signature = match dkim::Signature::parse(value) {
+        match dkim::Signature::parse(value) {
             Ok(signature) if signature.l == 0 || !strict => {
                 let ha = HashAlgorithm::from(signature.a);
                 if !self
@@ -128,25 +142,42 @@ impl<'x> AuthenticatedMessage<'x> {
                     self.body_hashes
                         .push((signature.cb, ha, signature.l, Vec::new()));
                 }
-                Ok(signature)
+                self.dkim_headers.push(Header::new(name, value, signature));
             }
-            Ok(_) => Err(crate::Error::Dkim(dkim::DkimError::SignatureLength)),
-            Err(err) => Err(err),
-        };
+            Ok(_) => {
+                self.push_dkim_error(name, value, Error::Dkim(dkim::DkimError::SignatureLength));
+            }
+            Err(err) => self.push_dkim_error(name, value, err),
+        }
+    }
 
-        self.dkim_headers.push(Header::new(name, value, signature));
+    fn parse_dkim2_signature(&mut self, name: &'x [u8], value: &'x [u8]) {
+        match dkim2::Signature::parse(value) {
+            Ok(signature) => self
+                .dkim2_signatures
+                .push(Header::new(name, value, signature)),
+            Err(err) => self.push_dkim2_error(name, value, err),
+        }
+    }
+
+    fn parse_dkim2_instance(&mut self, name: &'x [u8], value: &'x [u8]) {
+        match dkim2::MessageInstance::parse(value) {
+            Ok(instance) => self
+                .dkim2_instances
+                .push(Header::new(name, value, instance)),
+            Err(err) => self.push_dkim2_error(name, value, err),
+        }
     }
 
     fn parse_aar(&mut self, name: &'x [u8], value: &'x [u8]) {
-        let results = arc::Results::parse(value);
-        if !self.has_arc_errors {
-            self.has_arc_errors = results.is_err();
+        match arc::Results::parse(value) {
+            Ok(results) => self.aar_headers.push(Header::new(name, value, results)),
+            Err(err) => self.push_arc_error(name, value, err),
         }
-        self.aar_headers.push(Header::new(name, value, results));
     }
 
     fn parse_ams(&mut self, name: &'x [u8], value: &'x [u8], strict: bool) {
-        let signature = match arc::Signature::parse(value) {
+        match arc::Signature::parse(value) {
             Ok(signature) if signature.l == 0 || !strict => {
                 let ha = HashAlgorithm::from(signature.a);
                 if !self
@@ -157,27 +188,35 @@ impl<'x> AuthenticatedMessage<'x> {
                     self.body_hashes
                         .push((signature.cb, ha, signature.l, Vec::new()));
                 }
-                Ok(signature)
+                self.ams_headers.push(Header::new(name, value, signature));
             }
             Ok(_) => {
-                self.has_arc_errors = true;
-                Err(crate::Error::Arc(arc::ArcError::SignatureLength))
+                self.push_arc_error(name, value, Error::Arc(arc::ArcError::SignatureLength));
             }
-            Err(err) => {
-                self.has_arc_errors = true;
-                Err(err)
-            }
-        };
-
-        self.ams_headers.push(Header::new(name, value, signature));
+            Err(err) => self.push_arc_error(name, value, err),
+        }
     }
 
     fn parse_as(&mut self, name: &'x [u8], value: &'x [u8]) {
-        let seal = arc::Seal::parse(value);
-        if !self.has_arc_errors {
-            self.has_arc_errors = seal.is_err();
+        match arc::Seal::parse(value) {
+            Ok(seal) => self.as_headers.push(Header::new(name, value, seal)),
+            Err(err) => self.push_arc_error(name, value, err),
         }
-        self.as_headers.push(Header::new(name, value, seal));
+    }
+
+    fn push_dkim_error(&mut self, name: &'x [u8], value: &'x [u8], err: Error) {
+        self.has_dkim_errors = true;
+        self.errors.push(Header::new(name, value, err));
+    }
+
+    fn push_dkim2_error(&mut self, name: &'x [u8], value: &'x [u8], err: Error) {
+        self.has_dkim2_errors = true;
+        self.errors.push(Header::new(name, value, err));
+    }
+
+    fn push_arc_error(&mut self, name: &'x [u8], value: &'x [u8], err: Error) {
+        self.has_arc_errors = true;
+        self.errors.push(Header::new(name, value, err));
     }
 
     fn parse_from(&mut self, value: &HeaderValue<'x>) {
@@ -213,27 +252,15 @@ impl<'x> AuthenticatedMessage<'x> {
 
         // Sort ARC headers
         if !self.as_headers.is_empty() && !self.has_arc_errors {
-            self.as_headers.sort_unstable_by(|a, b| {
-                a.header
-                    .as_ref()
-                    .unwrap()
-                    .i
-                    .cmp(&b.header.as_ref().unwrap().i)
-            });
-            self.ams_headers.sort_unstable_by(|a, b| {
-                a.header
-                    .as_ref()
-                    .unwrap()
-                    .i
-                    .cmp(&b.header.as_ref().unwrap().i)
-            });
-            self.aar_headers.sort_unstable_by(|a, b| {
-                a.header
-                    .as_ref()
-                    .unwrap()
-                    .i
-                    .cmp(&b.header.as_ref().unwrap().i)
-            });
+            self.as_headers.sort_unstable_by_key(|h| h.header.i);
+            self.ams_headers.sort_unstable_by_key(|h| h.header.i);
+            self.aar_headers.sort_unstable_by_key(|h| h.header.i);
+        }
+
+        // Sort DKIM2 signatures and instances
+        if !self.has_dkim2_errors {
+            self.dkim2_signatures.sort_unstable_by_key(|h| h.header.i);
+            self.dkim2_instances.sort_unstable_by_key(|h| h.header.m);
         }
 
         self

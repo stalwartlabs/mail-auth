@@ -1,0 +1,6 @@
+From: sender@test4.dkim2.com
+To: recipient@example.com
+Subject: Message with empty body
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-empty@test4.dkim2.com>
+

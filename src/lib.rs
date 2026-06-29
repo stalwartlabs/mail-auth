@@ -131,16 +131,19 @@ pub struct AuthenticatedMessage<'x> {
     pub raw_message: &'x [u8],
     pub body_offset: u32,
     pub body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
-    pub dkim_headers: Vec<Header<'x, crate::Result<dkim::Signature>>>,
-    pub dkim2_signatures: Vec<Header<'x, crate::Result<dkim2::Signature>>>,
-    pub dkim2_instances: Vec<Header<'x, crate::Result<dkim2::MessageInstance>>>,
-    pub ams_headers: Vec<Header<'x, crate::Result<arc::Signature>>>,
-    pub as_headers: Vec<Header<'x, crate::Result<arc::Seal>>>,
-    pub aar_headers: Vec<Header<'x, crate::Result<arc::Results>>>,
+    pub dkim_headers: Vec<Header<'x, dkim::Signature>>,
+    pub dkim2_signatures: Vec<Header<'x, dkim2::Signature>>,
+    pub dkim2_instances: Vec<Header<'x, dkim2::MessageInstance>>,
+    pub ams_headers: Vec<Header<'x, arc::Signature>>,
+    pub as_headers: Vec<Header<'x, arc::Seal>>,
+    pub aar_headers: Vec<Header<'x, arc::Results>>,
     pub received_headers_count: usize,
     pub date_header_present: bool,
     pub message_id_header_present: bool,
+    pub errors: Vec<Header<'x, Error>>,
+    pub has_dkim_errors: bool,
     pub has_arc_errors: bool,
+    pub has_dkim2_errors: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,6 +273,22 @@ impl Display for DnsError {
             DnsError::RecordNotFound(code) => write!(f, "DNS record not found: {code}"),
             DnsError::InvalidRecordType => write!(f, "Invalid record"),
         }
+    }
+}
+
+impl<'x> TryFrom<&'x [u8]> for AuthenticatedMessage<'x> {
+    type Error = Error;
+
+    fn try_from(value: &'x [u8]) -> std::prelude::v1::Result<Self, Self::Error> {
+        AuthenticatedMessage::parse(value).ok_or(Error::ParseError)
+    }
+}
+
+impl<'x> TryFrom<&'x Vec<u8>> for AuthenticatedMessage<'x> {
+    type Error = Error;
+
+    fn try_from(value: &'x Vec<u8>) -> std::prelude::v1::Result<Self, Self::Error> {
+        AuthenticatedMessage::parse(value).ok_or(Error::ParseError)
     }
 }
 

@@ -1,0 +1,11 @@
+DKIM2-Signature: i=2; m=2; t=1740001000; d=test3.dkim2.com; mf=cmVsYXlAdGVzdDMuZGtpbTIuY29t; rt=cmVjaXBpZW50QGV4YW1wbGUuY29t; s=ed25519:ed25519-sha256:GvKXKsR5BrEghRdjM0P97a72lx7k8bnaWgbw2akordHhaSlGc/J2oEXS4gdMXC3fE+1s4D1HrHxXywsVzHVcCQ==;
+DKIM2-Signature: i=1; m=1; t=1740000000; d=test1.dkim2.com; mf=c2VuZGVyQHRlc3QxLmRraW0yLmNvbQ==; rt=bGlzdEB0ZXN0My5ka2ltMi5jb20=; s=ed25519:ed25519-sha256:BFU0Oz5jnaLq2Twt9Mp+xMuQLdOxR3NaDSox/sJQtYczUMsH0iVcunFqxgMbJpSx9yrNz52fpetIek+ngV7TBg==;
+Message-Instance: m=2; h=sha256:YQR+cQdwRx1EUHN5Hs0I0rdcwdmvtXuasYBEq2djXR0=:SgG5fNGEg1x24MwItCUYGDHQkWKng06W1/IvTGBdwzU=; r=eyJoIjp7InN1YmplY3QiOlt7ImQiOlsiIFNpbXBsZSB0ZXN0IG1lc3NhZ2UiXX1dfX0=;
+Message-Instance: m=1; h=sha256:SLtzk6LO68CCaX4edrJ6yfpWbp3hwgvI8IdMBRLDk+Y=:SgG5fNGEg1x24MwItCUYGDHQkWKng06W1/IvTGBdwzU=;
+From: sender@test1.dkim2.com
+To: recipient@example.com
+Subject: [MODIFIED] Simple test message
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-simple@test1.dkim2.com>
+
+Hello, this is a simple test message.

@@ -62,33 +62,30 @@ impl MessageAuthenticator {
         PTR: ResolverCache<IpAddr, RecordSet<Box<str>>>,
     {
         let message = params.params;
-        let mut output = Vec::with_capacity(message.dkim_headers.len());
+        let mut output = Vec::with_capacity(message.dkim_headers.len() + message.errors.len());
         let mut report_requested = false;
+
+        // Surface malformed DKIM signatures
+        for header in &message.errors {
+            if let Error::Dkim(_) = &header.header {
+                output.push(DkimOutput::neutral(header.header.clone()));
+            }
+        }
 
         // Validate DKIM headers
         for header in &message.dkim_headers {
-            // Validate body hash
-            let signature = match &header.header {
-                Ok(signature) => {
-                    if signature.r {
-                        report_requested = true;
-                    }
+            let signature = &header.header;
+            if signature.r {
+                report_requested = true;
+            }
 
-                    if signature.x == 0 || (signature.x > signature.t && signature.x > now) {
-                        signature
-                    } else {
-                        output.push(
-                            DkimOutput::neutral(Error::Dkim(DkimError::SignatureExpired))
-                                .with_signature(signature),
-                        );
-                        continue;
-                    }
-                }
-                Err(err) => {
-                    output.push(DkimOutput::neutral(err.clone()));
-                    continue;
-                }
-            };
+            if !(signature.x == 0 || (signature.x > signature.t && signature.x > now)) {
+                output.push(
+                    DkimOutput::neutral(Error::Dkim(DkimError::SignatureExpired))
+                        .with_signature(signature),
+                );
+                continue;
+            }
 
             // Validate body hash
             let ha = HashAlgorithm::from(signature.a);
@@ -280,18 +277,10 @@ impl<'x> AuthenticatedMessage<'x> {
         let mut data = Vec::with_capacity(256);
         for header in &self.dkim_headers {
             // Ensure signature is not obviously invalid
-            let signature = match &header.header {
-                Ok(signature) => {
-                    if signature.x == 0 || (signature.x > signature.t) {
-                        signature
-                    } else {
-                        continue;
-                    }
-                }
-                Err(_err) => {
-                    continue;
-                }
-            };
+            let signature = &header.header;
+            if !(signature.x == 0 || (signature.x > signature.t)) {
+                continue;
+            }
 
             // Get pre-hashed but canonically ordered headers, who's hash is signed
             let dkim_hdr_value = header.value.strip_signature();

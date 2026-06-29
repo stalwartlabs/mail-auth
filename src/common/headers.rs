@@ -47,6 +47,8 @@ pub(crate) struct HeaderParser<'x> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AuthenticatedHeader<'x> {
     Ds(&'x [u8]),
+    D2s(&'x [u8]),
+    D2i(&'x [u8]),
     Aar(&'x [u8]),
     Ams(&'x [u8]),
     As(&'x [u8]),
@@ -244,7 +246,7 @@ impl<'x> Iterator for HeaderParser<'x> {
                         }
                         token_end = pos;
                     }
-                    b'a'..=b'z' | b'-' => {
+                    b'a'..=b'z' | b'-' | b'0'..=b'9' => {
                         if hash_shift < 64 {
                             hash |= (ch as u64) << hash_shift;
                             hash_shift += 8;
@@ -301,6 +303,15 @@ impl<'x> Iterator for HeaderParser<'x> {
                     {
                         AuthenticatedHeader::Ds(header_name)
                     }
+                    DKIM2
+                        if self
+                            .message
+                            .get(token_start + 8..token_end + 1)
+                            .unwrap_or_default()
+                            .eq_ignore_ascii_case(b"gnature") =>
+                    {
+                        AuthenticatedHeader::D2s(header_name)
+                    }
                     MSGID
                         if self
                             .message
@@ -310,6 +321,15 @@ impl<'x> Iterator for HeaderParser<'x> {
                     {
                         self.has_message_id = true;
                         AuthenticatedHeader::Other(header_name)
+                    }
+                    MSGID
+                        if self
+                            .message
+                            .get(token_start + 8..token_end + 1)
+                            .unwrap_or_default()
+                            .eq_ignore_ascii_case(b"instance") =>
+                    {
+                        AuthenticatedHeader::D2i(header_name)
                     }
                     DATE => {
                         self.has_date = true;
@@ -374,6 +394,14 @@ const DKIM: u64 = (b'd' as u64)
     | ((b's' as u64) << 40)
     | ((b'i' as u64) << 48)
     | ((b'g' as u64) << 56);
+const DKIM2: u64 = (b'd' as u64)
+    | ((b'k' as u64) << 8)
+    | ((b'i' as u64) << 16)
+    | ((b'm' as u64) << 24)
+    | ((b'2' as u64) << 32)
+    | ((b'-' as u64) << 40)
+    | ((b's' as u64) << 48)
+    | ((b'i' as u64) << 56);
 const AAR: u64 = (b'a' as u64)
     | ((b'r' as u64) << 8)
     | ((b'c' as u64) << 16)
@@ -477,6 +505,8 @@ mod test {
                         (
                             std::str::from_utf8(match h {
                                 AuthenticatedHeader::Ds(v)
+                                | AuthenticatedHeader::D2s(v)
+                                | AuthenticatedHeader::D2i(v)
                                 | AuthenticatedHeader::Aar(v)
                                 | AuthenticatedHeader::Ams(v)
                                 | AuthenticatedHeader::As(v)

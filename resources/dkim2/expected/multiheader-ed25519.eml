@@ -1,0 +1,16 @@
+DKIM2-Signature: i=1; m=1; t=1740000000; d=test2.dkim2.com; mf=PHNlbmRlckB0ZXN0Mi5ka2ltMi5jb20+; rt=PHJlY2lwaWVudEBleGFtcGxlLmNvbT4=; s=ed25519:ed25519-sha256:BO0gJeWakCb56w9UM1CjzyJyiTzxaohp5u/JEGMUKf+mO3wz5Kj3gVEQyRGiz9cfaTt11BciXqxrI1WV8rLXCg==;
+Message-Instance: m=1; h=sha256:ShmtblPBr8lV9zKrv7MAP81zN+N32REP2QOZnUk9Fc8=:CyfSEkygi5JDksVb4/R53JKT7GKBuBgsR1ZYpkHnQOs=;
+From: sender@test2.dkim2.com
+To: recipient@example.com
+Cc: other@example.com
+Subject: A longer subject line that wraps
+ across multiple continuation lines
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-multi@test2.dkim2.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+X-Custom-Header: this should be excluded from header hash
+
+Hello, this is a test with multiple headers.
+
+It has multiple paragraphs too.

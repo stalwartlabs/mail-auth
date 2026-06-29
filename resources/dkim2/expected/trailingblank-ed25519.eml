@@ -1,0 +1,12 @@
+DKIM2-Signature: i=1; m=1; t=1740000000; d=test3.dkim2.com; mf=PHNlbmRlckB0ZXN0My5ka2ltMi5jb20+; rt=PHJlY2lwaWVudEBleGFtcGxlLmNvbT4=; s=ed25519:ed25519-sha256:7NsEMjYpfY5nn3T87LxcyW5NxaUo5gH9jdIVUOjhpoJCSXsOa+vXF8f9exhjl4jzywgJyOS3EACD+xUgndZFAg==;
+Message-Instance: m=1; h=sha256:YtDwzM7AADKC0ryh1KVt1aZ0lmSI7tSh0ZSprpfk4tQ=:769Te581VmTppQtDpBb9xdyD4tmnTJCPgtfQRQvDo2s=;
+From: sender@test3.dkim2.com
+To: recipient@example.com
+Subject: Message with trailing blank lines
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-trailing@test3.dkim2.com>
+
+Body text here.
+
+
+

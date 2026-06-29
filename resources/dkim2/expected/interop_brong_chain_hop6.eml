@@ -1,0 +1,446 @@
+DKIM2-Signature: i=6; m=5; t=1740000000; d=test1.dkim2.com;
+	mf=cmVsYXlAdGVzdDEuZGtpbTIuY29t;
+	rt=ZGVzdEB0ZXN0Mi5ka2ltMi5jb20=;
+	s=sel1:rsa-sha256:hFTV7qTUqC4TEFHHRbbmTt2mWyxa5zbppRoYGFHTbEp8Gu
+	N5Ms1ts0ekbq420ys7euZcuugSm7sV4FThBDuc2wE0FlyyM1kcK7ke66kyOwxOWm
+	YhtlotBZyaxMe6kvK9A93lwsMpCseCk2GmhLlJwj7ffJAatuTCTiUJ2/zl57w6Xk
+	qG2+6jBrFPbNKqVHZdox9gPAy15G/xgRSYRp+At2pw1kZkMTtR4lK9fAr9JyDJba
+	g3SuG5cB+CSnymlaPNC42J03zH/PCEWHNhIdmrOHlmYTUMCqCsg3lMLccgf8Pj2e
+	kB5lFa8Za5Y99nNlnSHmMOwxNJ84wad/4kM3Gduw==;
+DKIM2-Signature: i=5; m=5; t=1740000000; d=test5.dkim2.com;
+	mf=Zm9yd2FyZGVyQHRlc3Q1LmRraW0yLmNvbQ==;
+	rt=YnJvbmdAdGVzdDEuZGtpbTIuY29t;
+	s=sel2:rsa-sha256:XWrsTzZ+rTmisjHh59LP+VAgChh10IRcyqFVgmIy0Z2/hc
+	ZzelfZplVJTx28daevlgl8EX3+5b1glxQIQDdHDjB8qjrTXGarZQ3kljo0QtSRer
+	ZF+My1QAGlcHNoAQEMp8t7F+1kGE0+heE/Z2IcnHzJ/RFhMH0oJmwmGoYsQZovuT
+	4ElE8gbrAYqQRziyE7GHTMiOmmHASf4L4dcHZe6PzN6x7d9GHBdxfBePSnrC4Y5Q
+	5I8OtebXRsft7j2ySLwhkLPLPztAhEDX5V7eRfvtfAqvJbOuHw1dw7JljgueBqHr
+	uY8X06IJwMa+3QyHZd3FalG1xEtQs/2HeYZU0zLQ==;
+Message-Instance: m=5;
+	h=sha256:hixqBKGSX/pbmi3l0M1YQzc8Ad5BVkkHhRl4fNWkqjs=:4olUkMUi2b
+	CCfVrAOg4rSNpPMBWnWoKd71+94zpiUqo=;
+	r=eyJoIjp7InJlY2VpdmVkLXNwZiI6W119fQ==;
+Message-Instance: m=4;
+ h=sha256:hWR2jUhGIbgUk4+GFw4I3YOvmisoa423Fowk/BcJs9M=:4olUkMUi2b
+ CCfVrAOg4rSNpPMBWnWoKd71+94zpiUqo=;
+ r=eyJiIjpbeyJjIjpbMSwxNV19LHsiZCI6WyJIZXJlJ3Mgc29tZSBleHRyYSB0ZX
+ h0LiIsIiJdfSx7ImMiOlsxNiw2M119XSwiaCI6eyJleHRyYS1oZWFkZXIiOlt7Im
+ QiOlsieWVzIl19XX19;
+Message-Instance: m=3;
+ h=sha256:ElVBaJDUrsU0T5JD/75pQwfTLBnvQ+A7AcFbKt10wRU=:AU2ehAlvQ2
+ g+ZnJf3kTHsCycDFE7sCn6AhpbTGgSYFM=;
+ r=eyJiIjpbeyJjIjpbMSwxNV19LHsiYyI6WzE4LDY1XX1dLCJoIjp7ImV4dHJhLW
+ hlYWRlciI6W119fQ==;
+Message-Instance: m=2;
+ h=sha256:hWR2jUhGIbgUk4+GFw4I3YOvmisoa423Fowk/BcJs9M=:4olUkMUi2b
+ CCfVrAOg4rSNpPMBWnWoKd71+94zpiUqo=;
+ r=eyJiIjpbeyJkIjpbIi0tMTJiNTNkYzgyOWQyNDUxMWJmYTA0ZjdkNWUzNjc1Zj
+ giXX0seyJjIjpbNSw1XX0seyJjIjpbNyw5XX0seyJkIjpbIlRoaXMgZW1haWwgc3
+ RhcnRzIGEgd29ya2luZyBncm91cCBsYXN0IGNhbGwgZm9yIGh0dHBzOi8vZGF0YX
+ RyYWNrZXIuaWV0Zi5vcmcvZG9jL2RyYWZ0LWlldGYtam1hcC13ZWJwdXNoLXZhcG
+ lkLyBhcyBkaXNjdXNzZWQgaW4gdGhlIElFVEYxMTkgc2Vzc2lvbi4iXX0seyJjIj
+ pbMTEsMTFdfSx7ImQiOlsiUGxlYXNlIHBvc3QgYW55IGNvbW1lbnRzIG9yIHJlc3
+ BvbnNlcyBieSAqVGh1cnNkYXksIEFwcmlsIDR0aCwgMjAyNCouIl19LHsiYyI6Wz
+ EzLDEzXX0seyJjIjpbMTYsMjVdfSx7ImQiOlsiLS0xMmI1M2RjODI5ZDI0NTExYm
+ ZhMDRmN2Q1ZTM2NzVmOCJdfSx7ImMiOlsyNywzMV19LHsiZCI6WyJhbWlseTpBcm
+ lhbDtcIj5IaSBBbGwsPGJyPjwvZGl2PjxkaXYgc3R5bGU9M0RcImZvbnQtZmFtaW
+ x5OkFyaWFsO1wiPjxkaXY+PGI9Iiwicj48L2Rpdj48ZGl2PlRoaXMgZW1haWwgc3
+ RhcnRzIGEgd29ya2luZyBncm91cCBsYXN0IGNhbGwgZm9yIDxhIGhyZWY9M0RcIj
+ 0iLCJodHRwczovL2RhdGF0cmFja2VyLmlldGYub3JnL2RvYy9kcmFmdC1pZXRmLW
+ ptYXAtd2VicHVzaC12YXBpZC9cIj5odHRwczovPSIsIi9kYXRhdHJhY2tlci5pZX
+ RmLm9yZy9kb2MvZHJhZnQtaWV0Zi1qbWFwLXdlYnB1c2gtdmFwaWQvPC9hPiBhcy
+ BkaXNjdXNzZT0iLCJkIGluIHRoZSBJRVRGMTE5IHNlc3Npb24uPGJyPjwvZGl2Pj
+ xkaXYgc3R5bGU9M0RcImZvbnQtZmFtaWx5OkFyaWFsO1wiPjxicj0iLCI+PC9kaX
+ Y+PGRpdiBzdHlsZT0zRFwiZm9udC1mYW1pbHk6QXJpYWw7XCI+UGxlYXNlIHBvc3
+ QgYW55IGNvbW1lbnRzIG9yIHJlcz0iLCJwb25zZXMgYnkgPGI+VGh1cnNkYXksIE
+ FwcmlsIDR0aCwgMjAyNDwvYj4uPGJyPjwvZGl2PjxkaXYgc3R5bGU9M0RcImZvbn
+ QtPSIsImZhbWlseTpBcmlhbDtcIj48YnI+PC9kaXY+PGRpdiBzdHlsZT0zRFwiZm
+ 9udC1mYW1pbHk6QXJpYWw7XCI+VGhhbmtzLDxicj48Lz0iLCJkaXY+PGRpdiBzdH
+ lsZT0zRFwiZm9udC1mYW1pbHk6QXJpYWw7XCI+PGJyPjwvZGl2PjxkaXYgc3R5bG
+ U9M0RcImZvbnQtZmFtaWw9IiwieTpBcmlhbDtcIj5Ccm9uLjxicj48L2Rpdj48ZG
+ l2Pjxicj48L2Rpdj48ZGl2Pjxicj48L2Rpdj48L2Rpdj48ZGl2IGlkPTNEXCI9Ii
+ wic2lnNTY2Mjk0MTdcIj48ZGl2IGNsYXNzPTNEXCJzaWduYXR1cmVcIj4tLTxicj
+ 48L2Rpdj48ZGl2IGNsYXNzPTNEXCJzaWduYXR1cj0iLCJlXCI+Jm5ic3A7IEJyb2
+ 4gR29uZHdhbmEsIENFTywgRmFzdG1haWwgUHR5IEx0ZDxicj48L2Rpdj48ZGl2IG
+ NsYXNzPTNEXCJzaT0iLCJnbmF0dXJlXCI+Jm5ic3A7IGJyb25nQGZhc3RtYWlsdG
+ VhbS5jb208YnI+PC9kaXY+PGRpdiBjbGFzcz0zRFwic2lnbmF0dXJlXCI9IiwiPj
+ xicj48L2Rpdj48L2Rpdj48ZGl2IHN0eWxlPTNEXCJmb250LWZhbWlseTpBcmlhbD
+ tcIj48YnI+PC9kaXY+PC9ib2R5PjwvaHQ9IiwibWw+IiwiLS0xMmI1M2RjODI5ZD
+ I0NTExYmZhMDRmN2Q1ZTM2NzVmOC0tIl19XSwiaCI6eyJhcmNoaXZlZC1hdCI6W1
+ 0sImNvbnRlbnQtdHlwZSI6W3siZCI6WyJtdWx0aXBhcnQvYWx0ZXJuYXRpdmU7IG
+ JvdW5kYXJ5PTEyYjUzZGM4MjlkMjQ1MTFiZmEwNGY3ZDVlMzY3NWY4Il19XSwiZG
+ F0ZSI6W3siZCI6WyJUaHUsIDIxIE1hciAyMDI0IDEyOjA5OjM3ICsxMDAwIl19XS
+ wiZmVlZGJhY2staWQiOltdLCJmcm9tIjpbeyJkIjpbIlwiQnJvbiBHb25kd2FuYV
+ wiIDxicm9uZ0BmYXN0bWFpbHRlYW0uY29tPiJdfV0sImxpc3QtYXJjaGl2ZSI6W1
+ 0sImxpc3QtaGVscCI6W10sImxpc3QtaWQiOltdLCJsaXN0LW93bmVyIjpbXSwibG
+ lzdC1wb3N0IjpbXSwibGlzdC1zdWJzY3JpYmUiOltdLCJsaXN0LXVuc3Vic2NyaW
+ JlIjpbXSwibWVzc2FnZS1pZCI6W3siZCI6WyI8ZmIxYjEwYWUtZWEzNi00ZWU0LW
+ I4NGYtYjYyZjAzNmNmYWY1QGFwcC5mYXN0bWFpbC5jb20+Il19XSwibWVzc2FnZS
+ 1pZC1oYXNoIjpbXSwicHJlY2VkZW5jZSI6W10sInN1YmplY3QiOlt7ImQiOlsiV2
+ 9ya2luZyBncm91cCBsYXN0IGNhbGwgZHJhZnQtaWV0Zi1qbWFwLXdlYnB1c2gtdm
+ FwaWQiXX1dfX0=;
+Message-Instance: m=1;
+ h=sha256:tB8uwPQbcCHO6zvU0EnzEFWUKKBtwyzmrxeavy4Jn1g=:XI228V/720
+ XNelm76DFKQf934iOEQQCt6wZ3uKCIr9Q=;
+DKIM2-Signature: i=4; m=4; t=1740000000; d=test4.dkim2.com;
+ mf=cmVsYXlAdGVzdDQuZGtpbTIuY29t; rt=dXNlckB0ZXN0NS5ka2ltMi5jb20=;
+ s=sel1:rsa-sha256:TIuINCSEglL87Rd3EMZDVRzSnURdSy59hxHc0KqLGWekPw
+ aM36xlVbWSVCYxZwCrChFB5Rdx5/a9bMqG8OdzoHnrp7lJ6+azqXZ2HK3ms3fAry
+ at01pMX4WoIvyCLpoxjqd+FV5IafqUUv+oVQg/DPRcoDHsoIskmiw/1EjhFvrYHZ
+ /ULqF6sALHMcwrPsK5246s6bvKwBU2YsTVxQOVzSlyCagiBCTSk6M8HK1DvPDgMD
+ /LHNPSpIB6NAwPJuqOJxEkHY+xEkQEtXa5FNclgMqu1wLXYV+UiR6XvQ4YLTSqum
+ GSR0UXO862V0e6/vzI4/2GmGrpV+yIRbejMSjGDg==;
+DKIM2-Signature: i=3; m=3; t=1740000000; d=test3.dkim2.com;
+ mf=cmVsYXlAdGVzdDMuZGtpbTIuY29t; rt=dXNlckB0ZXN0NC5ka2ltMi5jb20=;
+ s=sel3:rsa-sha256:VWDryR2c3zOSZrkpcLPb2zY6TEiRhycvPws3A8ONP/UZJg
+ UItEpeupPRNeODwRLAJDGGu2NGxhIhEMcqsVGCSVsMjPANxnsDCtF2tiXKH8+PUy
+ 0sPstEBGydSaxxDX5/5zg9z1DBPpKIu+7KcwhvI/hDBWfkZSV7+0tLTS7Q+EjNG/
+ 4ulsc5nINVDn4U61qf89DYTC7yaz1ikyFXDp2aaJ/qpxCx17aBs3dEYX+kpgtdt5
+ AT1P0Axe0jw2tz1qwDcxJqSNkcNWDkiLZQMtF6BneXqSNjZho+2ep7zpUsOlf4PM
+ Ywj7REcHfZRSgTIFhRpWT0j0ouRlTveIWONaxcWA==;
+DKIM2-Signature: i=2; m=2; t=1740000000; d=test2.dkim2.com;
+ mf=Ym91bmNlc0B0ZXN0Mi5ka2ltMi5jb20=; rt=dXNlckB0ZXN0My5ka2ltMi5jb20=;
+ s=sel2:rsa-sha256:jAjg5tt/B+UbeeQvtzpRsqQhUCcM3bGadbKo2p+kNaOyqD
+ 0dbc2tG3wyYzPGOicJYTFFveUW5blie/74I1mRlVcj2FoxipcgxXdMv9aOH3btO6
+ 9rHA6sLfi3kRUJPNLfWEeqHh1MgjOnjZfYS5PwDaPXn3xKrunX+9ePAOeFx1m+La
+ Zo6GeW584e6x55zr5fWocKlFipBdrtjWtiKjQ4n2gq7S4HC487HTPazE9Dq/uBIu
+ p0OIxE5u2iND04I6RlbNGv0ypAXJfZaVd7S292ROswUVnpbvOId78t+i0nE/wvf5
+ P6yvlMVXCF9tvM5TBUi1bsIigy2k1xsXcloomjaw==;
+DKIM2-Signature: i=1; m=1; t=1740000000; d=test1.dkim2.com;
+ mf=YnJvbmdAdGVzdDEuZGtpbTIuY29t; rt=bGlzdEB0ZXN0Mi5ka2ltMi5jb20=;
+ s=sel1:rsa-sha256:osBes6YAerjC9sKhvU0R0HdB2LWquOpuzgvjgk0mlRVc7z
+ mLQ0FIBu2sOODgsvc4jli177mlgri3tlmXQz24X4Zzdsw9qUVWmYrmTuQ8eJv9Fl
+ qDWl+Rf/VOUXEenCGlGCaM2uPE5jMZIprFKMHtk8lx/nQAXxY53RnnxhfRFp+M7s
+ wduSPim0VFqDKI5igT0Oj8B4u8+ihO8QC8qp4+KnM6eajNgC+fqPDyIYt2VZbWhD
+ qfsp4SQQLRdPRQoQb0HldVsCZ6yQm1+2E8QpRHdpmbZC9I2E0ZOMoCm8TPxFQ3oR
+ 3LiA3XcVbFfmtxDNzg702UqjoEFK1VmVHJKhLxhw==;
+Return-Path: <forwardingalgorithm@ietf.org>
+Received: from compute3.internal (compute3.nyi.internal [10.202.2.43])
+	 by sloti43n03 (Cyrus 3.11.0-alpha0-679-g88f70abd1-fm-20240802.001-g88f70abd) with LMTPA;
+	 Wed, 07 Aug 2024 21:23:35 -0400
+X-Cyrus-Session-Id: sloti43n03-1723080215-1868662-2-10525599017107635449
+X-Sieve: CMU Sieve 3.0
+X-Spam-known-sender: yes ("Address brong=40fastmailteam.com@dmarc.ietf.org in From header is
+ in addressbook"); in-addressbook;
+ c0747cf6-4f2a-4e4b-9d8f-0ca44521d28d ("Autosaved")
+X-Spam-sender-reputation: 789 (domain)
+X-Spam-score: 0.0
+X-Spam-hits: BAYES_00 -1.9, DCC_REPUT_13_19 -0.1, HTML_MESSAGE 0.001,
+  MAILING_LIST_MULTI -1, ME_HAS_VSSU 0.001, ME_SENDERREP_NEUTRAL 0.001,
+  RCVD_IN_DNSWL_MED -2.3, RCVD_IN_MSPIKE_H4 -0.01, RCVD_IN_MSPIKE_WL -0.01,
+  SPF_HELO_NONE 0.001, SPF_PASS -0.001, LANGUAGES en, BAYES_USED user,
+  SA_VERSION 3.4.6
+X-Spam-source: IP='50.223.129.194', Host='mail.ietf.org', Country='US', FromHeader='org',
+  MailFrom='org'
+X-Spam-charsets: subject='utf-8', plain='utf-8'
+X-Resolved-to: brong@fastmail.fm
+X-Delivered-to: brong@fastmailteam.com
+X-Original-Delivered-to: jmap@ietfa.amsl.com
+X-Mail-from: forwardingalgorithm@ietf.org
+Received: from mx6 ([10.202.2.205])
+  by compute3.internal (LMTPProxy); Wed, 07 Aug 2024 21:23:35 -0400
+Received: from mx6.messagingengine.com (localhost [127.0.0.1])
+	by mailmx.nyi.internal (Postfix) with ESMTP id B4CDC116008B
+	for <brong@fastmailteam.com>; Wed,  7 Aug 2024 21:23:34 -0400 (EDT)
+Received: from mailmx.nyi.internal (localhost [127.0.0.1])
+    by mx6.messagingengine.com (Authentication Milter) with ESMTP
+    id 8E909B7A1BF.63B05116009E;
+    Wed, 7 Aug 2024 21:23:34 -0400
+ARC-Seal: i=1; a=rsa-sha256; cv=none; d=messagingengine.com; s=fm3; t=
+    1723080214; b=KdXp/RmiL8ik11LsmGY7cOWMjDgvsgvJ4DbwVVLvElDGX1ipzQ
+    0d6rtbNu3fQXfu1pGAVQP4WG9T8DRt4my4xYJOLERnhXu/C+yrqvahiy+vqcLfnk
+    FNm5tLyPehDpONQX9N2EiuK0o43rYqzq7yUwB3PrBIXerrkOXQY4RuOCzx5zopU3
+    UTEO+xihQ5/Gxbe91w4JVf44requksYhYLh3nhCYLyZIL3cxybjOpa8qVgasEiHA
+    aqI97h65pWHCnXcjYIKGnDkYAb/1xHlR6U922bKqBlY6xy+HCzAtLHGDqfSs3Lsz
+    GLBLc60DPNvH+VgIcs2QBfURq2lrgb0rk52A==
+ARC-Message-Signature: i=1; a=rsa-sha256; c=relaxed/relaxed; d=
+    messagingengine.com; h=mime-version:date:to:message-id:subject
+    :list-id:list-archive:list-help:list-owner:list-post
+    :list-subscribe:list-unsubscribe:content-type:from; s=fm3; t=
+    1723080214; bh=WmM5apq+WQpxS7eMhcbLvqgEs5dqin5Mlw/L82Lmt+k=; b=Q
+    7y9NnjCBjFJFCUzDAKiyJ6Ys7EpmBk6aLglgH+fFAwT+oaDY4plRqCb2hlV9TwJG
+    m9pdm32jYftkkFwUtQETOEszVat0/zqs7XyZX1DdGnXqQWW7xX5OoUO09URIHocK
+    +xVaFywxzvOQRV+D0s4uP/HllXi9rUQaTBCEy9oadzYsKFh4BJaeUR0pksdIJN/H
+    mr5iTqQ8NBYS4AV7Z25/ZJEvl7IHtdUyFb4buFicVgW/lIdww1csc5lEtGML9ZT2
+    qEOsaeqiFyrUYknHv2CqCVRKxV0buFl1gGiRY7gs0HjFOVQSNtso8C7tmD51y1c/
+    ATWW42inEAlNWxxuvm1YA==
+ARC-Authentication-Results: i=1; mx6.messagingengine.com;
+    x-csa=none;
+    x-me-sender=fail;
+    x-ptr=pass smtp.helo=mail.ietf.org policy.ptr=mail.ietf.org;
+    bimi=skipped (DMARC Policy is not at enforcement);
+    arc=none (no signatures found);
+    dkim=fail (message has been altered, 1024-bit rsa key sha256)
+    header.d=ietf.org header.i=@ietf.org header.b=yBBUCVc8
+    header.a=rsa-sha256 header.s=ietf1;
+    dkim=fail (message has been altered, 2048-bit rsa key sha256)
+    header.d=fastmailteam.com header.i=@fastmailteam.com header.b=BegZuiNO
+    header.a=rsa-sha256 header.s=fm1;
+    dkim=fail (message has been altered, 2048-bit rsa key sha256)
+    header.d=messagingengine.com header.i=@messagingengine.com
+    header.b=gwSrTmAD header.a=rsa-sha256 header.s=fm3;
+    dkim=pass (1024-bit rsa key sha256) header.d=ietf.org header.i=@ietf.org
+    header.b=CLw2FjhK header.a=rsa-sha256 header.s=ietf1;
+    dmarc=pass policy.published-domain-policy=none
+    policy.applied-disposition=none policy.evaluated-disposition=none
+    (p=none,has-list-id=yes,d=none,d.eval=none) policy.policy-from=p
+    header.from=dmarc.ietf.org;
+    iprev=pass smtp.remote-ip=50.223.129.194 (mail.ietf.org);
+    spf=pass smtp.mailfrom=forwardingalgorithm@ietf.org
+    smtp.helo=mail.ietf.org
+X-ME-Authentication-Results: mx6.messagingengine.com;
+    x-aligned-from=orgdomain_pass (Domain org match);
+    x-return-mx=pass header.domain=dmarc.ietf.org policy.org_domain=ietf.org
+      policy.is_org=no (MX Records found: mail.ietf.org);
+    x-return-mx=pass smtp.domain=ietf.org policy.is_org=yes
+      (MX Records found: mail.ietf.org);
+    x-tls=pass smtp.version=TLSv1.3 smtp.cipher=TLS_AES_256_GCM_SHA384
+      smtp.bits=256/256;
+    x-vs=clean score=0 state=0
+Authentication-Results: mx6.messagingengine.com;
+    x-csa=none;
+    x-me-sender=fail;
+    x-ptr=pass smtp.helo=mail.ietf.org policy.ptr=mail.ietf.org
+Authentication-Results: mx6.messagingengine.com;
+    bimi=skipped (DMARC Policy is not at enforcement)
+Authentication-Results: mx6.messagingengine.com;
+    arc=none (no signatures found)
+Authentication-Results: mx6.messagingengine.com;
+    dkim=fail (message has been altered, 1024-bit rsa key sha256)
+      header.d=ietf.org header.i=@ietf.org header.b=yBBUCVc8
+      header.a=rsa-sha256 header.s=ietf1;
+    dkim=fail (message has been altered, 2048-bit rsa key sha256)
+      header.d=fastmailteam.com header.i=@fastmailteam.com header.b=BegZuiNO
+      header.a=rsa-sha256 header.s=fm1;
+    dkim=fail (message has been altered, 2048-bit rsa key sha256)
+      header.d=messagingengine.com header.i=@messagingengine.com
+      header.b=gwSrTmAD header.a=rsa-sha256 header.s=fm3;
+    dkim=pass (1024-bit rsa key sha256) header.d=ietf.org header.i=@ietf.org
+      header.b=CLw2FjhK header.a=rsa-sha256 header.s=ietf1;
+    dmarc=pass policy.published-domain-policy=none
+      policy.applied-disposition=none policy.evaluated-disposition=none
+      (p=none,has-list-id=yes,d=none,d.eval=none) policy.policy-from=p
+      header.from=dmarc.ietf.org;
+    iprev=pass smtp.remote-ip=50.223.129.194 (mail.ietf.org);
+    spf=pass smtp.mailfrom=forwardingalgorithm@ietf.org
+      smtp.helo=mail.ietf.org
+X-ME-VSSU: VW5zdWI9bWFpbHRvOmptYXAtbGVhdmVAaWV0Zi5vcmc
+X-ME-VSCause: gggruggvucftvghtrhhoucdtuddrgeeftddrledugdeghecutefuodetggdotefrodftvf
+    curfhrohhfihhlvgemucfhrghsthforghilhdpggftfghnshhusghstghrihgsvgdpuffr
+    tefokffrpgfnqfghnecuuegrihhlohhuthemuceftddtnecunecujfgurhepofggfffvkf
+    hpufejgeefvddutdfjtgfhsehmtderreertdejnecuhfhrohhmpeeurhhonhcuifhonhgu
+    figrnhgruceosghrohhnghepgedtfhgrshhtmhgrihhlthgvrghmrdgtohhmsegumhgrrh
+    gtrdhivghtfhdrohhrgheqnecuggftrfgrthhtvghrnhepieekuddugeeutddtkeejkedu
+    ffejvdfgveevhfdvheetgfdvgfffhfekvddtiedvnecuffhomhgrihhnpehivghtfhdroh
+    hrghenucfkphephedtrddvvdefrdduvdelrdduleegpddutdefrdduieekrddujedvrddu
+    heehnecuvehluhhsthgvrhfuihiivgepgeenucfrrghrrghmpehinhgvthephedtrddvvd
+    efrdduvdelrdduleegpdhhvghlohepmhgrihhlrdhivghtfhdrohhrghdpmhgrihhlfhhr
+    ohhmpeeofhhorhifrghrughinhhgrghlghhorhhithhhmhesihgvthhfrdhorhhgqedpnh
+    gspghrtghpthhtohepuddprhgtphhtthhopeeosghrohhnghesfhgrshhtmhgrihhlthgv
+    rghmrdgtohhmqe
+X-ME-VSScore: 0
+X-ME-VSCategory: clean
+X-ME-CSA: none
+X-ME-Received: <xmx:Fh60ZsCwlgRfQJ1PkxTAm3CfE8HRSYwyZ_v3Qo8GI90C5DtwQI4c8Q>
+Received-SPF: pass
+    (ietf.org: 50.223.129.194 is authorized to use 'forwardingalgorithm@ietf.org' in 'mfrom' identity (mechanism 'ip4:50.223.129.192/26' matched))
+    receiver=mx6.messagingengine.com;
+    identity=mailfrom;
+    envelope-from="forwardingalgorithm@ietf.org";
+    helo=mail.ietf.org;
+    client-ip=50.223.129.194
+Received: from mail.ietf.org (mail.ietf.org [50.223.129.194])
+	(using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+	 key-exchange X25519 server-signature RSA-PSS (2048 bits) server-digest SHA256)
+	(No client certificate requested)
+	by mx6.messagingengine.com (Postfix) with ESMTPS id 63B05116009E
+	for <brong@fastmailteam.com>; Wed,  7 Aug 2024 21:23:34 -0400 (EDT)
+Received: from ietfa.amsl.com (localhost [IPv6:::1])
+	by ietfa.amsl.com (Postfix) with ESMTP id B5BE4C1CAE68
+	for <brong@fastmailteam.com>; Wed,  7 Aug 2024 18:23:32 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
+	t=1723080212; bh=4olUkMUi2bCCfVrAOg4rSNpPMBWnWoKd71+94zpiUqo=;
+	h=Date:To:Subject:List-Id:List-Archive:List-Help:List-Owner:
+	 List-Post:List-Subscribe:List-Unsubscribe:From;
+	b=CLw2FjhKp7CRVUJPX4KiI30N4GDBexaIPvfwPPJBKsPRXVFw81Tztl17T218R0ijP
+	 YHaj6U21uewshsjhUOIL2AuFDHHXd3glLsWSvCVzbDpmr+IXDgZtRgWaf0Xf3f5PV4
+	 NjakHUDM8Pzo03GyxEpeE6Zc/BPche9Daga0TYKA=
+Received: from ietfa.amsl.com (localhost [IPv6:::1])
+ by ietfa.amsl.com (Postfix) with ESMTP id 90085C1D4A90
+ for <brong@fastmailteam.com>; Wed,  7 Aug 2024 18:23:32 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
+ t=1723080212; bh=D4M1qDkbCpQmJnJKwy6QzCLlvWZ8iPtmnwzvt/sAK4A=;
+ h=Date:From:To:Subject:List-Id:List-Archive:List-Help:List-Owner:
+ List-Post:List-Subscribe:List-Unsubscribe;
+ b=yBBUCVc87K5d2tjGaSRqun787NrrwNHAT0er1vnq79tkxY+FYwq0op2sWlTW5RO/E
+ ADDylBQ1omAuQKR+t/GHVMd008kbgnKTDrd9xGK+Z64CT0f/F2GvDILtM5XiuY2wxW
+ BOS4ELsZ9mwSMkkjcf+G9hnRC2DiAkcv7pS8svGk=
+X-Original-To: jmap@ietfa.amsl.com
+X-Remote-Delivered-To: jmap@ietfa.amsl.com
+Received: from localhost (localhost [127.0.0.1])
+ by ietfa.amsl.com (Postfix) with ESMTP id 0604EC151557
+ for <jmap@ietfa.amsl.com>; Wed,  7 Aug 2024 18:23:16 -0700 (PDT)
+X-Virus-Scanned: amavisd-new at amsl.com
+X-Remote-Spam-Flag: NO
+X-Remote-Spam-Score: -7.107
+X-Remote-Spam-Level: 
+X-Remote-Spam-Status: No, score=-7.107 tagged_above=-999 required=5
+ tests=[BAYES_00=-1.9, DKIM_SIGNED=0.1, DKIM_VALID=-0.1,
+ DKIM_VALID_AU=-0.1, DKIM_VALID_EF=-0.1, HTML_MESSAGE=0.001,
+ RCVD_IN_DNSWL_HI=-5, RCVD_IN_ZEN_BLOCKED_OPENDNS=0.001,
+ SPF_PASS=-0.001, T_SCC_BODY_TEXT_LINE=-0.01,
+ URIBL_DBL_BLOCKED_OPENDNS=0.001, URIBL_ZEN_BLOCKED_OPENDNS=0.001]
+ autolearn=ham autolearn_force=no
+Authentication-Results: ietfa.amsl.com (amavisd-new); dkim=pass (2048-bit key)
+ header.d=fastmailteam.com header.b="BegZuiNO";
+ dkim=pass (2048-bit key) header.d=messagingengine.com
+ header.b="gwSrTmAD"
+Received: from mail.ietf.org ([50.223.129.194])
+ by localhost (ietfa.amsl.com [127.0.0.1]) (amavisd-new, port 10024)
+ with ESMTP id 6eYkUse_PpJL for <jmap@ietfa.amsl.com>;
+ Wed,  7 Aug 2024 18:23:11 -0700 (PDT)
+Received: from fhigh4-smtp.messagingengine.com
+ (fhigh4-smtp.messagingengine.com [103.168.172.155])
+ (using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+ key-exchange X25519 server-signature ECDSA (P-256) server-digest SHA256)
+ (No client certificate requested)
+ by ietfa.amsl.com (Postfix) with ESMTPS id 59805C180B46
+ for <jmap@ietf.org>; Wed,  7 Aug 2024 18:23:11 -0700 (PDT)
+Received: from compute3.internal (compute3.nyi.internal [10.202.2.43])
+ by mailfhigh.nyi.internal (Postfix) with ESMTP id 7F8CD1151BFC
+ for <jmap@ietf.org>; Wed,  7 Aug 2024 21:23:10 -0400 (EDT)
+Received: from imap43 ([10.202.2.93])
+ by compute3.internal (MEProxy); Wed, 07 Aug 2024 21:23:10 -0400
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=
+ fastmailteam.com; h=cc:content-type:content-type:date:date:from
+ :from:in-reply-to:message-id:mime-version:reply-to:subject
+ :subject:to:to; s=fm1; t=1723080190; x=1723166590; bh=ENKomZA/3h
+ Kj4mEy8zVyGxgFFF3ca2hZ/98i2+K7KaY=; b=BegZuiNOFa7t8HkBcw4YJkGa21
+ +ZXchRG4uDKn+hTDdyIFMQLuJfjj7Ks2hlnuPsrSgorSlQV+ahGmsRlTyiu8IB0C
+ C6S0e4hqCQ+E0ngcic5VnMguB/2sNLy3oEu3ypsaPLjIP8Suw5GjQo83lklnxYdX
+ iDxKeLSkBR5RsQD5JJu9jz7Ejy/xWMXv0xzeDZ4nSUqCukzroi47GJymVzwtgF9B
+ gW0jwsOtlSwg1aAG593D2QPp2xs+y3y+/KKtifqw7cyZjxwCQD+IV44KttDfryxH
+ 7sbJAVZrrsvkO4Ye+X5JQWi5Y5+/3dhVZsJbi+Z8odScOVpVUTfrbZ//gZoA==
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=
+ messagingengine.com; h=cc:content-type:content-type:date:date
+ :feedback-id:feedback-id:from:from:in-reply-to:message-id
+ :mime-version:reply-to:subject:subject:to:to:x-me-proxy
+ :x-me-proxy:x-me-sender:x-me-sender:x-sasl-enc; s=fm3; t=
+ 1723080190; x=1723166590; bh=ENKomZA/3hKj4mEy8zVyGxgFFF3ca2hZ/98
+ i2+K7KaY=; b=gwSrTmADrvu95IfsA6s0PrAHSj1aHlMh7SAg+kYOdHSSBheVQ9U
+ Pcy2ca09ZC5cU1bUPgRVyBDIWIHzyWO4e9Gtc4sOniF5mO3NqXbgowpsoOSpaCbL
+ KJQ/MsQltjc1Aa+WytrRdovUf6IsJSV48efWpd10eM5MeZ1SOid4Smygbb1ApMoC
+ PRbYcOXxpR3LT9+MlSrtTFxE+u9T6IiMlzyQ8koJzubtqaeTCJD/XQTer5EbMQvH
+ wZlDztSYjcG90vdgTjaqrnaK5YmLIh02GnwmPhOizHCcHJqkWeJdKoEGlXCv/YQv
+ 06hEKtDPMftijuxZNZrJfNszCkq1XofOPJA==
+X-ME-Sender: <xms:_h20ZuwXg_Fsx0BuOLSMOZO1-8fizxTBF_t0j5sjZD12Ur-622oo9Q>
+ <xme:_h20ZqRT1Zm-hJj0LmAX563um-V86XXD1TICB_4okgFllK960ODM2ezjcU3xGNa93
+ rWAwth4rSU>
+X-ME-Proxy-Cause: gggruggvucftvghtrhhoucdtuddrgeeftddrledugdeghecutefuodetggdotefrodftvf
+ curfhrohhfihhlvgemucfhrghsthforghilhdpqfgfvfdpuffrtefokffrpgfnqfghnecu
+ uegrihhlohhuthemuceftddtnecunecujfgurhepofggfffhvffkufgtsegrtderreertd
+ dtnecuhfhrohhmpedfuehrohhnucfiohhnugifrghnrgdfuceosghrohhnghesfhgrshht
+ mhgrihhlthgvrghmrdgtohhmqeenucggtffrrghtthgvrhhnpeffjeetvdeufeehiedufe
+ dukeegueekudffveefudekhfehhfeugfekleffkeethfenucffohhmrghinhepihgvthhf
+ rdhorhhgnecuvehluhhsthgvrhfuihiivgeptdenucfrrghrrghmpehmrghilhhfrhhomh
+ epsghrohhnghesfhgrshhtmhgrihhlthgvrghmrdgtohhmpdhnsggprhgtphhtthhopedt
+X-ME-Proxy: <xmx:_h20ZgVNinMgANitQTXC3nkqjvQGwTtHOJ3s-_0ZiMI8FwoVVYqZFQ>
+ <xmx:_h20Zki1lA6RRp1uSC0Mbrolwi-AHu163azlB8Xw-JjLUfkOGcICZw>
+ <xmx:_h20ZgCk05oM7CTdtLS_ljALb70IwsQKZgvxHPuhtktxc5V7Rgb-dg>
+ <xmx:_h20ZlJwW8Jp1dIYzpfbybXM8udtY4i0bdiXfap0QhMKb_gL6EzSdg>
+ <xmx:_h20ZrolsC-tmEni_U-kNfMASwVtyKmGvuQcxdcR5qxMqndygVHHQ8jE>
+Feedback-ID: i2d7042ce:Fastmail
+Received: by mailuser.nyi.internal (Postfix, from userid 501)
+ id 5272C2D4007D; Wed,  7 Aug 2024 21:23:10 -0400 (EDT)
+X-Mailer: MessagingEngine.com Webmail Interface
+MIME-Version: 1.0
+Date: Thu, 08 Aug 2024 11:22:49 +1000
+To: jmap@ietf.org
+Message-Id: <855105cc-e439-4a4f-9d93-3d56f9aed618@app.fastmail.com>
+Message-ID-Hash: QUAKRFGSIORIBVKHCBU3D7MSUNMJA7ZR
+X-Message-ID-Hash: QUAKRFGSIORIBVKHCBU3D7MSUNMJA7ZR
+X-MailFrom: brong@fastmailteam.com
+X-Mailman-Rule-Misses: dmarc-mitigation; no-senders; approved; emergency;
+ loop; banned-address; member-moderation; header-match-jmap.ietf.org-0;
+ nonmember-moderation; administrivia; implicit-dest; max-recipients; max-size; 
+ news-moderation; no-subject; digests; suspicious-header
+X-Mailman-Version: 3.3.9rc4
+Precedence: list
+Subject: =?utf-8?q?=5BJmap=5D_Working_Group_Last_Call_=28repeat=29_draft-ietf-jmap-we?=
+ =?utf-8?q?bpush-vapid-03?=
+List-Id: JSON Message Access Protocol <jmap.ietf.org>
+Archived-At: <https://mailarchive.ietf.org/arch/msg/jmap/h5ZJ4zIU_xTYV6Urxz1GIukafIU>
+List-Archive: <https://mailarchive.ietf.org/arch/browse/jmap>
+List-Help: <mailto:jmap-request@ietf.org?subject=help>
+List-Owner: <mailto:jmap-owner@ietf.org>
+List-Post: <mailto:jmap@ietf.org>
+List-Subscribe: <mailto:jmap-join@ietf.org>
+List-Unsubscribe: <mailto:jmap-leave@ietf.org>
+Content-Type: multipart/mixed; boundary="===============6090836018512317826=="
+X-Original-From: "Bron Gondwana" <brong@fastmailteam.com>
+From: Bron Gondwana <brong=40fastmailteam.com@dmarc.ietf.org>
+
+--===============6090836018512317826==
+Content-Type: multipart/alternative; boundary=050c6a6ec8c942ab825bbc048ba71c35
+
+--050c6a6ec8c942ab825bbc048ba71c35
+Content-Type: text/plain
+Content-Transfer-Encoding: 7bit
+
+Hi All,
+
+This starts a repeat working group last call on the webpush vapid draft:
+
+https://datatracker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/
+
+Please provide any comments on the updated draft by *Thursday August 22nd,* two weeks from today.  I'll submit to IESG then unless there are remaining unsolved issues.
+
+Thanks,
+
+Bron.
+
+
+--
+  Bron Gondwana, CEO, Fastmail Pty Ltd
+  brong@fastmailteam.com
+
+
+--050c6a6ec8c942ab825bbc048ba71c35
+Content-Type: text/html
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html><html><head><title></title><style type=3D"text/css">p.Mso=
+Normal,p.MsoNoSpacing{margin:0}</style></head><body><div style=3D"font-f=
+amily:Arial;">Hi All,<br></div><div style=3D"font-family:Arial;"><br></d=
+iv><div style=3D"font-family:Arial;">This starts a repeat working group =
+last call on the webpush vapid draft:<br></div><div style=3D"font-family=
+:Arial;"><br></div><div style=3D"font-family:Arial;"><a href=3D"https://=
+datatracker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/">https://datatra=
+cker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/</a><br></div><div style=
+=3D"font-family:Arial;"><br></div><div style=3D"font-family:Arial;">Plea=
+se provide any comments on the updated draft by <b>Thursday August 22nd,=
+</b> two weeks from today.&nbsp; I'll submit to IESG then unless there a=
+re remaining unsolved issues.<br></div><div style=3D"font-family:Arial;"=
+><br></div><div style=3D"font-family:Arial;">Thanks,<br></div><div style=
+=3D"font-family:Arial;"><br>Bron.<br></div><div style=3D"font-family:Ari=
+al;"><br></div><div style=3D"font-family:Arial;"><br></div><div id=3D"si=
+g56629417"><div class=3D"signature">--<br></div><div class=3D"signature"=
+>&nbsp; Bron Gondwana, CEO, Fastmail Pty Ltd<br></div><div class=3D"sign=
+ature">&nbsp; brong@fastmailteam.com<br></div><div class=3D"signature"><=
+br></div></div><div style=3D"font-family:Arial;"><br></div></body></html=
+>
+--050c6a6ec8c942ab825bbc048ba71c35--
+
+
+--===============6090836018512317826==
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+Content-Disposition: inline
+
+X19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX18KSm1hcCBtYWls
+aW5nIGxpc3QgLS0gam1hcEBpZXRmLm9yZwpUbyB1bnN1YnNjcmliZSBzZW5kIGFuIGVtYWlsIHRv
+IGptYXAtbGVhdmVAaWV0Zi5vcmcK
+
+--===============6090836018512317826==--
+

@@ -166,26 +166,34 @@ impl SigningKey for Ed25519Key {
 }
 
 pub(crate) struct RsaPublicKey {
-    sha1: UnparsedPublicKey<Vec<u8>>,
-    sha2: UnparsedPublicKey<Vec<u8>>,
+    key: Vec<u8>,
 }
 
 impl RsaPublicKey {
     pub(crate) fn verifying_key_from_bytes(
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
-        let key = try_strip_rsa_prefix(bytes).unwrap_or(bytes);
         Ok(Box::new(Self {
-            sha1: UnparsedPublicKey::new(
-                &RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
-                key.to_vec(),
-            ),
-            sha2: UnparsedPublicKey::new(
-                &RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
-                key.to_vec(),
-            ),
+            key: try_strip_rsa_prefix(bytes).unwrap_or(bytes).to_vec(),
         }))
     }
+}
+
+/// Computes the RSA modulus size in bits from a DER-encoded RSAPublicKey
+fn rsa_modulus_bits(key: &[u8]) -> Option<usize> {
+    if *key.first()? != DER_SEQUENCE_TAG {
+        return None;
+    }
+    let (_, rest) = decode_multi_byte_len(&key[1..])?;
+    if *rest.first()? != DER_INTEGER_TAG {
+        return None;
+    }
+    let (len, after_len) = decode_multi_byte_len(&rest[1..])?;
+    after_len
+        .get(..len)?
+        .iter()
+        .position(|&b| b != 0)
+        .map(|leading_zeros| (len - leading_zeros) * 8)
 }
 
 /// Try to strip an ASN.1 DER-encoded RSA public key prefix
@@ -235,6 +243,7 @@ fn decode_multi_byte_len(bytes: &[u8]) -> Option<(usize, &[u8])> {
 const DER_OBJECT_ID_TAG: u8 = 0x06;
 const DER_BIT_STRING_TAG: u8 = 0x03;
 const DER_SEQUENCE_TAG: u8 = 0x30;
+const DER_INTEGER_TAG: u8 = 0x02;
 
 impl VerifyingKey for RsaPublicKey {
     fn verify<'a>(
@@ -248,16 +257,42 @@ impl VerifyingKey for RsaPublicKey {
         canonicalization.canonicalize_headers(headers, &mut data);
 
         match algorithm {
-            Algorithm::RsaSha256 => self
-                .sha2
-                .verify(&data, signature)
-                .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
-            Algorithm::RsaSha1 => self
-                .sha1
-                .verify(&data, signature)
-                .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
+            Algorithm::RsaSha256 => UnparsedPublicKey::new(
+                &RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
+                self.key.as_slice(),
+            )
+            .verify(&data, signature)
+            .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
+            Algorithm::RsaSha1 => UnparsedPublicKey::new(
+                &RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
+                self.key.as_slice(),
+            )
+            .verify(&data, signature)
+            .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
             Algorithm::Ed25519Sha256 => Err(Error::Crypto(CryptoError::IncompatibleAlgorithms)),
         }
+    }
+
+    fn verify_bytes(&self, input: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+        match algorithm {
+            Algorithm::RsaSha256 => UnparsedPublicKey::new(
+                &RSA_PKCS1_1024_8192_SHA256_FOR_LEGACY_USE_ONLY,
+                self.key.as_slice(),
+            )
+            .verify(input, signature)
+            .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
+            Algorithm::RsaSha1 => UnparsedPublicKey::new(
+                &RSA_PKCS1_1024_8192_SHA1_FOR_LEGACY_USE_ONLY,
+                self.key.as_slice(),
+            )
+            .verify(input, signature)
+            .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
+            Algorithm::Ed25519Sha256 => Err(Error::Crypto(CryptoError::IncompatibleAlgorithms)),
+        }
+    }
+
+    fn public_key_bits(&self) -> usize {
+        rsa_modulus_bits(&self.key).unwrap_or_default()
     }
 }
 
@@ -292,6 +327,18 @@ impl VerifyingKey for Ed25519PublicKey {
         self.inner
             .verify(hasher.complete().as_ref(), signature)
             .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))
+    }
+
+    fn verify_bytes(&self, input: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+        if !matches!(algorithm, Algorithm::Ed25519Sha256) {
+            return Err(Error::Crypto(CryptoError::IncompatibleAlgorithms));
+        }
+
+        let mut hasher = Sha256::hasher();
+        hasher.write(input);
+        self.inner
+            .verify(hasher.complete().as_ref(), signature)
+            .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
     }
 }
 

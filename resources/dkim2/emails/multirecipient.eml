@@ -1,0 +1,8 @@
+From: sender@test5.dkim2.com
+To: alice@example.com, bob@example.com
+Cc: charlie@example.com
+Subject: Multi-recipient message
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-multirecip@test5.dkim2.com>
+
+This message goes to multiple recipients.

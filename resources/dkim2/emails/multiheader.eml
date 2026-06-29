@@ -1,0 +1,14 @@
+From: sender@test2.dkim2.com
+To: recipient@example.com
+Cc: other@example.com
+Subject: A longer subject line that wraps
+ across multiple continuation lines
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-multi@test2.dkim2.com>
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+X-Custom-Header: this should be excluded from header hash
+
+Hello, this is a test with multiple headers.
+
+It has multiple paragraphs too.

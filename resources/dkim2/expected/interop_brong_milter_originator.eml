@@ -1,0 +1,58 @@
+DKIM2-Signature: i=1; m=1; t=1740000000; d=test1.dkim2.com;
+	mf=c2VuZGVyQHRlc3QxLmRraW0yLmNvbQ==;
+	rt=Zm9vQHRlc3QyLmRraW0yLmNvbQ==;
+	s=rsa1024:rsa-sha256:vf2AdstFm3A0l53jmfiyv1VBThYJga0F/4vOle4WcgN
+	1L1n8L3pUs18hCElKk/5QdE5RHy3kAbP7aGBgtCXJOaYiBQss+amr83VEkQs5Wjd
+	SaG5xtcg0MeN/f1yb8YSmIyaAIk20TPkMzTOlgrpx0ND1Zm8bCRHuxrVX0fm9wvs
+	=;
+Message-Instance: m=1; h=sha256:tB8uwPQbcCHO6zvU0EnzEFWUKKBtwyzmrxeavy4Jn1g=:XI228V/720XNelm76DFKQf934iOEQQCt6wZ3uKCIr9Q=;
+MIME-Version: 1.0
+Message-Id: <fb1b10ae-ea36-4ee4-b84f-b62f036cfaf5@app.fastmail.com>
+Date: Thu, 21 Mar 2024 12:09:37 +1000
+From: "Bron Gondwana" <brong@fastmailteam.com>
+To: jmap@ietf.org
+Subject: Working group last call draft-ietf-jmap-webpush-vapid
+Content-Type: multipart/alternative;
+ boundary=12b53dc829d24511bfa04f7d5e3675f8
+
+--12b53dc829d24511bfa04f7d5e3675f8
+Content-Type: text/plain
+
+Hi All,
+
+This email starts a working group last call for https://datatracker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/ as discussed in the IETF119 session.
+
+Please post any comments or responses by *Thursday, April 4th, 2024*.
+
+Thanks,
+
+Bron.
+
+
+--
+  Bron Gondwana, CEO, Fastmail Pty Ltd
+  brong@fastmailteam.com
+
+
+--12b53dc829d24511bfa04f7d5e3675f8
+Content-Type: text/html
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html><html><head><title></title><style type=3D"text/css">p.Mso=
+Normal,p.MsoNoSpacing{margin:0}</style></head><body><div style=3D"font-f=
+amily:Arial;">Hi All,<br></div><div style=3D"font-family:Arial;"><div><b=
+r></div><div>This email starts a working group last call for <a href=3D"=
+https://datatracker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/">https:/=
+/datatracker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/</a> as discusse=
+d in the IETF119 session.<br></div><div style=3D"font-family:Arial;"><br=
+></div><div style=3D"font-family:Arial;">Please post any comments or res=
+ponses by <b>Thursday, April 4th, 2024</b>.<br></div><div style=3D"font-=
+family:Arial;"><br></div><div style=3D"font-family:Arial;">Thanks,<br></=
+div><div style=3D"font-family:Arial;"><br></div><div style=3D"font-famil=
+y:Arial;">Bron.<br></div><div><br></div><div><br></div></div><div id=3D"=
+sig56629417"><div class=3D"signature">--<br></div><div class=3D"signatur=
+e">&nbsp; Bron Gondwana, CEO, Fastmail Pty Ltd<br></div><div class=3D"si=
+gnature">&nbsp; brong@fastmailteam.com<br></div><div class=3D"signature"=
+><br></div></div><div style=3D"font-family:Arial;"><br></div></body></ht=
+ml>
+--12b53dc829d24511bfa04f7d5e3675f8--

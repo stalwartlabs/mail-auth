@@ -1,0 +1,9 @@
+Message-Instance: m=1; h=sha256:JhBJq79bbNbN5ASEJvYpb/QwHL+x5Hyl1SoV5s/tGVk=:SgG5fNGEg1x24MwItCUYGDHQkWKng06W1/IvTGBdwzU=
+Dkim2-Signature: i=1;m=1;t=1782394336;d=test.dkim2.eu;mf=PHNlbmRlckB0ZXN0LmRraW0yLmV1Pg==;rt=PHJlY2lwaWVudEBleGFtcGxlLmNvbT4=;n=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa;s=rsa2048:rsa-sha256:S76TGrq29IJ7SAX0u34pzI0klR44RWdpJis/R9WWIJD7MHXK4BON3XQ7cc5EuRbmaC/0MZgVDY4gORuqigQrr9pwgaxGcRFksBrvLplQh3nkpJQvtXch0R8I0jN/nuOH4m8xSQneV8xjnPvfHO4J1b57+NqAhQPZvqnw5Dfktp8haGKFwq86DfxkOc/T3s8HAb6+YD48FC32ocyTPmgCoX0coYIVjuoQ6OVAc59ZPEAJPEuZnWY3EcabHqen6f0/IPLJ5kW1lxRJannjMm/oiRVKD/rU3PW3djR5OvjKdwPklgkwlhtFq35tt1YsP9Fvv/gZ215hBcPcHMhrNfJv+g==
+From: sender@test.dkim2.eu
+To: recipient@example.com
+Subject: Simple test message
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-simple@test1.dkim2.com>
+
+Hello, this is a simple test message.

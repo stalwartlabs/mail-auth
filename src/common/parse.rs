@@ -165,14 +165,26 @@ impl TagParser for Iter<'_, u8> {
     #[inline(always)]
     fn text(&mut self, to_lower: bool) -> String {
         let mut tag = Vec::with_capacity(20);
+        let mut maybe_uppercase = false;
         for &ch in self {
-            if ch == b';' {
-                break;
-            } else if !ch.is_ascii_whitespace() {
-                tag.push(ch);
+            match ch {
+                b'A'..=b'Z' if to_lower => {
+                    tag.push(ch + 32);
+                }
+                b'\t' | b'\n' | b'\x0C' | b'\r' | b' ' => (),
+                b';' => {
+                    break;
+                }
+                0x7f.. => {
+                    maybe_uppercase = true;
+                    tag.push(ch);
+                }
+                _ => {
+                    tag.push(ch);
+                }
             }
         }
-        if to_lower {
+        if to_lower && maybe_uppercase {
             String::from_utf8_lossy(&tag).to_lowercase()
         } else {
             String::from_utf8(tag)

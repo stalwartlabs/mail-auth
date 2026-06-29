@@ -53,9 +53,17 @@ pub trait VerifyingKey {
         &self,
         headers: &mut dyn Iterator<Item = (&'a [u8], &'a [u8])>,
         signature: &[u8],
-        canonicalication: Canonicalization,
+        canonicalization: Canonicalization,
         algorithm: Algorithm,
     ) -> Result<()>;
+
+    /// Verifies a signature computed over an already-canonicalized byte string
+    fn verify_bytes(&self, input: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()>;
+
+    /// Size in bits of the public key.
+    fn public_key_bits(&self) -> usize {
+        usize::MAX
+    }
 }
 
 pub(crate) enum VerifyingKeyType {
@@ -124,8 +132,26 @@ impl HashAlgorithm {
             }
         }
     }
+
+    pub fn parse(name: &str) -> Option<Self> {
+        if name.eq_ignore_ascii_case("sha256") {
+            Some(HashAlgorithm::Sha256)
+        } else if name.eq_ignore_ascii_case("sha1") {
+            Some(HashAlgorithm::Sha1)
+        } else {
+            None
+        }
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            HashAlgorithm::Sha1 => "sha1",
+            HashAlgorithm::Sha256 => "sha256",
+        }
+    }
 }
 
+#[derive(Clone)]
 #[non_exhaustive]
 pub enum HashOutput {
     #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
@@ -141,6 +167,20 @@ impl AsRef<[u8]> for HashOutput {
     }
 }
 
+impl PartialEq for HashOutput {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_ref() == other.as_ref()
+    }
+}
+
+impl Eq for HashOutput {}
+
+impl std::fmt::Debug for HashOutput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.as_ref().fmt(f)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum Algorithm {
@@ -152,3 +192,21 @@ pub enum Algorithm {
 
 pub(crate) const R_HASH_SHA1: u64 = 0x01;
 pub(crate) const R_HASH_SHA256: u64 = 0x02;
+
+impl Algorithm {
+    pub fn parse(name: &[u8]) -> Option<Self> {
+        hashify::tiny_map_ignore_case!(name,
+            b"rsa-sha1" => Algorithm::RsaSha1,
+            b"rsa-sha256" => Algorithm::RsaSha256,
+            b"ed25519-sha256" => Algorithm::Ed25519Sha256,
+        )
+    }
+
+    pub fn name(&self) -> &'static str {
+        match self {
+            Algorithm::RsaSha1 => "rsa-sha1",
+            Algorithm::RsaSha256 => "rsa-sha256",
+            Algorithm::Ed25519Sha256 => "ed25519-sha256",
+        }
+    }
+}

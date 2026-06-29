@@ -1,0 +1,10 @@
+DKIM2-Signature: i=1; m=1; t=1740000000; d=test5.dkim2.com; mf=PHNlbmRlckB0ZXN0NS5ka2ltMi5jb20+; rt=PGFsaWNlQGV4YW1wbGUuY29tPg==,PGJvYkBleGFtcGxlLmNvbT4=,PGNoYXJsaWVAZXhhbXBsZS5jb20+; s=ed25519:ed25519-sha256:OGWWXoikwFZubulI1DCmXs7E8vYcCuKLr1jN2hytkuG2qMgbdprx8UucyOsn+ziWSxtZtM5Swe3K/GpHjCCVAw==;
+Message-Instance: m=1; h=sha256:H+VUb6aLBKEh3HADN5AHzR0BQT/Mst1Gs8OylrwE9jY=:hp66YMSkgILq+EkTq9fWZj609/jmBH9ey8ppXqAtZZ0=;
+From: sender@test5.dkim2.com
+To: alice@example.com, bob@example.com
+Cc: charlie@example.com
+Subject: Multi-recipient message
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-multirecip@test5.dkim2.com>
+
+This message goes to multiple recipients.

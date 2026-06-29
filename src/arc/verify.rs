@@ -35,6 +35,17 @@ impl MessageAuthenticator {
     {
         let params = params.into();
         let message = params.params;
+        if message.has_arc_errors {
+            let err = message
+                .errors
+                .iter()
+                .find_map(|h| match &h.header {
+                    Error::Arc(_) => Some(h.header.clone()),
+                    _ => None,
+                })
+                .unwrap_or(Error::Arc(ArcError::BrokenChain));
+            return ArcOutput::default().with_result(DkimResult::Neutral(err));
+        }
         let arc_headers = message.ams_headers.len();
         if arc_headers == 0 {
             return ArcOutput::default();
@@ -66,18 +77,9 @@ impl MessageAuthenticator {
             .zip(message.aar_headers.iter())
             .enumerate()
         {
-            let seal = match &seal_.header {
-                Ok(seal) => seal,
-                Err(err) => return output.with_result(DkimResult::Neutral(err.clone())),
-            };
-            let signature = match &signature_.header {
-                Ok(signature) => signature,
-                Err(err) => return output.with_result(DkimResult::Neutral(err.clone())),
-            };
-            let results = match &results_.header {
-                Ok(results) => results,
-                Err(err) => return output.with_result(DkimResult::Neutral(err.clone())),
-            };
+            let seal = &seal_.header;
+            let signature = &signature_.header;
+            let results = &results_.header;
 
             if output.result == DkimResult::None {
                 if (seal.i as usize != (pos + 1))

@@ -1,0 +1,9 @@
+Message-Instance: m=1; h=sha256:JhBJq79bbNbN5ASEJvYpb/QwHL+x5Hyl1SoV5s/tGVk=:SgG5fNGEg1x24MwItCUYGDHQkWKng06W1/IvTGBdwzU=
+Dkim2-Signature: i=1;m=1;t=1782394336;d=test.dkim2.eu;mf=PHNlbmRlckB0ZXN0LmRraW0yLmV1Pg==;rt=PHJlY2lwaWVudEBleGFtcGxlLmNvbT4=;n=banana;s=rsa2048:rsa-sha256:s/LZFbebLBLsD7jKgm85pLuYAKowkmX2f9kMhBHuu0qdmN0ab2OvwKEWhuj8BBuZDi5rRQyTBGSPATFboV1qWHb3/V8N47q7SIBYpoAN4XBNI2s+6zqtqRm3O7X1/cjZM8C1wJvf30eI34yOSbdOrVcY++sqhJyLj7YspsQtb6RDSXxFUJmlCwgztvgfQSialzRSWFVa+5qr+0CGF4d50juSRCIDd+m/ssjGQZoPy5M4HlrkE3XUH6bz2YgLcL4cbc3GkhfKJCmpePRrFIdRyElHUTJeJ7uEw5UXgrPaGxKmNXefw7JWk/mGcCcxDoPNKjvMKt9Zj+eXBRY7M1ZXPg==;S=rsa2048:rsa-sha256:s/LZFbebLBLsD7jKgm85pLuYAKowkmX2f9kMhBHuu0qdmN0ab2OvwKEWhuj8BBuZDi5rRQyTBGSPATFboV1qWHb3/V8N47q7SIBYpoAN4XBNI2s+6zqtqRm3O7X1/cjZM8C1wJvf30eI34yOSbdOrVcY++sqhJyLj7YspsQtb6RDSXxFUJmlCwgztvgfQSialzRSWFVa+5qr+0CGF4d50juSRCIDd+m/ssjGQZoPy5M4HlrkE3XUH6bz2YgLcL4cbc3GkhfKJCmpePRrFIdRyElHUTJeJ7uEw5UXgrPaGxKmNXefw7JWk/mGcCcxDoPNKjvMKt9Zj+eXBRY7M1ZXPg==;f=feedback
+From: sender@test.dkim2.eu
+To: recipient@example.com
+Subject: Simple test message
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-simple@test1.dkim2.com>
+
+Hello, this is a simple test message.

@@ -1,0 +1,10 @@
+From: sender@test3.dkim2.com
+To: recipient@example.com
+Subject: Message with trailing blank lines
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-trailing@test3.dkim2.com>
+
+Body text here.
+
+
+

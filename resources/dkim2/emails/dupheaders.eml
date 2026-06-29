@@ -1,0 +1,12 @@
+From: sender@test1.dkim2.com
+To: recipient@example.com
+Subject: Duplicate header ordering test
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-dupheaders@test1.dkim2.com>
+Received: from first.example.com by second.example.com; Sat, 01 Mar 2026 12:00:00 +0000
+Received: from origin.example.com by first.example.com; Sat, 01 Mar 2026 11:59:00 +0000
+Authentication-Results: mx1.example.com; spf=pass
+Authentication-Results: mx2.example.com; dkim=pass
+Authentication-Results: mx3.example.com; dmarc=pass
+
+Test message with duplicate headers that must be sorted bottom-up.

@@ -1,0 +1,21 @@
+DKIM2-Signature: i=3; m=3; t=1740002000; d=test3.dkim2.com; mf=bXhAdGVzdDMuZGtpbTIuY29t; rt=cmVjaXBpZW50QGV4YW1wbGUuY29t; s=ed25519:ed25519-sha256:RAVkmMEuUUFrW7ctsmVmqBU3joq844LGXzJEr6PdMaPups3YlYnipPQ4ah4JLkNjh48Ok/io+zZNYp0T+nKHBw==;
+DKIM2-Signature: i=2; m=2; t=1740001000; d=test2.dkim2.com; mf=cmVsYXlAdGVzdDIuZGtpbTIuY29t; rt=bXhAdGVzdDMuZGtpbTIuY29t; s=ed25519:ed25519-sha256:FxmzZtlO85fCr8g+fSUtSf3g69IpsSC1I8adKgKvQBA7OMD2LMLzpO3EC8e3N+hwmFgV+IvbYGoAv2lqPaOyBw==;
+DKIM2-Signature: i=1; m=1; t=1740000000; d=test1.dkim2.com; mf=c2VuZGVyQHRlc3QxLmRraW0yLmNvbQ==; rt=cmVsYXlAdGVzdDIuZGtpbTIuY29t; s=ed25519:ed25519-sha256:OykYN8jiKsmYKlGpZN0OpyMv8Fc3LIFop+vg9G+iBVuFmTRe8smlh4d3BLqu6i5W9f4rG8/abSnGeH7wSRdXAA==;
+Message-Instance: m=3; h=sha256:AfpBX5VmAIJLyRjG5w0mENbh6QDhUw88/norVLXQLY8=:1qpsCHgYA5m9tWU1x8yom2ztdiaAQirhqJujNRLDbAs=; r=eyJoIjp7ImF1dGhlbnRpY2F0aW9uLXJlc3VsdHMiOlt7ImMiOlsxLDVdfV19fQ==;
+Message-Instance: m=2; h=sha256:AfpBX5VmAIJLyRjG5w0mENbh6QDhUw88/norVLXQLY8=:1qpsCHgYA5m9tWU1x8yom2ztdiaAQirhqJujNRLDbAs=; r=eyJoIjp7ImF1dGhlbnRpY2F0aW9uLXJlc3VsdHMiOlt7ImMiOlsxLDNdfV19fQ==;
+Message-Instance: m=1; h=sha256:AfpBX5VmAIJLyRjG5w0mENbh6QDhUw88/norVLXQLY8=:1qpsCHgYA5m9tWU1x8yom2ztdiaAQirhqJujNRLDbAs=;
+Authentication-Results: mx.test3.dkim2.com; dmarc=pass
+Authentication-Results: relay.test2.dkim2.com; spf=pass
+Authentication-Results: relay.test2.dkim2.com; dkim=pass
+From: sender@test1.dkim2.com
+To: recipient@example.com
+Subject: Duplicate header ordering test
+Date: Sat, 01 Mar 2026 12:00:00 +0000
+Message-ID: <test-dupheaders@test1.dkim2.com>
+Received: from first.example.com by second.example.com; Sat, 01 Mar 2026 12:00:00 +0000
+Received: from origin.example.com by first.example.com; Sat, 01 Mar 2026 11:59:00 +0000
+Authentication-Results: mx1.example.com; spf=pass
+Authentication-Results: mx2.example.com; dkim=pass
+Authentication-Results: mx3.example.com; dmarc=pass
+
+Test message with duplicate headers that must be sorted bottom-up.
