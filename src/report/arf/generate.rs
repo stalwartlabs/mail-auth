@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use crate::SystemTime;
 use crate::report::{AuthFailureType, DeliveryResult, Feedback, FeedbackType, IdentityAlignment};
 use mail_builder::{
     MessageBuilder,
@@ -11,7 +12,6 @@ use mail_builder::{
     mime::{BodyPart, MimePart, make_boundary},
 };
 use mail_parser::DateTime;
-use crate::SystemTime;
 use std::{fmt::Write, io};
 
 impl<'x> Feedback<'x> {

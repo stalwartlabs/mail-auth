@@ -5,6 +5,7 @@
  */
 
 use super::{ArcError, ArcSealer, ArcSet, ChainValidation, Signature};
+use crate::SystemTime;
 use crate::{
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
     common::{
@@ -14,7 +15,6 @@ use crate::{
     dkim::{Canonicalization, Done, canonicalize::CanonicalHeaders},
 };
 use mail_builder::encoders::base64::base64_encode;
-use crate::SystemTime;
 
 impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
     pub fn seal<'x>(

@@ -8,6 +8,8 @@
 
 #[cfg(feature = "arc")]
 use arc::Set;
+#[cfg(feature = "dns-doh")]
+use common::doh::DohResolver;
 use common::{
     crypto::{CryptoError, HashAlgorithm},
     headers::Header,
@@ -17,8 +19,6 @@ use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
 #[cfg(not(feature = "dns-doh"))]
 use hickory_resolver::{TokioResolver, proto::op::ResponseCode};
-#[cfg(feature = "dns-doh")]
-use common::doh::DohResolver;
 use mta_sts::{MtaSts, TlsRpt};
 use spf::{Macro, Spf};
 use std::{
@@ -31,10 +31,10 @@ use std::{
     sync::Arc,
 };
 
-#[cfg(feature = "dns-doh")]
-pub(crate) use web_time::{Instant, SystemTime};
 #[cfg(not(feature = "dns-doh"))]
 pub(crate) use std::time::{Instant, SystemTime};
+#[cfg(feature = "dns-doh")]
+pub(crate) use web_time::{Instant, SystemTime};
 
 #[cfg(feature = "arc")]
 pub mod arc;

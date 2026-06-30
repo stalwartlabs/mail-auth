@@ -9,7 +9,8 @@ use super::headers::{HeaderWriter, Writer};
 use crate::{ArcOutput, arc::ArcError};
 use crate::{
     AuthenticationResults, Dkim2Result, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
-    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, dkim::DkimError, dkim2::Dkim2Output,
+    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, dkim::DkimError,
+    dkim2::Dkim2Output,
 };
 use crate::{DnsError, common::crypto::CryptoError};
 use mail_builder::encoders::base64::base64_encode;

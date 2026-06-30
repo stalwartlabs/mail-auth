@@ -5,6 +5,7 @@
  */
 
 use super::{ArcError, ChainValidation, Set};
+use crate::SystemTime;
 use crate::{
     ArcOutput, AuthenticatedMessage, DkimResult, Error, MX, MessageAuthenticator, Parameters,
     RecordSet, ResolverCache, Txt,
@@ -15,7 +16,6 @@ use crate::{
     },
     dkim::{Canonicalization, verify::Verifier},
 };
-use crate::SystemTime;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 impl MessageAuthenticator {

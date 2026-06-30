@@ -6,11 +6,11 @@
 
 use super::{Macro, Mechanism, Qualifier, Spf, Variables};
 use crate::DnsError;
+use crate::Instant;
 use crate::{
     Error, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult,
     Txt, common::cache::NoCache,
 };
-use crate::Instant;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct SpfParameters<'x> {

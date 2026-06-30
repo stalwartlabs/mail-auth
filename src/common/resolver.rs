@@ -5,6 +5,7 @@
  */
 
 use super::{parse::TxtRecordParser, verify::DomainKey};
+use crate::Instant;
 use crate::{
     DnssecStatus, Error, IpLookupStrategy, MX, MessageAuthenticator, RecordSet, ResolverCache, Txt,
     dkim::{Atps, DomainKeyReport},
@@ -25,7 +26,6 @@ use hickory_resolver::{
 };
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
-use crate::Instant;
 
 pub struct DnsEntry<T> {
     pub entry: T,
@@ -286,7 +286,13 @@ impl MessageAuthenticator {
             let entry: Arc<[Ipv4Addr]> = lookup
                 .answers()
                 .iter()
-                .filter_map(|r| if let RData::A(a) = &r.data { Some(a.0) } else { None })
+                .filter_map(|r| {
+                    if let RData::A(a) = &r.data {
+                        Some(a.0)
+                    } else {
+                        None
+                    }
+                })
                 .collect::<Vec<Ipv4Addr>>()
                 .into();
             Ok(DnsEntry { entry, expires })

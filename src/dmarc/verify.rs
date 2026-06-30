@@ -7,9 +7,9 @@
 use super::{Alignment, Dmarc};
 use crate::DnsError;
 use crate::{
-    AuthenticatedMessage, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
+    AuthenticatedMessage, Dkim2Result, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
     MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult, Txt,
-    common::cache::NoCache,
+    common::cache::NoCache, dkim2::Dkim2Output,
 };
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
@@ -22,6 +22,7 @@ where
 {
     pub message: &'x AuthenticatedMessage<'x>,
     pub dkim_output: &'x [DkimOutput<'x>],
+    pub dkim2_output: Option<&'x Dkim2Output<'x>>,
     pub rfc5321_mail_from_domain: &'x str,
     pub spf_output: &'x SpfOutput,
     pub domain_suffix_fn: F,
@@ -45,6 +46,7 @@ impl MessageAuthenticator {
         let params = params.into();
         let message = params.params.message;
         let dkim_output = params.params.dkim_output;
+        let dkim2_output = params.params.dkim2_output;
         let domain_suffix_fn = params.params.domain_suffix_fn;
         let rfc5321_mail_from_domain = params.params.rfc5321_mail_from_domain;
         let spf_output = params.params.spf_output;
@@ -88,7 +90,24 @@ impl MessageAuthenticator {
             record: None,
         };
 
-        let has_dkim_pass = dkim_output.iter().any(|o| o.result == DkimResult::Pass);
+        let dkim_pass_domains = dkim_output
+            .iter()
+            .filter(|o| o.result == DkimResult::Pass)
+            .filter_map(|o| o.signature.as_ref())
+            .map(|s| s.d.as_str())
+            .chain(
+                dkim2_output
+                    .filter(|o| o.result == Dkim2Result::Pass)
+                    .and_then(|o| {
+                        o.chain
+                            .iter()
+                            .find(|link| link.signature.i == 1 && link.result == Dkim2Result::Pass)
+                            .map(|link| link.signature.d.as_str())
+                    }),
+            )
+            .collect::<Vec<_>>();
+
+        let has_dkim_pass = !dkim_pass_domains.is_empty();
         if spf_output.result == SpfResult::Pass || has_dkim_pass {
             // Check SPF alignment
             let rfc5322_from_subdomain = domain_suffix_fn(rfc5322_from_domain);
@@ -107,26 +126,21 @@ impl MessageAuthenticator {
 
             // Check DKIM alignment
             if has_dkim_pass {
-                output.dkim_result = if dkim_output.iter().any(|o| {
-                    o.result == DkimResult::Pass
-                        && o.signature.as_ref().unwrap().d.eq(rfc5322_from_domain)
-                }) {
+                output.dkim_result = if dkim_pass_domains.iter().any(|d| d.eq(&rfc5322_from_domain))
+                {
                     DmarcResult::Pass
                 } else if dmarc.adkim == Alignment::Relaxed
-                    && dkim_output.iter().any(|o| {
-                        o.result == DkimResult::Pass
-                            && domain_suffix_fn(&o.signature.as_ref().unwrap().d)
-                                == rfc5322_from_subdomain
-                    })
+                    && dkim_pass_domains
+                        .iter()
+                        .any(|&d| domain_suffix_fn(d) == rfc5322_from_subdomain)
                 {
                     output.policy = dmarc.sp;
                     DmarcResult::Pass
                 } else {
-                    if dkim_output.iter().any(|o| {
-                        o.result == DkimResult::Pass
-                            && domain_suffix_fn(&o.signature.as_ref().unwrap().d)
-                                == rfc5322_from_subdomain
-                    }) {
+                    if dkim_pass_domains
+                        .iter()
+                        .any(|&d| domain_suffix_fn(d) == rfc5322_from_subdomain)
+                    {
                         output.policy = dmarc.sp;
                     }
                     DmarcResult::Fail(Error::NotAligned)
@@ -228,6 +242,7 @@ impl<'x> DmarcParameters<'x, fn(&str) -> &str> {
         Self {
             message,
             dkim_output,
+            dkim2_output: None,
             rfc5321_mail_from_domain,
             spf_output,
             domain_suffix_fn: |d| d,
@@ -239,6 +254,11 @@ impl<'x, F> DmarcParameters<'x, F>
 where
     F: for<'y> Fn(&'y str) -> &'y str,
 {
+    pub fn with_dkim2_output(mut self, dkim2_output: &'x Dkim2Output<'x>) -> Self {
+        self.dkim2_output = Some(dkim2_output);
+        self
+    }
+
     pub fn with_domain_suffix_fn<NewF>(self, f: NewF) -> DmarcParameters<'x, NewF>
     where
         NewF: for<'y> Fn(&'y str) -> &'y str,
@@ -246,6 +266,7 @@ where
         DmarcParameters {
             message: self.message,
             dkim_output: self.dkim_output,
+            dkim2_output: self.dkim2_output,
             rfc5321_mail_from_domain: self.rfc5321_mail_from_domain,
             spf_output: self.spf_output,
             domain_suffix_fn: f,
@@ -274,10 +295,7 @@ where
 #[cfg(test)]
 #[allow(unused)]
 mod test {
-    use std::time::{Duration, Instant};
-
-    use mail_parser::MessageParser;
-
+    use super::DmarcParameters;
     use crate::{
         AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, Error, MessageAuthenticator,
         SpfOutput, SpfResult,
@@ -285,8 +303,8 @@ mod test {
         dkim::{DkimError, Signature},
         dmarc::{Dmarc, Policy, URI},
     };
-
-    use super::DmarcParameters;
+    use mail_parser::MessageParser;
+    use std::time::{Duration, Instant};
 
     #[tokio::test]
     async fn dmarc_verify() {
@@ -465,6 +483,140 @@ mod test {
             assert_eq!(result.spf_result, expect_spf);
             assert_eq!(result.policy, policy);
         }
+    }
+
+    #[tokio::test]
+    async fn dmarc_verify_dkim2() {
+        use crate::Dkim2Result;
+        use crate::dkim2::{ChainLink, Dkim2Output, Signature as Dkim2Signature};
+
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = DummyCaches::new();
+
+        for (dmarc_dns, dmarc, message, signature_domain, dkim2_result, expect_dkim, policy) in [
+            // Strict - Pass
+            (
+                "_dmarc.example.org.",
+                "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo=1;",
+                "From: hello@example.org\r\n\r\n",
+                "example.org",
+                Dkim2Result::Pass,
+                DmarcResult::Pass,
+                Policy::Reject,
+            ),
+            // Relaxed - Pass on organizational domain
+            (
+                "_dmarc.example.org.",
+                "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=r; adkim=r; fo=1;",
+                "From: hello@example.org\r\n\r\n",
+                "subdomain.example.org",
+                Dkim2Result::Pass,
+                DmarcResult::Pass,
+                Policy::Quarantine,
+            ),
+            // Strict - Fail (subdomain does not match exactly)
+            (
+                "_dmarc.example.org.",
+                "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo=1;",
+                "From: hello@example.org\r\n\r\n",
+                "subdomain.example.org",
+                Dkim2Result::Pass,
+                DmarcResult::Fail(Error::NotAligned),
+                Policy::Quarantine,
+            ),
+            // Chain did not verify - no DKIM alignment
+            (
+                "_dmarc.example.org.",
+                "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo=1;",
+                "From: hello@example.org\r\n\r\n",
+                "example.org",
+                Dkim2Result::Fail(Error::NotAligned),
+                DmarcResult::None,
+                Policy::Reject,
+            ),
+        ] {
+            caches.txt_add(
+                dmarc_dns,
+                Dmarc::parse(dmarc.as_bytes()).unwrap(),
+                Instant::now() + Duration::new(3200, 0),
+            );
+
+            let auth_message = AuthenticatedMessage::parse(message.as_bytes()).unwrap();
+            let signature = Dkim2Signature {
+                i: 1,
+                d: signature_domain.into(),
+                ..Default::default()
+            };
+            let dkim2 = Dkim2Output {
+                result: dkim2_result.clone(),
+                chain: vec![ChainLink {
+                    signature: &signature,
+                    instance: None,
+                    result: dkim2_result,
+                    custody_ok: true,
+                }],
+            };
+            let spf = SpfOutput {
+                result: SpfResult::None,
+                domain: "example.org".to_string(),
+                report: None,
+                explanation: None,
+            };
+            let result = resolver
+                .verify_dmarc(
+                    caches.parameters(
+                        DmarcParameters::new(&auth_message, &[], "example.org", &spf)
+                            .with_dkim2_output(&dkim2)
+                            .with_domain_suffix_fn(|d| psl::domain_str(d).unwrap_or(d)),
+                    ),
+                )
+                .await;
+            assert_eq!(result.dkim_result, expect_dkim);
+            assert_eq!(result.policy, policy);
+        }
+
+        caches.txt_add(
+            "_dmarc.example.org.",
+            Dmarc::parse(b"v=DMARC1; p=reject; aspf=s; adkim=s; fo=1;").unwrap(),
+            Instant::now() + Duration::new(3200, 0),
+        );
+        let auth_message = AuthenticatedMessage::parse(b"From: hello@example.org\r\n\r\n").unwrap();
+        let originator = Dkim2Signature {
+            i: 1,
+            d: "other.org".into(),
+            ..Default::default()
+        };
+        let forwarder = Dkim2Signature {
+            i: 2,
+            d: "example.org".into(),
+            ..Default::default()
+        };
+        let link = |signature| ChainLink {
+            signature,
+            instance: None,
+            result: Dkim2Result::Pass,
+            custody_ok: true,
+        };
+        let dkim2 = Dkim2Output {
+            result: Dkim2Result::Pass,
+            chain: vec![link(&originator), link(&forwarder)],
+        };
+        let spf = SpfOutput {
+            result: SpfResult::None,
+            domain: "example.org".to_string(),
+            report: None,
+            explanation: None,
+        };
+        let result = resolver
+            .verify_dmarc(
+                caches.parameters(
+                    DmarcParameters::new(&auth_message, &[], "example.org", &spf)
+                        .with_dkim2_output(&dkim2)
+                        .with_domain_suffix_fn(|d| psl::domain_str(d).unwrap_or(d)),
+                ),
+            )
+            .await;
+        assert_eq!(result.dkim_result, DmarcResult::Fail(Error::NotAligned));
     }
 
     #[tokio::test]

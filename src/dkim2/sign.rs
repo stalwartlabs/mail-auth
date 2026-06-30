@@ -8,6 +8,7 @@ use super::{
     ChainBinding, Dkim2Signer, Done, MessageHash, MessageInstance, Signature, SignatureValue,
     recipe::Recipe,
 };
+use crate::SystemTime;
 use crate::{
     AuthenticatedMessage, Error,
     common::{
@@ -16,7 +17,6 @@ use crate::{
     },
     dkim2::canonicalize::CanonicalizedHeaderWriter,
 };
-use crate::SystemTime;
 
 #[allow(clippy::large_enum_variant)]
 enum RecipeSource<'x> {
