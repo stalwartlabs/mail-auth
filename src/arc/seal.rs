@@ -14,7 +14,7 @@ use crate::{
     dkim::{Canonicalization, Done, canonicalize::CanonicalHeaders},
 };
 use mail_builder::encoders::base64::base64_encode;
-use std::time::SystemTime;
+use crate::SystemTime;
 
 impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
     pub fn seal<'x>(

@@ -233,7 +233,10 @@ impl DMARCParser for Iter<'_, u8> {
                                 has_units = true;
                             }
                             b't' | b'T' if !has_units && has_digits => {
-                                size = size.saturating_mul(1024 * 1024 * 1024 * 1024);
+                                size = usize::try_from(
+                                    (size as u64).saturating_mul(1024 * 1024 * 1024 * 1024),
+                                )
+                                .unwrap_or(usize::MAX);
                                 has_units = true;
                             }
                             b';' => {

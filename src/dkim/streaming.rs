@@ -6,7 +6,7 @@
 
 //! Streaming DKIM signing API for reduced memory usage with large emails.
 
-use std::time::SystemTime;
+use crate::SystemTime;
 
 use mail_builder::encoders::base64::base64_encode;
 

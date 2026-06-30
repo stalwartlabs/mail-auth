@@ -16,10 +16,8 @@ use crate::{
     is_within_pct,
 };
 use crate::{DnsError, common::crypto::CryptoError};
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    time::SystemTime,
-};
+use crate::SystemTime;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use super::{
     Atps, DkimError, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_EXPIRATION, RR_OTHER,

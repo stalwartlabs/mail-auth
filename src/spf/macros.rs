@@ -5,7 +5,8 @@
  */
 
 use super::{Macro, Variable, Variables};
-use std::{borrow::Cow, net::IpAddr, time::SystemTime};
+use crate::SystemTime;
+use std::{borrow::Cow, net::IpAddr};
 
 impl Macro {
     pub fn eval<'z, 'x: 'z>(

@@ -10,10 +10,8 @@ use crate::{
     Error, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult,
     Txt, common::cache::NoCache,
 };
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    time::Instant,
-};
+use crate::Instant;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct SpfParameters<'x> {
     ip: IpAddr,

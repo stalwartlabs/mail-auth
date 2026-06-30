@@ -5,6 +5,7 @@
  */
 
 use super::{DkimSigner, Done, Signature, canonicalize::CanonicalHeaders};
+use crate::SystemTime;
 use crate::{
     Error,
     common::{
@@ -13,7 +14,6 @@ use crate::{
     },
 };
 use mail_builder::encoders::base64::base64_encode;
-use std::time::SystemTime;
 
 impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a message.
@@ -111,7 +111,6 @@ pub mod test {
         dkim::{Atps, Canonicalization, DkimSigner, DomainKeyReport, HashAlgorithm, Signature},
     };
     use core::str;
-    use hickory_resolver::proto::op::ResponseCode;
     use mail_parser::{MessageParser, decoders::base64::base64_decode};
     use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
     use std::time::{Duration, Instant};
@@ -497,7 +496,7 @@ pub mod test {
                 .unwrap(),
             message,
             Err(super::Error::Dns(crate::DnsError::RecordNotFound(
-                ResponseCode::NXDomain,
+                crate::DNS_RCODE_NXDOMAIN,
             ))),
         )
         .await;

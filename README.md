@@ -43,6 +43,26 @@ Signing and verification are backed by a selectable crypto provider, chosen with
 - `ring`: uses [ring](https://crates.io/crates/ring).
 - `rust-crypto`: a pure-Rust backend ([rsa](https://crates.io/crates/rsa), [ed25519-dalek](https://crates.io/crates/ed25519-dalek), [sha1](https://crates.io/crates/sha1), [sha2](https://crates.io/crates/sha2)) that compiles to WebAssembly.
 
+## DNS resolution backends
+
+DNS lookups (used by SPF, DMARC, and DKIM/DKIM2 key retrieval) are backed by a selectable resolver, chosen with two mutually exclusive Cargo features:
+
+- `dns-hickory` (default): system-configured UDP/TCP/TLS DNS via [hickory-resolver](https://crates.io/crates/hickory-resolver). Build resolvers with `MessageAuthenticator::new_cloudflare_tls()`, `new_system_conf()`, and the other `new_*` constructors. Not available on WebAssembly.
+- `dns-doh`: DNS-over-HTTPS (JSON API) via [reqwest](https://crates.io/crates/reqwest), usable on both native targets and WebAssembly.
+
+Enable exactly one; building with both, or with neither, is a compile error.
+
+## WebAssembly (WASM)
+
+mail-auth compiles and runs on `wasm32-unknown-unknown` (browsers, edge runtimes). The WASM-capable configuration pairs the pure-Rust crypto backend with DNS-over-HTTPS:
+
+```bash
+ $ cargo build --target wasm32-unknown-unknown \
+     --no-default-features --features dns-doh,rust-crypto
+```
+
+On WASM, DoH requests are issued through the browser Fetch API, randomness comes from the Web Crypto API, and time (cache expiry and signature timestamps) uses the browser clock via [web-time](https://crates.io/crates/web-time).
+
 ## Usage examples
 
 ### DKIM2 Signing

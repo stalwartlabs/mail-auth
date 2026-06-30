@@ -15,10 +15,8 @@ use crate::{
     },
     dkim::{Canonicalization, verify::Verifier},
 };
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    time::SystemTime,
-};
+use crate::SystemTime;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 impl MessageAuthenticator {
     /// Verifies ARC headers of an RFC5322 message.

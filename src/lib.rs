@@ -15,7 +15,10 @@ use common::{
 };
 use dkim::{Atps, Canonicalization, DomainKeyReport};
 use dmarc::Dmarc;
+#[cfg(not(feature = "dns-doh"))]
 use hickory_resolver::{TokioResolver, proto::op::ResponseCode};
+#[cfg(feature = "dns-doh")]
+use common::doh::DohResolver;
 use mta_sts::{MtaSts, TlsRpt};
 use spf::{Macro, Spf};
 use std::{
@@ -26,8 +29,12 @@ use std::{
     io,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
-    time::{Instant, SystemTime},
 };
+
+#[cfg(feature = "dns-doh")]
+pub(crate) use web_time::{Instant, SystemTime};
+#[cfg(not(feature = "dns-doh"))]
+pub(crate) use std::time::{Instant, SystemTime};
 
 #[cfg(feature = "arc")]
 pub mod arc;
@@ -40,13 +47,26 @@ pub mod mta_sts;
 pub mod report;
 pub mod spf;
 
+#[cfg(all(feature = "dns-hickory", feature = "dns-doh"))]
+compile_error!(
+    "features `dns-hickory` and `dns-doh` are mutually exclusive; enable only one DNS backend"
+);
+#[cfg(not(any(feature = "dns-hickory", feature = "dns-doh")))]
+compile_error!("a DNS backend is required; enable feature `dns-hickory` or `dns-doh`");
+
 pub use flate2;
+#[cfg(not(feature = "dns-doh"))]
 pub use hickory_resolver;
 #[cfg(feature = "report")]
 pub use zip;
 
 #[derive(Clone)]
+#[cfg(not(feature = "dns-doh"))]
 pub struct MessageAuthenticator(pub TokioResolver);
+
+#[derive(Clone)]
+#[cfg(feature = "dns-doh")]
+pub struct MessageAuthenticator(pub DohResolver);
 
 pub struct Parameters<'x, P, TXT, MXX, IPV4, IPV6, PTR>
 where
@@ -269,9 +289,17 @@ pub enum Version {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DnsError {
     Resolver(String),
+    #[cfg(not(feature = "dns-doh"))]
     RecordNotFound(ResponseCode),
+    #[cfg(feature = "dns-doh")]
+    RecordNotFound(u16),
     InvalidRecordType,
 }
+
+#[cfg(all(not(feature = "dns-doh"), any(test, feature = "test")))]
+pub(crate) const DNS_RCODE_NXDOMAIN: ResponseCode = ResponseCode::NXDomain;
+#[cfg(all(feature = "dns-doh", any(test, feature = "test")))]
+pub(crate) const DNS_RCODE_NXDOMAIN: u16 = 3;
 
 impl Display for DnsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

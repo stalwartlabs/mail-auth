@@ -12,6 +12,7 @@ use crate::{
     mta_sts::{MtaSts, TlsRpt},
     spf::{Macro, Spf},
 };
+#[cfg(not(feature = "dns-doh"))]
 use hickory_resolver::{
     TokioResolver,
     config::{CLOUDFLARE, GOOGLE, QUAD9, ResolverConfig, ResolverOpts},
@@ -22,18 +23,16 @@ use hickory_resolver::{
     },
     system_conf::read_system_conf,
 };
-use std::{
-    borrow::Cow,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-    time::Instant,
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::sync::Arc;
+use crate::Instant;
 
 pub struct DnsEntry<T> {
     pub entry: T,
     pub expires: Instant,
 }
 
+#[cfg(not(feature = "dns-doh"))]
 impl MessageAuthenticator {
     #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
     pub fn new_cloudflare_tls() -> Result<Self, NetError> {
@@ -79,23 +78,35 @@ impl MessageAuthenticator {
     pub fn resolver(&self) -> &TokioResolver {
         &self.0
     }
+}
 
+impl MessageAuthenticator {
     pub async fn txt_raw_lookup(&self, key: impl ToFqdn) -> crate::Result<Vec<u8>> {
-        let mut result = vec![];
-        for record in self
-            .0
-            .txt_lookup(Name::from_str_relaxed::<&str>(key.to_fqdn().as_ref())?)
-            .await?
-            .answers()
-        {
-            if let RData::TXT(txt) = &record.data {
-                for item in &txt.txt_data {
-                    result.extend_from_slice(item);
+        let key = key.to_fqdn();
+
+        #[cfg(not(feature = "dns-doh"))]
+        let records = {
+            let lookup = self
+                .0
+                .txt_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
+                .await?;
+            let mut records: Vec<Vec<u8>> = Vec::new();
+            for record in lookup.answers() {
+                if let RData::TXT(txt) = &record.data {
+                    let mut entry = Vec::new();
+                    for item in &txt.txt_data {
+                        entry.extend_from_slice(item);
+                    }
+                    records.push(entry);
                 }
             }
-        }
+            records
+        };
 
-        Ok(result)
+        #[cfg(feature = "dns-doh")]
+        let records = self.doh_txt(key.as_ref()).await?.entry;
+
+        Ok(records.into_iter().flatten().collect())
     }
 
     pub async fn txt_lookup<T: TxtRecordParser + Into<Txt> + UnwrapTxtRecord>(
@@ -113,31 +124,42 @@ impl MessageAuthenticator {
             return mock_resolve(key.as_ref());
         }
 
-        let txt_lookup = self
-            .0
-            .txt_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
-            .await?;
-        let mut result = Err(Error::Dns(crate::DnsError::InvalidRecordType));
-        let records = txt_lookup.answers().iter().filter_map(|r| {
-            let RData::TXT(txt) = &r.data else {
-                return None;
-            };
-            let txt_data = &txt.txt_data;
-            match txt_data.len() {
-                1 => Some(Cow::from(txt_data[0].as_ref())),
-                0 => None,
-                _ => {
-                    let mut entry = Vec::with_capacity(255 * txt_data.len());
-                    for data in txt_data {
-                        entry.extend_from_slice(data);
+        #[cfg(not(feature = "dns-doh"))]
+        let (records, expires) = {
+            let lookup = self
+                .0
+                .txt_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
+                .await?;
+            let expires = lookup.valid_until();
+            let mut records: Vec<Vec<u8>> = Vec::new();
+            for record in lookup.answers() {
+                let RData::TXT(txt) = &record.data else {
+                    continue;
+                };
+                match txt.txt_data.len() {
+                    0 => {}
+                    1 => records.push(txt.txt_data[0].to_vec()),
+                    _ => {
+                        let mut entry = Vec::with_capacity(255 * txt.txt_data.len());
+                        for data in txt.txt_data.iter() {
+                            entry.extend_from_slice(data);
+                        }
+                        records.push(entry);
                     }
-                    Some(Cow::from(entry))
                 }
             }
-        });
+            (records, expires)
+        };
 
-        for record in records {
-            result = T::parse(record.as_ref());
+        #[cfg(feature = "dns-doh")]
+        let (records, expires) = {
+            let raw = self.doh_txt(key.as_ref()).await?;
+            (raw.entry, raw.expires)
+        };
+
+        let mut result = Err(Error::Dns(crate::DnsError::InvalidRecordType));
+        for record in &records {
+            result = T::parse(record);
             if result.is_ok() {
                 break;
             }
@@ -146,7 +168,7 @@ impl MessageAuthenticator {
         let result: Txt = result.into();
 
         if let Some(cache) = cache {
-            cache.insert(key, result.clone(), txt_lookup.valid_until());
+            cache.insert(key, result.clone(), expires);
         }
 
         T::unwrap_txt(result)
@@ -167,22 +189,41 @@ impl MessageAuthenticator {
             return mock_resolve(key.as_ref());
         }
 
-        let mx_lookup = self
-            .0
-            .mx_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
-            .await?;
-        let mx_records = mx_lookup.answers();
-        let mut records: Vec<(u16, Vec<Box<str>>)> = Vec::with_capacity(mx_records.len());
-        for mx_record in mx_records {
-            if let RData::MX(mx) = &mx_record.data {
-                let preference = mx.preference;
-                let exchange = mx.exchange.to_lowercase().to_string().into_boxed_str();
+        #[cfg(not(feature = "dns-doh"))]
+        let (mx_records, expires): (Vec<(u16, Box<str>)>, Instant) = {
+            let lookup = self
+                .0
+                .mx_lookup(Name::from_str_relaxed::<&str>(key.as_ref())?)
+                .await?;
+            let expires = lookup.valid_until();
+            let mx_records = lookup
+                .answers()
+                .iter()
+                .filter_map(|r| {
+                    let RData::MX(mx) = &r.data else {
+                        return None;
+                    };
+                    Some((
+                        mx.preference,
+                        mx.exchange.to_lowercase().to_string().into_boxed_str(),
+                    ))
+                })
+                .collect();
+            (mx_records, expires)
+        };
 
-                if let Some(record) = records.iter_mut().find(|r| r.0 == preference) {
-                    record.1.push(exchange);
-                } else {
-                    records.push((preference, vec![exchange]));
-                }
+        #[cfg(feature = "dns-doh")]
+        let (mx_records, expires): (Vec<(u16, Box<str>)>, Instant) = {
+            let raw = self.doh_mx(key.as_ref()).await?;
+            (raw.entry, raw.expires)
+        };
+
+        let mut records: Vec<(u16, Vec<Box<str>>)> = Vec::with_capacity(mx_records.len());
+        for (preference, exchange) in mx_records {
+            if let Some(record) = records.iter_mut().find(|r| r.0 == preference) {
+                record.1.push(exchange);
+            } else {
+                records.push((preference, vec![exchange]));
             }
         }
 
@@ -200,7 +241,7 @@ impl MessageAuthenticator {
         };
 
         if let Some(cache) = cache {
-            cache.insert(key, records.clone(), mx_lookup.valid_until());
+            cache.insert(key, records.clone(), expires);
         }
 
         Ok(records)
@@ -235,27 +276,24 @@ impl MessageAuthenticator {
             return mock_resolve(key);
         }
 
-        let ipv4_lookup = self
-            .0
-            .ipv4_lookup(Name::from_str_relaxed::<&str>(key)?)
-            .await?;
-        let ips: Arc<[Ipv4Addr]> = ipv4_lookup
-            .answers()
-            .iter()
-            .filter_map(|r| {
-                if let RData::A(a) = &r.data {
-                    Some(a.0)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<Ipv4Addr>>()
-            .into();
+        #[cfg(not(feature = "dns-doh"))]
+        {
+            let lookup = self
+                .0
+                .ipv4_lookup(Name::from_str_relaxed::<&str>(key)?)
+                .await?;
+            let expires = lookup.valid_until();
+            let entry: Arc<[Ipv4Addr]> = lookup
+                .answers()
+                .iter()
+                .filter_map(|r| if let RData::A(a) = &r.data { Some(a.0) } else { None })
+                .collect::<Vec<Ipv4Addr>>()
+                .into();
+            Ok(DnsEntry { entry, expires })
+        }
 
-        Ok(DnsEntry {
-            entry: ips,
-            expires: ipv4_lookup.valid_until(),
-        })
+        #[cfg(feature = "dns-doh")]
+        self.doh_ipv4(key).await
     }
 
     pub async fn ipv6_lookup(
@@ -287,27 +325,30 @@ impl MessageAuthenticator {
             return mock_resolve(key);
         }
 
-        let ipv6_lookup = self
-            .0
-            .ipv6_lookup(Name::from_str_relaxed::<&str>(key)?)
-            .await?;
-        let ips: Arc<[Ipv6Addr]> = ipv6_lookup
-            .answers()
-            .iter()
-            .filter_map(|r| {
-                if let RData::AAAA(aaaa) = &r.data {
-                    Some(aaaa.0)
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<Ipv6Addr>>()
-            .into();
+        #[cfg(not(feature = "dns-doh"))]
+        {
+            let lookup = self
+                .0
+                .ipv6_lookup(Name::from_str_relaxed::<&str>(key)?)
+                .await?;
+            let expires = lookup.valid_until();
+            let entry: Arc<[Ipv6Addr]> = lookup
+                .answers()
+                .iter()
+                .filter_map(|r| {
+                    if let RData::AAAA(aaaa) = &r.data {
+                        Some(aaaa.0)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<Ipv6Addr>>()
+                .into();
+            Ok(DnsEntry { entry, expires })
+        }
 
-        Ok(DnsEntry {
-            entry: ips,
-            expires: ipv6_lookup.valid_until(),
-        })
+        #[cfg(feature = "dns-doh")]
+        self.doh_ipv6(key).await
     }
 
     pub async fn ip_lookup(
@@ -372,28 +413,40 @@ impl MessageAuthenticator {
             return mock_resolve(&addr.to_string());
         }
 
-        let ptr_lookup = self.0.reverse_lookup(addr).await?;
-        let ptr: Arc<[Box<str>]> = ptr_lookup
-            .answers()
-            .iter()
-            .filter_map(|r| {
-                let RData::PTR(ptr) = &r.data else {
-                    return None;
-                };
-                if !ptr.is_empty() {
-                    Some(ptr.to_lowercase().to_string().into_boxed_str())
-                } else {
-                    None
-                }
-            })
-            .collect::<Arc<[Box<str>]>>();
+        #[cfg(not(feature = "dns-doh"))]
+        let (entry, expires): (Arc<[Box<str>]>, Instant) = {
+            let lookup = self.0.reverse_lookup(addr).await?;
+            let expires = lookup.valid_until();
+            let entry = lookup
+                .answers()
+                .iter()
+                .filter_map(|r| {
+                    let RData::PTR(ptr) = &r.data else {
+                        return None;
+                    };
+                    if !ptr.is_empty() {
+                        Some(ptr.to_lowercase().to_string().into_boxed_str())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Arc<[Box<str>]>>();
+            (entry, expires)
+        };
+
+        #[cfg(feature = "dns-doh")]
+        let (entry, expires): (Arc<[Box<str>]>, Instant) = {
+            let raw = self.doh_ptr(addr).await?;
+            (raw.entry, raw.expires)
+        };
+
         let ptr = RecordSet {
-            rrset: ptr,
+            rrset: entry,
             dnssec_status: DnssecStatus::Indeterminate,
         };
 
         if let Some(cache) = cache {
-            cache.insert(addr, ptr.clone(), ptr_lookup.valid_until());
+            cache.insert(addr, ptr.clone(), expires);
         }
 
         Ok(ptr)
@@ -435,30 +488,38 @@ impl MessageAuthenticator {
             return Ok(true);
         }
 
-        match self
-            .0
-            .lookup_ip(Name::from_str_relaxed::<&str>(key.as_ref())?)
-            .await
+        #[cfg(not(feature = "dns-doh"))]
         {
-            Ok(result) => Ok(result.as_lookup().answers().iter().any(|r| {
-                matches!(
-                    &r.data.record_type(),
-                    hickory_resolver::proto::rr::RecordType::A
-                        | hickory_resolver::proto::rr::RecordType::AAAA
-                )
-            })),
-            Err(err) if err.is_no_records_found() => Ok(false),
-            Err(err) => Err(err.into()),
+            match self
+                .0
+                .lookup_ip(Name::from_str_relaxed::<&str>(key.as_ref())?)
+                .await
+            {
+                Ok(result) => Ok(result.as_lookup().answers().iter().any(|r| {
+                    matches!(
+                        &r.data.record_type(),
+                        hickory_resolver::proto::rr::RecordType::A
+                            | hickory_resolver::proto::rr::RecordType::AAAA
+                    )
+                })),
+                Err(err) if err.is_no_records_found() => Ok(false),
+                Err(err) => Err(err.into()),
+            }
         }
+
+        #[cfg(feature = "dns-doh")]
+        self.doh_exists(key.as_ref()).await
     }
 }
 
+#[cfg(not(feature = "dns-doh"))]
 impl From<ProtoError> for Error {
     fn from(err: ProtoError) -> Self {
         Error::Dns(crate::DnsError::Resolver(err.to_string()))
     }
 }
 
+#[cfg(not(feature = "dns-doh"))]
 impl From<NetError> for Error {
     fn from(err: NetError) -> Self {
         match &err {
@@ -670,9 +731,7 @@ pub fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
     } else if domain.contains("_dns_error.") {
         Error::Dns(crate::DnsError::Resolver("".to_string()))
     } else {
-        Error::Dns(crate::DnsError::RecordNotFound(
-            hickory_resolver::proto::op::ResponseCode::NXDomain,
-        ))
+        Error::Dns(crate::DnsError::RecordNotFound(crate::DNS_RCODE_NXDOMAIN))
     })
 }
 

@@ -31,7 +31,7 @@ impl<K, V> ResolverCache<K, V> for NoCache<K, V> {
         None
     }
 
-    fn insert(&self, _: K, _: V, _: std::time::Instant) {}
+    fn insert(&self, _: K, _: V, _: crate::Instant) {}
 }
 
 impl<P>

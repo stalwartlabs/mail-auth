@@ -11,7 +11,8 @@ use mail_builder::{
     mime::{BodyPart, MimePart, make_boundary},
 };
 use mail_parser::DateTime;
-use std::{fmt::Write, io, time::SystemTime};
+use crate::SystemTime;
+use std::{fmt::Write, io};
 
 impl<'x> Feedback<'x> {
     pub fn write_rfc5322(

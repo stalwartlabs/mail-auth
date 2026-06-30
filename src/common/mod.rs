@@ -11,6 +11,8 @@ pub mod auth_results;
 pub mod base32;
 pub mod cache;
 pub mod crypto;
+#[cfg(feature = "dns-doh")]
+pub mod doh;
 pub mod headers;
 pub mod message;
 pub mod parse;
