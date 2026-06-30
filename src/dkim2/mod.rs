@@ -19,6 +19,9 @@ mod recipe_serializer;
 pub mod sign;
 pub mod verify;
 
+#[cfg(test)]
+mod interop_test;
+
 pub use dsn::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput};
 pub use recipe::{BodyRecipe, HeaderRecipe, Recipe, Step};
 pub use sign::{Dkim2Signed, Envelope, Hop};

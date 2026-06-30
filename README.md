@@ -10,16 +10,16 @@ protocols. The library aims to be fast, safe and correct while supporting all ma
 
 Features:
 
+- **DomainKeys Identified Mail v2 (DKIMv2)**:
+  - ED25519-SHA256 and RSA-SHA256 signing and chain verification.
+  - Algorithmic dexterity: a single `DKIM2-Signature` can carry several signatures under different selectors and algorithms.
+  - SMTP envelope (MAIL FROM / RCPT TO) and next-domain chain binding, with per-hop `Message-Instance` hashes and modification recipes.
+  - Verifiable delivery status notification (DSN) authentication.
 - **DomainKeys Identified Mail v1 (DKIMv1)**:
   - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 signing and verification.
   - DKIM Authorized Third-Party Signatures.
   - DKIM failure reporting using the Abuse Reporting Format.
   - Key-pair generation for both RSA and Ed25519 (enabled by the `generate` feature).
-- **DomainKeys Identified Mail v2 (DKIMv2)**:
-  - ED25519-SHA256 and RSA-SHA256 signing and chain verification (SHA-256 only, as required by the draft).
-  - Algorithmic dexterity: a single DKIM2-Signature can carry several signatures under different selectors and algorithms.
-  - SMTP envelope (MAIL FROM / RCPT TO) and next-domain chain binding, with per-hop Message-Instance hashes and modification recipes.
-  - Verifiable delivery status notification (DSN) authentication.
 - **Sender Policy Framework (SPF)**:
   - Policy evaluation.
   - SPF failure reporting using the Abuse Reporting Format.

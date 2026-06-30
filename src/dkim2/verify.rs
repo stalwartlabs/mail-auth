@@ -323,15 +323,7 @@ impl MessageAuthenticator {
                             .into();
                         }
                     },
-                    None => {
-                        return Dkim2Result::PermError(Error::Dkim2(
-                            Dkim2Error::InstanceTagMissing {
-                                m: instance.m,
-                                tag: "r",
-                            },
-                        ))
-                        .into();
-                    }
+                    None => {}
                 }
             }
         }
