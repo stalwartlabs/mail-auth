@@ -306,24 +306,23 @@ impl MessageAuthenticator {
                 return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::BodyHashMismatch(instance.m)))
                     .into();
             }
-            if instance.m > 1 {
-                match &instance.recipe {
-                    Some(recipe) => match recipe.apply(last_headers, last_body) {
-                        Ok(previous) => {
-                            new_body = previous;
-                            let mut iter = HeaderIterator::new(&new_body);
-                            new_haders = iter.by_ref().collect();
-                            last_body = iter.body();
-                            last_headers = new_haders.as_slice();
-                        }
-                        Err(_) => {
-                            return Dkim2Result::Fail(Error::Dkim2(
-                                Dkim2Error::HeaderHashMismatch(instance.m),
-                            ))
-                            .into();
-                        }
-                    },
-                    None => {}
+            if instance.m > 1
+                && let Some(recipe) = &instance.recipe
+            {
+                match recipe.apply(last_headers, last_body) {
+                    Ok(previous) => {
+                        new_body = previous;
+                        let mut iter = HeaderIterator::new(&new_body);
+                        new_haders = iter.by_ref().collect();
+                        last_body = iter.body();
+                        last_headers = new_haders.as_slice();
+                    }
+                    Err(_) => {
+                        return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::HeaderHashMismatch(
+                            instance.m,
+                        )))
+                        .into();
+                    }
                 }
             }
         }

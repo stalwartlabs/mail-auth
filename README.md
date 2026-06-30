@@ -35,6 +35,14 @@ Features:
 - **SMTP TLS Reporting**:
   - Report parsing and generation.
 
+## Cryptography backends
+
+Signing and verification are backed by a selectable crypto provider, chosen with Cargo features:
+
+- `aws-lc-rs` (default): uses [aws-lc-rs](https://crates.io/crates/aws-lc-rs).
+- `ring`: uses [ring](https://crates.io/crates/ring).
+- `rust-crypto`: a pure-Rust backend ([rsa](https://crates.io/crates/rsa), [ed25519-dalek](https://crates.io/crates/ed25519-dalek), [sha1](https://crates.io/crates/sha1), [sha2](https://crates.io/crates/sha2)) that compiles to WebAssembly.
+
 ## Usage examples
 
 ### DKIM2 Signing

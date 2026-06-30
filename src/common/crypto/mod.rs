@@ -34,6 +34,13 @@ pub use ring_impls::{Ed25519Key, RsaKey};
 #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
 pub(crate) use ring_impls::{Ed25519PublicKey, RsaPublicKey};
 
+#[cfg(all(feature = "rust-crypto", not(any(feature = "ring", feature = "aws-lc-rs"))))]
+mod rust_crypto;
+#[cfg(all(feature = "rust-crypto", not(any(feature = "ring", feature = "aws-lc-rs"))))]
+pub use rust_crypto::{Ed25519Key, RsaKey};
+#[cfg(all(feature = "rust-crypto", not(any(feature = "ring", feature = "aws-lc-rs"))))]
+pub(crate) use rust_crypto::{Ed25519PublicKey, RsaPublicKey};
+
 pub trait SigningKey {
     type Hasher: HashImpl;
 
@@ -49,13 +56,13 @@ pub trait SigningKey {
 }
 
 /// A concrete DKIM signing key, holding either an RSA or an Ed25519 key.
-#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
 pub enum DkimKey {
     Rsa(RsaKey<Sha256>),
     Ed25519(Ed25519Key),
 }
 
-#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
 impl SigningKey for DkimKey {
     type Hasher = Sha256;
 
@@ -74,14 +81,14 @@ impl SigningKey for DkimKey {
     }
 }
 
-#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
 impl From<RsaKey<Sha256>> for DkimKey {
     fn from(key: RsaKey<Sha256>) -> Self {
         DkimKey::Rsa(key)
     }
 }
 
-#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
 impl From<Ed25519Key> for DkimKey {
     fn from(key: Ed25519Key) -> Self {
         DkimKey::Ed25519(key)
@@ -117,9 +124,9 @@ impl VerifyingKeyType {
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
         match self {
-            #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+            #[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
             Self::Rsa => RsaPublicKey::verifying_key_from_bytes(bytes),
-            #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+            #[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
             Self::Ed25519 => Ed25519PublicKey::verifying_key_from_bytes(bytes),
         }
     }
@@ -172,7 +179,28 @@ impl HashAlgorithm {
             }
         }
     }
+}
 
+#[cfg(all(feature = "rust-crypto", not(any(feature = "ring", feature = "aws-lc-rs"))))]
+impl HashAlgorithm {
+    pub fn hash(&self, data: impl Writable) -> HashOutput {
+        use sha2::Digest as _;
+        match self {
+            Self::Sha1 => {
+                let mut hasher = sha1::Sha1::new();
+                data.write(&mut hasher);
+                HashOutput::RustCryptoSha1(hasher.finalize())
+            }
+            Self::Sha256 => {
+                let mut hasher = sha2::Sha256::new();
+                data.write(&mut hasher);
+                HashOutput::RustCryptoSha256(hasher.finalize())
+            }
+        }
+    }
+}
+
+impl HashAlgorithm {
     pub fn parse(name: &str) -> Option<Self> {
         if name.eq_ignore_ascii_case("sha256") {
             Some(HashAlgorithm::Sha256)
@@ -196,6 +224,10 @@ impl HashAlgorithm {
 pub enum HashOutput {
     #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
     Digest(crypto_backend::digest::Digest),
+    #[cfg(all(feature = "rust-crypto", not(any(feature = "ring", feature = "aws-lc-rs"))))]
+    RustCryptoSha1(sha1::digest::Output<sha1::Sha1>),
+    #[cfg(all(feature = "rust-crypto", not(any(feature = "ring", feature = "aws-lc-rs"))))]
+    RustCryptoSha256(sha2::digest::Output<sha2::Sha256>),
 }
 
 impl AsRef<[u8]> for HashOutput {
@@ -203,6 +235,10 @@ impl AsRef<[u8]> for HashOutput {
         match self {
             #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
             Self::Digest(output) => output.as_ref(),
+            #[cfg(all(feature = "rust-crypto", not(any(feature = "ring", feature = "aws-lc-rs"))))]
+            Self::RustCryptoSha1(output) => output.as_ref(),
+            #[cfg(all(feature = "rust-crypto", not(any(feature = "ring", feature = "aws-lc-rs"))))]
+            Self::RustCryptoSha256(output) => output.as_ref(),
         }
     }
 }

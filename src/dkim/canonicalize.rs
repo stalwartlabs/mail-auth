@@ -460,7 +460,7 @@ mod test {
                 .write(&mut hasher);
 
                 assert_eq!(
-                    String::from_utf8(base64_encode(hasher.finish().as_ref()).unwrap()).unwrap(),
+                    String::from_utf8(base64_encode(hasher.complete().as_ref()).unwrap()).unwrap(),
                     hash,
                 );
             }

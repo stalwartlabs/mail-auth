@@ -19,9 +19,10 @@ doctest = false
 default = ["aws-lc-rs", "report"]
 aws-lc-rs = ["dep:aws-lc-rs", "hickory-resolver/tls-aws-lc-rs", "hickory-resolver/dnssec-aws-lc-rs", "hickory-resolver/rustls-platform-verifier"]
 ring = ["dep:ring", "hickory-resolver/tls-ring", "hickory-resolver/dnssec-ring", "hickory-resolver/rustls-platform-verifier"]
+rust-crypto = ["rsa", "rand", "ed25519-dalek", "sha1", "sha2"]
 generate = ["rsa", "rand"]
 arc = []
-report = ["quick-xml", "zip", "hashify"]
+report = ["quick-xml", "zip"]
 test = []
 rkyv = ["dep:rkyv", "mail-parser/rkyv"]
 
@@ -29,11 +30,14 @@ rkyv = ["dep:rkyv", "mail-parser/rkyv"]
 flate2 = "1.1"
 mail-parser = { version = "0.11", features = ["full_encoding"] }
 mail-builder = { version = "0.4" }
-quick-xml = { version = "0.40", optional = true }
-hashify =  { version = "0.2", optional = true }
+quick-xml = { version = "0.41", optional = true }
+hashify =  { version = "0.2" }
 aws-lc-rs = { version = "1", optional = true }
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.8", optional = true }
+ed25519-dalek = { version = "2", optional = true, features = ["pkcs8", "rand_core"] }
+sha1 = { version = "0.11", optional = true }
+sha2 = { version = "0.11", optional = true }
 rustls-pki-types = "1.14"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

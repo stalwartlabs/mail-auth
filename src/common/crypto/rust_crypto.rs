@@ -14,10 +14,38 @@ use crate::{
     dkim::Canonicalization,
 };
 use ed25519_dalek::Signer;
-use rsa::{Pkcs1v15Sign, RsaPrivateKey, pkcs1::DecodeRsaPrivateKey};
-use sha2::digest::Digest;
+use rsa::{
+    BigUint, Pkcs1v15Sign, RsaPrivateKey,
+    pkcs1::{DecodeRsaPrivateKey, EncodeRsaPublicKey, der::Decode},
+    pkcs8::DecodePrivateKey,
+    traits::PublicKeyParts,
+};
+use rustls_pki_types::PrivateKeyDer;
+use sha2::Digest;
 use std::array::TryFromSliceError;
 use std::marker::PhantomData;
+
+const SHA256_DIGEST_INFO_PREFIX: &[u8] = &[
+    0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05,
+    0x00, 0x04, 0x20,
+];
+const SHA1_DIGEST_INFO_PREFIX: &[u8] = &[
+    0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14,
+];
+
+fn pkcs1v15_sha256() -> Pkcs1v15Sign {
+    Pkcs1v15Sign {
+        hash_len: Some(32),
+        prefix: SHA256_DIGEST_INFO_PREFIX.into(),
+    }
+}
+
+fn pkcs1v15_sha1() -> Pkcs1v15Sign {
+    Pkcs1v15Sign {
+        hash_len: Some(20),
+        prefix: SHA1_DIGEST_INFO_PREFIX.into(),
+    }
+}
 
 #[derive(Debug)]
 pub struct RsaKey<T> {
@@ -26,10 +54,21 @@ pub struct RsaKey<T> {
 }
 
 impl<T: HashImpl> RsaKey<T> {
-    /// Creates a new RSA private key from a PKCS1 PEM string.
-    pub fn from_pkcs1_pem(private_key_pem: &str) -> Result<Self> {
-        let inner = RsaPrivateKey::from_pkcs1_pem(private_key_pem)
-            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
+    /// Creates a new RSA private key from various DER-encoded key formats.
+    ///
+    /// Only supports PKCS1 and PKCS8 formats -- will yield an error for other formats.
+    pub fn from_key_der(key_der: PrivateKeyDer<'_>) -> Result<Self> {
+        let inner = match key_der {
+            PrivateKeyDer::Pkcs1(der) => RsaPrivateKey::from_pkcs1_der(der.secret_pkcs1_der())
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
+            PrivateKeyDer::Pkcs8(der) => RsaPrivateKey::from_pkcs8_der(der.secret_pkcs8_der())
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
+            _ => {
+                return Err(Error::Crypto(CryptoError::Library(
+                    "Unsupported RSA key format".to_string(),
+                )));
+            }
+        };
 
         Ok(RsaKey {
             inner,
@@ -37,33 +76,12 @@ impl<T: HashImpl> RsaKey<T> {
         })
     }
 
-    /// Creates a new RSA private key from a PKCS1 binary slice.
-    pub fn from_pkcs1_der(private_key_bytes: &[u8]) -> Result<Self> {
-        let inner = RsaPrivateKey::from_pkcs1_der(private_key_bytes)
-            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
-
-        Ok(RsaKey {
-            inner,
-            padding: PhantomData,
-        })
-    }
-}
-
-impl SigningKey for RsaKey<Sha1> {
-    type Hasher = Sha1;
-
-    fn sign(&self, input: impl Writable) -> Result<Vec<u8>> {
-        let hash = self.hash(input);
-        self.inner
-            .sign(
-                Pkcs1v15Sign::new::<<Self::Hasher as HashImpl>::Context>(),
-                hash.as_ref(),
-            )
-            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))
-    }
-
-    fn algorithm(&self) -> Algorithm {
-        Algorithm::RsaSha1
+    /// Returns the public key of the RSA key pair, encoded as a PKCS1 RSAPublicKey.
+    pub fn public_key(&self) -> Vec<u8> {
+        rsa::RsaPublicKey::from(&self.inner)
+            .to_pkcs1_der()
+            .map(|der| der.as_bytes().to_vec())
+            .unwrap_or_default()
     }
 }
 
@@ -73,10 +91,7 @@ impl SigningKey for RsaKey<Sha256> {
     fn sign(&self, input: impl Writable) -> Result<Vec<u8>> {
         let hash = self.hash(input);
         self.inner
-            .sign(
-                Pkcs1v15Sign::new::<<Self::Hasher as HashImpl>::Context>(),
-                hash.as_ref(),
-            )
+            .sign(pkcs1v15_sha256(), hash.as_ref())
             .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))
     }
 
@@ -90,15 +105,44 @@ pub struct Ed25519Key {
 }
 
 impl Ed25519Key {
-    /// Creates an Ed25519 private key
-    pub fn from_bytes(private_key_bytes: &[u8]) -> crate::Result<Self> {
+    /// Generates a new Ed25519 key pair encoded in PKCS#8 DER format.
+    pub fn generate_pkcs8() -> Result<Vec<u8>> {
+        use ed25519_dalek::pkcs8::EncodePrivateKey;
+        Ok(ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng)
+            .to_pkcs8_der()
+            .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?
+            .as_bytes()
+            .to_vec())
+    }
+
+    pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self> {
         Ok(Self {
-            inner: ed25519_dalek::SigningKey::from_bytes(
-                private_key_bytes
-                    .try_into()
-                    .map_err(|err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())))?,
-            ),
+            inner: ed25519_dalek::SigningKey::from_pkcs8_der(pkcs8_der)
+                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         })
+    }
+
+    pub fn from_pkcs8_maybe_unchecked_der(pkcs8_der: &[u8]) -> Result<Self> {
+        Self::from_pkcs8_der(pkcs8_der)
+    }
+
+    pub fn from_seed_and_public_key(seed: &[u8], public_key: &[u8]) -> Result<Self> {
+        let inner = ed25519_dalek::SigningKey::from_bytes(seed.try_into().map_err(
+            |err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())),
+        )?);
+
+        if inner.verifying_key().as_bytes().as_slice() != public_key {
+            return Err(Error::Crypto(CryptoError::Library(
+                "Ed25519 public key does not match the provided seed".to_string(),
+            )));
+        }
+
+        Ok(Self { inner })
+    }
+
+    /// Returns the public key of the Ed25519 key pair.
+    pub fn public_key(&self) -> Vec<u8> {
+        self.inner.verifying_key().to_bytes().to_vec()
     }
 }
 
@@ -119,15 +163,52 @@ pub(crate) struct RsaPublicKey {
     inner: rsa::RsaPublicKey,
 }
 
+/// Largest RSA modulus accepted.
+const RSA_MAX_MODULUS_BITS: usize = 8192;
+
 impl RsaPublicKey {
     pub(crate) fn verifying_key_from_bytes(
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
+        let pkcs1 = match rsa::pkcs8::SubjectPublicKeyInfoRef::try_from(bytes) {
+            Ok(spki) => {
+                rsa::pkcs1::RsaPublicKey::from_der(spki.subject_public_key.as_bytes().ok_or_else(
+                    || Error::Crypto(CryptoError::Library("Malformed RSA key".into())),
+                )?)
+            }
+            Err(_) => rsa::pkcs1::RsaPublicKey::from_der(bytes),
+        }
+        .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
+
+        let n = BigUint::from_bytes_be(pkcs1.modulus.as_bytes());
+        let e = BigUint::from_bytes_be(pkcs1.public_exponent.as_bytes());
+
         Ok(Box::new(RsaPublicKey {
-            inner: <rsa::RsaPublicKey as rsa::pkcs8::DecodePublicKey>::from_public_key_der(bytes)
-                .or_else(|_| rsa::pkcs1::DecodeRsaPublicKey::from_pkcs1_der(bytes))
+            inner: rsa::RsaPublicKey::new_with_max_size(n, e, RSA_MAX_MODULUS_BITS)
                 .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         }))
+    }
+
+    fn verify_digest(&self, data: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+        match algorithm {
+            Algorithm::RsaSha256 => self
+                .inner
+                .verify(
+                    pkcs1v15_sha256(),
+                    sha2::Sha256::digest(data).as_slice(),
+                    signature,
+                )
+                .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
+            Algorithm::RsaSha1 => self
+                .inner
+                .verify(
+                    pkcs1v15_sha1(),
+                    sha1::Sha1::digest(data).as_slice(),
+                    signature,
+                )
+                .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
+            Algorithm::Ed25519Sha256 => Err(Error::Crypto(CryptoError::IncompatibleAlgorithms)),
+        }
     }
 }
 
@@ -139,31 +220,17 @@ impl VerifyingKey for RsaPublicKey {
         canonicalization: Canonicalization,
         algorithm: Algorithm,
     ) -> Result<()> {
-        match algorithm {
-            Algorithm::RsaSha256 => {
-                let mut hasher = sha2::Sha256::new();
-                canonicalization.canonicalize_headers(headers, &mut hasher);
-                let hash = hasher.finalize();
+        let mut data = Vec::with_capacity(256);
+        canonicalization.canonicalize_headers(headers, &mut data);
+        self.verify_digest(&data, signature, algorithm)
+    }
 
-                self.inner
-                    .verify(
-                        Pkcs1v15Sign::new::<sha2::Sha256>(),
-                        hash.as_ref(),
-                        signature,
-                    )
-                    .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
-            }
-            Algorithm::RsaSha1 => {
-                let mut hasher = sha1::Sha1::new();
-                canonicalization.canonicalize_headers(headers, &mut hasher);
-                let hash = hasher.finalize();
+    fn verify_bytes(&self, input: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+        self.verify_digest(input, signature, algorithm)
+    }
 
-                self.inner
-                    .verify(Pkcs1v15Sign::new::<sha1::Sha1>(), hash.as_ref(), signature)
-                    .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
-            }
-            Algorithm::Ed25519Sha256 => Err(Error::Crypto(CryptoError::IncompatibleAlgorithms)),
-        }
+    fn public_key_bits(&self) -> usize {
+        self.inner.n().bits()
     }
 }
 
@@ -176,13 +243,21 @@ impl Ed25519PublicKey {
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
         Ok(Box::new(Ed25519PublicKey {
-            inner: ed25519_dalek::VerifyingKey::from_bytes(
-                bytes
-                    .try_into()
-                    .map_err(|err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())))?,
-            )
+            inner: ed25519_dalek::VerifyingKey::from_bytes(bytes.try_into().map_err(
+                |err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())),
+            )?)
             .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
         }))
+    }
+
+    fn verify_digest(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+        let signature = ed25519_dalek::Signature::from_bytes(signature.try_into().map_err(
+            |err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())),
+        )?);
+
+        self.inner
+            .verify_strict(sha2::Sha256::digest(data).as_slice(), &signature)
+            .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
     }
 }
 
@@ -198,20 +273,17 @@ impl VerifyingKey for Ed25519PublicKey {
             return Err(Error::Crypto(CryptoError::IncompatibleAlgorithms));
         }
 
-        let mut hasher = sha2::Sha256::new();
-        canonicalization.canonicalize_headers(headers, &mut hasher);
-        let hash = hasher.finalize();
+        let mut data = Vec::with_capacity(256);
+        canonicalization.canonicalize_headers(headers, &mut data);
+        self.verify_digest(&data, signature)
+    }
 
-        self.inner
-            .verify_strict(
-                hash.as_ref(),
-                &ed25519_dalek::Signature::from_bytes(
-                    signature
-                        .try_into()
-                        .map_err(|err: TryFromSliceError| Error::Crypto(CryptoError::Library(err.to_string())))?,
-                ),
-            )
-            .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
+    fn verify_bytes(&self, input: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
+        if !matches!(algorithm, Algorithm::Ed25519Sha256) {
+            return Err(Error::Crypto(CryptoError::IncompatibleAlgorithms));
+        }
+
+        self.verify_digest(input, signature)
     }
 }
 

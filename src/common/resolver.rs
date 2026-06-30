@@ -35,6 +35,7 @@ pub struct DnsEntry<T> {
 }
 
 impl MessageAuthenticator {
+    #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
     pub fn new_cloudflare_tls() -> Result<Self, NetError> {
         Self::new(ResolverConfig::tls(&CLOUDFLARE), ResolverOpts::default())
     }
@@ -57,6 +58,7 @@ impl MessageAuthenticator {
         Self::new(ResolverConfig::udp_and_tcp(&QUAD9), ResolverOpts::default())
     }
 
+    #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
     pub fn new_quad9_tls() -> Result<Self, NetError> {
         Self::new(ResolverConfig::tls(&QUAD9), ResolverOpts::default())
     }

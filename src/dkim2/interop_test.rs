@@ -23,8 +23,7 @@ use std::{
     time::{Duration, Instant},
 };
 use testcontainers::{
-    GenericBuildableImage, Image, ImageExt,
-    ContainerAsync,
+    ContainerAsync, GenericBuildableImage, Image, ImageExt,
     core::{ExecCommand, Mount, WaitFor},
     runners::{AsyncBuilder, AsyncRunner},
 };
@@ -143,8 +142,11 @@ fn resource(parts: &[&str]) -> PathBuf {
 }
 
 fn load_ed25519(domain: &str, selector: &str) -> Ed25519Key {
-    let pem =
-        std::fs::read(resource(&["keys", &format!("{selector}._domainkey.{domain}.pem")])).unwrap();
+    let pem = std::fs::read(resource(&[
+        "keys",
+        &format!("{selector}._domainkey.{domain}.pem"),
+    ]))
+    .unwrap();
     let PrivateKeyDer::Pkcs8(der) = PrivateKeyDer::from_pem_slice(&pem).unwrap() else {
         panic!("expected PKCS8 key");
     };
@@ -152,8 +154,11 @@ fn load_ed25519(domain: &str, selector: &str) -> Ed25519Key {
 }
 
 fn load_rsa(domain: &str, selector: &str) -> RsaKey<Sha256> {
-    let pem =
-        std::fs::read(resource(&["keys", &format!("{selector}._domainkey.{domain}.pem")])).unwrap();
+    let pem = std::fs::read(resource(&[
+        "keys",
+        &format!("{selector}._domainkey.{domain}.pem"),
+    ]))
+    .unwrap();
     RsaKey::<Sha256>::from_key_der(PrivateKeyDer::from_pem_slice(&pem).unwrap()).unwrap()
 }
 
@@ -166,7 +171,11 @@ fn load_caches() -> DummyCaches {
         for (selector, records) in selectors.as_object().unwrap() {
             let record = records[0][1].as_str().unwrap();
             let name = format!("{selector}.{domain}.");
-            caches.txt_add(name, DomainKey::parse(record.as_bytes()).unwrap(), valid_until);
+            caches.txt_add(
+                name,
+                DomainKey::parse(record.as_bytes()).unwrap(),
+                valid_until,
+            );
         }
     }
     caches
@@ -440,8 +449,7 @@ async fn verify_msg(
 /// End-to-end DKIM2 interoperability matrix against the upstream Python
 /// (dkim2wg/interop) and Go (turscar/dkim2) reference implementations.
 ///
-/// Ignored by default because it requires a running Docker daemon and network
-/// access to clone and build the reference impls. Run with:
+/// Run with:
 ///
 ///   cargo test --lib dkim2::interop_test -- --ignored --nocapture
 ///
@@ -505,10 +513,13 @@ async fn dkim2_interop_matrix() {
     for hop in &single_hops {
         for signer in ALL {
             idx += 1;
-            let Some(signed) =
-                sign_hop(&container, work.path(), idx, signer, &original, hop).await
+            let Some(signed) = sign_hop(&container, work.path(), idx, signer, &original, hop).await
             else {
-                failures.push(format!("single/{}/{}: SIGN failed", alg_tag(hop.alg), signer.name()));
+                failures.push(format!(
+                    "single/{}/{}: SIGN failed",
+                    alg_tag(hop.alg),
+                    signer.name()
+                ));
                 continue;
             };
             for verifier in ALL {
@@ -561,15 +572,24 @@ async fn dkim2_interop_matrix() {
     for s1 in ALL {
         for s2 in ALL {
             idx += 1;
-            let Some(msg1) = sign_hop(&container, work.path(), idx, s1, &original, &two_hop[0]).await
+            let Some(msg1) =
+                sign_hop(&container, work.path(), idx, s1, &original, &two_hop[0]).await
             else {
-                failures.push(format!("multihop2/{}-{}: HOP1 sign failed", s1.name(), s2.name()));
+                failures.push(format!(
+                    "multihop2/{}-{}: HOP1 sign failed",
+                    s1.name(),
+                    s2.name()
+                ));
                 continue;
             };
             idx += 1;
             let Some(msg2) = sign_hop(&container, work.path(), idx, s2, &msg1, &two_hop[1]).await
             else {
-                failures.push(format!("multihop2/{}-{}: HOP2 sign failed", s1.name(), s2.name()));
+                failures.push(format!(
+                    "multihop2/{}-{}: HOP2 sign failed",
+                    s1.name(),
+                    s2.name()
+                ));
                 continue;
             };
             for verifier in ALL {
@@ -634,8 +654,15 @@ async fn dkim2_interop_matrix() {
         let mut chain_ok = true;
         for (hop_idx, signer) in pattern.iter().enumerate() {
             idx += 1;
-            match sign_hop(&container, work.path(), idx, *signer, &message, &three_hop[hop_idx])
-                .await
+            match sign_hop(
+                &container,
+                work.path(),
+                idx,
+                *signer,
+                &message,
+                &three_hop[hop_idx],
+            )
+            .await
             {
                 Some(next) => message = next,
                 None => {
