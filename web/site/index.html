@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>mail-auth playground</title>
+  <meta name="description"
+    content="Sign and verify DKIM, DKIM2, SPF and DMARC entirely in your browser via WebAssembly." />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="brand">
+        <h1>mail-auth <span>playground</span></h1>
+        <p>DKIM · DKIM2 · SPF · DMARC, signed and verified in your browser.</p>
+      </div>
+      <div class="wasm-badge" id="wasm-badge" data-state="loading">
+        loading wasm…
+      </div>
+    </div>
+    <nav class="tabs" id="tabs" role="tablist">
+      <button class="tab" role="tab" data-tab="dkim2">Sign DKIM2</button>
+      <button class="tab" role="tab" data-tab="dkim1">Sign DKIM1</button>
+      <button class="tab" role="tab" data-tab="verify">Verify</button>
+      <button class="tab tab-end" role="tab" data-tab="settings">
+        ⚙ Settings
+      </button>
+    </nav>
+  </header>
+
+  <main class="stage">
+    <section class="panel" data-panel="dkim2" hidden>
+      <div class="context-strip" data-context="signing"></div>
+
+      <div class="card">
+        <h2>Single hop</h2>
+        <div class="grid two">
+          <label>
+            MAIL FROM
+            <input id="d2-mailfrom" type="text" value="alice@example.com" />
+          </label>
+          <label>
+            RCPT TO <span class="hint">comma-separated</span>
+            <input id="d2-rcpt" type="text" value="bob@example.net" />
+          </label>
+        </div>
+        <label>
+          Message
+          <textarea id="d2-message" rows="9" spellcheck="false"></textarea>
+        </label>
+        <div class="actions">
+          <button class="btn sample" data-sample="d2-message">Load sample</button>
+          <button class="btn primary" id="d2-sign">Sign</button>
+        </div>
+        <div class="error" id="d2-error" hidden></div>
+        <div class="output-block" hidden id="d2-output-wrap">
+          <div class="output-head">
+            <span>Signed message</span>
+            <button class="btn ghost copy" data-copy="d2-output">Copy</button>
+          </div>
+          <pre class="output" id="d2-output"></pre>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Multihop / revised</h2>
+        <p class="card-sub">
+          A forwarder changes a message and re-signs it, recording a recipe
+          that lets a verifier reconstruct the previous instance. Uses the key,
+          domain, selector and envelope above.
+        </p>
+        <div class="grid two">
+          <div class="field">
+            <div class="label-row">
+              <label for="d2-original">Original message (as received)</label>
+            </div>
+            <textarea id="d2-original" rows="10" spellcheck="false"></textarea>
+          </div>
+          <div class="field">
+            <div class="label-row">
+              <label for="d2-modified">Modified message (to send)</label>
+              <button class="btn ghost" id="d2-copy-orig" type="button">
+                Copy from original
+              </button>
+            </div>
+            <textarea id="d2-modified" rows="10" spellcheck="false"></textarea>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn sample" data-sample="d2-revised">Load sample</button>
+          <button class="btn primary" id="d2-revise">Compute recipe &amp; sign</button>
+        </div>
+        <div class="error" id="d2-rev-error" hidden></div>
+        <div class="output-block" hidden id="d2-recipe-wrap">
+          <div class="output-head">
+            <span>Recipe (JSON)</span>
+            <button class="btn ghost copy" data-copy="d2-recipe">Copy</button>
+          </div>
+          <pre class="output" id="d2-recipe"></pre>
+        </div>
+        <div class="output-block" hidden id="d2-revout-wrap">
+          <div class="output-head">
+            <span>New instance</span>
+            <button class="btn ghost copy" data-copy="d2-revout">Copy</button>
+          </div>
+          <pre class="output" id="d2-revout"></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="dkim1" hidden>
+      <div class="context-strip" data-context="signing"></div>
+      <div class="card">
+        <h2>Sign with DKIM1</h2>
+        <label>
+          Headers to sign <span class="hint">comma-separated, in order</span>
+          <input id="d1-headers" type="text" value="From, To, Subject, Date" />
+        </label>
+        <label>
+          Message
+          <textarea id="d1-message" rows="11" spellcheck="false"></textarea>
+        </label>
+        <div class="actions">
+          <button class="btn sample" data-sample="d1-message">Load sample</button>
+          <button class="btn primary" id="d1-sign">Sign</button>
+        </div>
+        <div class="error" id="d1-error" hidden></div>
+        <div class="output-block" hidden id="d1-output-wrap">
+          <div class="output-head">
+            <span>Signed message</span>
+            <button class="btn ghost copy" data-copy="d1-output">Copy</button>
+          </div>
+          <pre class="output" id="d1-output"></pre>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="verify" hidden>
+      <div class="context-strip" data-context="dns"></div>
+      <div class="card">
+        <h2>Verify</h2>
+        <fieldset class="checks">
+          <legend>Checks</legend>
+          <label class="check"><input type="checkbox" id="v-dkim" checked /> DKIM</label>
+          <label class="check"><input type="checkbox" id="v-dkim2" checked /> DKIM2</label>
+          <label class="check"><input type="checkbox" id="v-spf" checked /> SPF</label>
+          <label class="check"><input type="checkbox" id="v-dmarc" checked /> DMARC</label>
+        </fieldset>
+
+        <div class="grid two">
+          <label>
+            Remote IP
+            <input id="v-ip" type="text" value="192.0.2.10" />
+          </label>
+          <label>
+            EHLO host
+            <input id="v-ehlo" type="text" value="mail.example.com" />
+          </label>
+        </div>
+        <div class="grid two">
+          <label>
+            MAIL FROM <span class="hint">return-path; SPF + DMARC alignment</span>
+            <input id="v-mailfrom" type="text" value="alice@example.com" />
+          </label>
+          <label>
+            RCPT TO <span class="hint">comma-separated; DKIM2 envelope</span>
+            <input id="v-rcpt" type="text" value="bob@example.net" />
+          </label>
+        </div>
+        <label>
+          Received message (full, with headers)
+          <textarea id="v-message" rows="12" spellcheck="false"></textarea>
+        </label>
+        <div class="actions">
+          <button class="btn sample" data-sample="v-message">Load sample</button>
+          <button class="btn primary" id="v-run">Verify</button>
+        </div>
+        <div class="error" id="v-error" hidden></div>
+        <div class="results" id="v-results" hidden></div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="settings" hidden>
+      <div class="card">
+        <h2>Signing identity</h2>
+        <div class="grid two">
+          <label>
+            Domain
+            <input id="s-domain" type="text" value="example.com" />
+          </label>
+          <label>
+            Selector
+            <input id="s-selector" type="text" value="default" />
+          </label>
+        </div>
+
+        <div class="segmented" id="s-keymode">
+          <button class="seg active" data-keymode="paste">Paste an existing key</button>
+          <button class="seg" data-keymode="generate">Generate a new one</button>
+        </div>
+
+        <div data-keypane="paste">
+          <label>
+            Algorithm
+            <select id="s-paste-algo">
+              <option value="rsa">RSA</option>
+              <option value="ed25519">Ed25519</option>
+            </select>
+          </label>
+          <label>
+            Private key (PEM)
+            <textarea id="s-paste-key" rows="7" spellcheck="false" placeholder="-----BEGIN PRIVATE KEY-----"></textarea>
+          </label>
+          <div class="actions">
+            <button class="btn primary" id="s-use-key">Use key</button>
+          </div>
+        </div>
+
+        <div data-keypane="generate" hidden>
+          <div class="grid two">
+            <label>
+              Algorithm
+              <select id="s-gen-algo">
+                <option value="ed25519">Ed25519</option>
+                <option value="rsa">RSA</option>
+              </select>
+            </label>
+            <label>
+              RSA bits
+              <select id="s-gen-bits">
+                <option>2048</option>
+                <option>3072</option>
+                <option>4096</option>
+              </select>
+            </label>
+          </div>
+          <div class="actions">
+            <button class="btn primary" id="s-generate">Generate</button>
+          </div>
+        </div>
+
+        <div class="error" id="s-error" hidden></div>
+
+        <div class="key-status" id="s-key-status">No active key.</div>
+
+        <div class="output-block" hidden id="s-key-wrap">
+          <div class="output-head">
+            <span>Private key (PEM)</span>
+            <button class="btn ghost copy" data-copy="s-key-pem">Copy</button>
+          </div>
+          <pre class="output" id="s-key-pem"></pre>
+        </div>
+        <div class="output-block" hidden id="s-dns-wrap">
+          <div class="output-head">
+            <span>Publish this DNS TXT record</span>
+            <button class="btn ghost copy" data-copy="s-dns-record">Copy</button>
+          </div>
+          <pre class="output" id="s-dns-record"></pre>
+        </div>
+
+        <p class="warn">
+          Keys are generated locally and never transmitted. Demo only: do not
+          reuse a key minted here on a real domain.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>DNS source <span class="card-tag">used by Verify</span></h2>
+        <div class="segmented" id="s-dnsmode">
+          <button class="seg active" data-dnsmode="live">Live (DNS-over-HTTPS)</button>
+          <button class="seg" data-dnsmode="offline">Manual records (offline)</button>
+        </div>
+
+        <div data-dnspane="live">
+          <div class="grid two">
+            <label>
+              Resolver
+              <select id="s-doh-preset">
+                <option value="https://cloudflare-dns.com/dns-query|json">Cloudflare</option>
+                <option value="https://dns.google/resolve|json">Google</option>
+                <option value="https://dns.adguard-dns.com/resolve|json">AdGuard</option>
+                <option value="custom">Custom…</option>
+              </select>
+            </label>
+            <label>
+              Format
+              <select id="s-doh-format">
+                <option value="json">JSON</option>
+                <option value="wire">Wire</option>
+              </select>
+            </label>
+          </div>
+          <label>
+            Endpoint URL
+            <input id="s-doh-endpoint" type="text" value="https://cloudflare-dns.com/dns-query" />
+          </label>
+        </div>
+
+        <div data-dnspane="offline" hidden>
+          <label>
+            DNS records <span class="hint">one per line: name TYPE value</span>
+            <textarea id="s-records" rows="8" spellcheck="false" placeholder="default._domainkey.example.com TXT v=DKIM1; k=rsa; p=...
+example.com TXT v=spf1 ip4:192.0.2.0/24 -all
+_dmarc.example.com TXT v=DMARC1; p=reject"></textarea>
+          </label>
+          <p class="card-sub">
+            Offline mode answers every lookup from these records only. Anything
+            not listed fails instead of touching the network.
+          </p>
+        </div>
+        <div class="actions">
+          <button class="btn primary" id="s-save-dns">Save DNS source</button>
+        </div>
+        <div class="saved-flash" id="s-dns-saved" hidden>Saved.</div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    Everything runs client-side via WebAssembly.
+    <a href="https://github.com/stalwartlabs/mail-auth">mail-auth</a> on GitHub.
+  </footer>
+
+  <script type="module" src="./app.js"></script>
+</body>
+
+</html>

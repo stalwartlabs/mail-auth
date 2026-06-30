@@ -172,6 +172,12 @@ pub struct AuthenticatedMessage<'x> {
     pub has_dkim2_errors: bool,
 }
 
+impl<'x> AsRef<AuthenticatedMessage<'x>> for AuthenticatedMessage<'x> {
+    fn as_ref(&self) -> &AuthenticatedMessage<'x> {
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 // Authentication-Results header
 pub struct AuthenticationResults<'x> {

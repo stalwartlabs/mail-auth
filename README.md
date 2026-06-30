@@ -35,7 +35,9 @@ Features:
 - **SMTP TLS Reporting**:
   - Report parsing and generation.
 
-## Cryptography backends
+## Backends
+
+### Cryptography
 
 Signing and verification are backed by a selectable crypto provider, chosen with Cargo features:
 
@@ -43,7 +45,7 @@ Signing and verification are backed by a selectable crypto provider, chosen with
 - `ring`: uses [ring](https://crates.io/crates/ring).
 - `rust-crypto`: a pure-Rust backend ([rsa](https://crates.io/crates/rsa), [ed25519-dalek](https://crates.io/crates/ed25519-dalek), [sha1](https://crates.io/crates/sha1), [sha2](https://crates.io/crates/sha2)) that compiles to WebAssembly.
 
-## DNS resolution backends
+### DNS resolution
 
 DNS lookups (used by SPF, DMARC, and DKIM/DKIM2 key retrieval) are backed by a selectable resolver, chosen with two mutually exclusive Cargo features:
 
@@ -52,7 +54,7 @@ DNS lookups (used by SPF, DMARC, and DKIM/DKIM2 key retrieval) are backed by a s
 
 Enable exactly one; building with both, or with neither, is a compile error.
 
-## WebAssembly (WASM)
+### WebAssembly (WASM)
 
 mail-auth compiles and runs on `wasm32-unknown-unknown` (browsers, edge runtimes). The WASM-capable configuration pairs the pure-Rust crypto backend with DNS-over-HTTPS:
 

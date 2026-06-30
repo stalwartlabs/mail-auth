@@ -1,0 +1,30 @@
+[package]
+name = "mail-auth-web"
+description = "WASM bindings and demo site for mail-auth (DKIM, DKIM2, DMARC)"
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0 OR MIT"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mail-auth = { path = "..", default-features = false, features = ["rust-crypto", "dns-doh", "generate"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+rustls-pki-types = { version = "1.14", features = ["alloc", "std"] }
+base64 = "0.22"
+web-time = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde-wasm-bindgen = "0.6"
+console_error_panic_hook = "0.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"

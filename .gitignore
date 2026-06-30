@@ -2,3 +2,5 @@
 Cargo.lock
 **/*.rs.bk
 .ignore
+/web/target/
+/web/dist/

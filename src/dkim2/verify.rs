@@ -25,10 +25,10 @@ const MAX_AGE: u64 = 14 * 86400;
 
 impl MessageAuthenticator {
     /// Verifies the DKIM2 signature chain of an RFC5322 message.
-    pub async fn verify_dkim2<'x, TXT, MXX, IPV4, IPV6, PTR>(
+    pub async fn verify_dkim2<'x, 'y, TXT, MXX, IPV4, IPV6, PTR>(
         &self,
         params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
-        envelope: &Envelope<'x>,
+        envelope: &Envelope<'y>,
     ) -> Dkim2Output<'x>
     where
         TXT: ResolverCache<Box<str>, Txt> + 'x,
@@ -42,10 +42,10 @@ impl MessageAuthenticator {
             .await
     }
 
-    pub(crate) async fn verify_dkim2_<'x, TXT>(
+    pub(crate) async fn verify_dkim2_<'x, 'y, TXT>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
-        envelope: &Envelope<'x>,
+        envelope: &Envelope<'y>,
         cache_txt: Option<&TXT>,
         now: u64,
         body_present: bool,
