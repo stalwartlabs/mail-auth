@@ -95,7 +95,7 @@ impl Signature {
             }
         }
 
-        for (key, tag) in [(T, "t"), (S, "s")] {
+        for (key, tag) in [(I, "i"), (M, "m"), (T, "t"), (D, "d"), (S, "s")] {
             if !seen.contains(&key) {
                 return Err(Error::Dkim2(Dkim2Error::SignatureTagMissing {
                     i: signature.i,
@@ -112,10 +112,20 @@ impl Signature {
                 }));
             }
             (Some(domain), false) => ChainBinding::NextDomain(domain),
-            (None, _) => ChainBinding::Envelope {
-                mail_from: mail_from.unwrap_or_default(),
-                rcpt_to,
-            },
+            (None, _) => {
+                for (key, tag) in [(MF, "mf"), (RT, "rt")] {
+                    if !seen.contains(&key) {
+                        return Err(Error::Dkim2(Dkim2Error::SignatureTagMissing {
+                            i: signature.i,
+                            tag,
+                        }));
+                    }
+                }
+                ChainBinding::Envelope {
+                    mail_from: mail_from.unwrap_or_default(),
+                    rcpt_to,
+                }
+            }
         };
 
         Ok(signature)
@@ -174,6 +184,9 @@ fn parse_signature_values(value: &str) -> Option<Vec<SignatureValue>> {
         let Some(algorithm) = Algorithm::parse(algorithm.as_bytes()) else {
             continue;
         };
+        if matches!(algorithm, Algorithm::RsaSha1) {
+            continue;
+        }
         let b = if signature.is_empty() {
             Vec::new()
         } else {
@@ -260,7 +273,7 @@ mod test {
 
     #[test]
     fn signature_parse_reordered_tags_and_multi_sset() {
-        let v = b"f=donotmodify; m=2; s=sel:rsa-sha256:AAAA,sel2:ed25519-sha256:BBBB; i=3; d=ex.com; mf=; t=5; xunknown=zz";
+        let v = b"f=donotmodify; m=2; s=sel:rsa-sha256:AAAA,sel2:ed25519-sha256:BBBB; i=3; d=ex.com; mf=; rt=Yg==; t=5; xunknown=zz";
         let sig = Signature::parse(v).unwrap();
         assert_eq!(sig.i, 3);
         assert_eq!(sig.m, 2);
@@ -280,7 +293,7 @@ mod test {
     #[test]
     fn signature_m_can_reach_u32_max() {
         let v: &[u8] =
-            b"i=1; m=4294967295; t=0; d=ex.com; mf=YQ==; s=sel:rsa-sha256:QQ==; f=donotmodify;";
+            b"i=1; m=4294967295; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=sel:rsa-sha256:QQ==; f=donotmodify;";
         let sig = Signature::parse(v).unwrap();
         assert_eq!(sig.m, u32::MAX);
     }
@@ -309,7 +322,7 @@ mod test {
     #[test]
     fn nonce_exactly_64_chars_is_accepted() {
         let n = "a".repeat(64);
-        let v = format!("i=1; m=1; t=0; d=ex.com; mf=YQ==; n={n}; s=sel:rsa-sha256:QQ==;");
+        let v = format!("i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; n={n}; s=sel:rsa-sha256:QQ==;");
         let sig = Signature::parse(v.as_bytes()).unwrap();
         assert_eq!(sig.n.as_deref(), Some(n.as_str()));
     }
@@ -377,7 +390,7 @@ mod test {
     #[test]
     fn unknown_algorithm_in_s_is_ignored() {
         let v: &[u8] =
-            b"i=1; m=1; t=0; d=ex.com; mf=YQ==; s=banana:banana:,sel:ed25519-sha256:QQ==;";
+            b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=banana:banana:,sel:ed25519-sha256:QQ==;";
         let sig = Signature::parse(v).unwrap();
         assert_eq!(sig.s.len(), 1);
         assert_eq!(sig.s[0].selector, "sel");
@@ -385,7 +398,71 @@ mod test {
 
     #[test]
     fn only_unknown_algorithms_yields_empty_s() {
-        let v: &[u8] = b"i=1; m=1; t=0; d=ex.com; mf=YQ==; s=banana:banana:;";
+        let v: &[u8] = b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=banana:banana:;";
+        let sig = Signature::parse(v).unwrap();
+        assert!(sig.s.is_empty());
+    }
+
+    #[test]
+    fn mf_without_rt_is_rejected() {
+        let v: &[u8] = b"i=1; m=1; t=0; d=ex.com; mf=YQ==; s=sel:rsa-sha256:QQ==;";
+        assert!(matches!(
+            Signature::parse(v),
+            Err(Error::Dkim2(Dkim2Error::SignatureTagMissing {
+                tag: "rt",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn rt_without_mf_is_rejected() {
+        let v: &[u8] = b"i=1; m=1; t=0; d=ex.com; rt=Yg==; s=sel:rsa-sha256:QQ==;";
+        assert!(matches!(
+            Signature::parse(v),
+            Err(Error::Dkim2(Dkim2Error::SignatureTagMissing {
+                tag: "mf",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn missing_d_tag_is_rejected() {
+        let v: &[u8] = b"i=1; m=1; t=0; mf=YQ==; rt=Yg==; s=sel:rsa-sha256:QQ==;";
+        assert!(matches!(
+            Signature::parse(v),
+            Err(Error::Dkim2(Dkim2Error::SignatureTagMissing {
+                tag: "d",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn neither_nd_nor_envelope_is_rejected() {
+        let v: &[u8] = b"i=1; m=1; t=0; d=ex.com; s=sel:rsa-sha256:QQ==;";
+        assert!(matches!(
+            Signature::parse(v),
+            Err(Error::Dkim2(Dkim2Error::SignatureTagMissing {
+                tag: "mf",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn rsa_sha1_set_is_dropped() {
+        let v: &[u8] =
+            b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=sel:rsa-sha1:QQ==,sel2:ed25519-sha256:QQ==;";
+        let sig = Signature::parse(v).unwrap();
+        assert_eq!(sig.s.len(), 1);
+        assert_eq!(sig.s[0].selector, "sel2");
+    }
+
+    #[test]
+    fn only_rsa_sha1_yields_empty_s() {
+        let v: &[u8] = b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=sel:rsa-sha1:QQ==;";
         let sig = Signature::parse(v).unwrap();
         assert!(sig.s.is_empty());
     }
@@ -393,7 +470,7 @@ mod test {
     #[test]
     fn feedhere_flag_is_parsed() {
         let v: &[u8] =
-            b"i=1; m=1; t=0; d=ex.com; mf=YQ==; s=sel:rsa-sha256:QQ==; f=feedback,feedhere;";
+            b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=sel:rsa-sha256:QQ==; f=feedback,feedhere;";
         let sig = Signature::parse(v).unwrap();
         assert_eq!(sig.flags, vec![Flag::Feedback, Flag::FeedHere]);
     }

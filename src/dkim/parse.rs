@@ -286,6 +286,9 @@ impl TxtRecordParser for DomainKey {
         }
 
         match public_key {
+            Some(public_key) if public_key.is_empty() => {
+                Err(Error::Dkim(DkimError::RevokedPublicKey))
+            }
             Some(public_key) => Ok(DomainKey {
                 p: key_type.verifying_key(&public_key)?,
                 f: flags,
@@ -659,6 +662,20 @@ mod test {
             assert_eq!(
                 DomainKey::parse(record.as_bytes()).unwrap().f,
                 expected_result
+            );
+        }
+    }
+
+    #[test]
+    fn dkim_record_empty_p_is_revoked() {
+        use crate::{Error, dkim::DkimError};
+        for record in ["v=DKIM1; p=", "v=DKIM1; k=rsa; p=;", "p="] {
+            assert!(
+                matches!(
+                    DomainKey::parse(record.as_bytes()),
+                    Err(Error::Dkim(DkimError::RevokedPublicKey))
+                ),
+                "{record:?}"
             );
         }
     }

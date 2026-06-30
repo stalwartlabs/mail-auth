@@ -4,51 +4,61 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{Dkim2Signer, Done, Flag, NeedDomain, NeedSelector};
-use crate::common::crypto::SigningKey;
+use super::{Dkim2Signer, Done, Flag, KeyEntry, NeedDomain, NeedSelector};
+use crate::common::crypto::DkimKey;
 
-impl<T: SigningKey> Dkim2Signer<T> {
-    pub fn from_key(key: T) -> Dkim2Signer<T, NeedDomain> {
+impl Dkim2Signer<NeedDomain> {
+    pub fn from_key(key: impl Into<DkimKey>) -> Dkim2Signer<NeedDomain> {
         Dkim2Signer {
             _state: Default::default(),
-            key,
+            keys: vec![KeyEntry {
+                key: key.into(),
+                selector: String::new(),
+            }],
             domain: String::new(),
-            selector: String::new(),
             flags: Vec::new(),
             nonce: None,
         }
     }
-}
 
-impl<T: SigningKey> Dkim2Signer<T, NeedDomain> {
     /// Sets the domain to use for signing.
-    pub fn domain(self, domain: impl Into<String>) -> Dkim2Signer<T, NeedSelector> {
+    pub fn domain(self, domain: impl Into<String>) -> Dkim2Signer<NeedSelector> {
         Dkim2Signer {
             _state: Default::default(),
-            key: self.key,
+            keys: self.keys,
             domain: domain.into(),
-            selector: self.selector,
             flags: self.flags,
             nonce: self.nonce,
         }
     }
 }
 
-impl<T: SigningKey> Dkim2Signer<T, NeedSelector> {
+impl Dkim2Signer<NeedSelector> {
     /// Sets the selector to use for signing.
-    pub fn selector(self, selector: impl Into<String>) -> Dkim2Signer<T, Done> {
+    pub fn selector(mut self, selector: impl Into<String>) -> Dkim2Signer<Done> {
+        if let Some(entry) = self.keys.first_mut() {
+            entry.selector = selector.into();
+        }
         Dkim2Signer {
             _state: Default::default(),
-            key: self.key,
+            keys: self.keys,
             domain: self.domain,
-            selector: selector.into(),
             flags: self.flags,
             nonce: self.nonce,
         }
     }
 }
 
-impl<T: SigningKey> Dkim2Signer<T, Done> {
+impl Dkim2Signer<Done> {
+    /// Adds an additional signing key and selector.
+    pub fn additional_key(mut self, key: impl Into<DkimKey>, selector: impl Into<String>) -> Self {
+        self.keys.push(KeyEntry {
+            key: key.into(),
+            selector: selector.into(),
+        });
+        self
+    }
+
     /// Sets the flags (f= tag) to add to the signature.
     pub fn flags(mut self, flags: impl IntoIterator<Item = Flag>) -> Self {
         self.flags = flags.into_iter().collect();

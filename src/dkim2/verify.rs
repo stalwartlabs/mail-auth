@@ -16,6 +16,7 @@ use crate::{
         headers::{Header, HeaderIterator, HeaderStream, Writer},
         verify::DomainKey,
     },
+    dkim::DkimError,
     dkim2::{canonicalize::CanonicalizedHeaderWriter, sign::now},
 };
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -234,6 +235,12 @@ impl MessageAuthenticator {
                     Ok(key) => key,
                     Err(Error::Dns(DnsError::Resolver(_))) => {
                         return Dkim2Result::TempError(Error::Dkim2(Dkim2Error::PublicKeyFetch(
+                            signature.i,
+                        )))
+                        .into();
+                    }
+                    Err(Error::Dkim(DkimError::RevokedPublicKey)) => {
+                        return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::PublicKeyRevoked(
                             signature.i,
                         )))
                         .into();
@@ -621,7 +628,7 @@ mod canonicalize_test {
 }
 
 #[cfg(test)]
-mod test_reverse_path {
+pub(crate) mod test_reverse_path {
     use std::cell::Cell;
 
     thread_local! {
@@ -921,6 +928,75 @@ mod test {
             output.failure_reason()
         );
         assert_eq!(output.chain().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn sign_multi_algorithm_then_verify() {
+        use crate::{
+            common::crypto::{Algorithm, Ed25519Key, RsaKey, Sha256},
+            dkim2::{Dkim2Signer, Envelope as HopEnvelope, Hop},
+        };
+        use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
+
+        let load_ed = |domain: &str, selector: &str| {
+            let pem = std::fs::read(resource(&[
+                "keys",
+                &format!("{selector}._domainkey.{domain}.pem"),
+            ]))
+            .unwrap();
+            let PrivateKeyDer::Pkcs8(der) = PrivateKeyDer::from_pem_slice(&pem).unwrap() else {
+                panic!("expected PKCS8 key");
+            };
+            Ed25519Key::from_pkcs8_maybe_unchecked_der(der.secret_pkcs8_der()).unwrap()
+        };
+        let load_rsa = |domain: &str, selector: &str| {
+            let pem = std::fs::read(resource(&[
+                "keys",
+                &format!("{selector}._domainkey.{domain}.pem"),
+            ]))
+            .unwrap();
+            RsaKey::<Sha256>::from_key_der(PrivateKeyDer::from_pem_slice(&pem).unwrap()).unwrap()
+        };
+
+        let original = std::fs::read(resource(&["emails", "simple.eml"])).unwrap();
+
+        let signed = Dkim2Signer::from_key(load_ed("test1.dkim2.com", "ed25519"))
+            .domain("test1.dkim2.com")
+            .selector("ed25519")
+            .additional_key(load_rsa("test1.dkim2.com", "sel1"), "sel1")
+            .sign(
+                &original,
+                &Hop::Real(HopEnvelope {
+                    mail_from: "sender@test1.dkim2.com",
+                    rcpt_to: &["recipient@example.com"],
+                }),
+            )
+            .unwrap();
+
+        assert_eq!(signed.signature.s.len(), 2);
+        assert_eq!(signed.signature.s[0].selector, "ed25519");
+        assert_eq!(signed.signature.s[0].a, Algorithm::Ed25519Sha256);
+        assert_eq!(signed.signature.s[1].selector, "sel1");
+        assert_eq!(signed.signature.s[1].a, Algorithm::RsaSha256);
+
+        let message = prepend(&signed, &original);
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = load_caches();
+        let parsed = AuthenticatedMessage::parse(&message).unwrap();
+        let params = caches.parameters(&parsed);
+        let envelope = Envelope {
+            mail_from: "sender@test1.dkim2.com",
+            rcpt_to: &["recipient@example.com"],
+        };
+        let output = resolver
+            .verify_dkim2_(&parsed, &envelope, params.cache_txt, NOW, true)
+            .await;
+        assert_eq!(
+            output.result(),
+            &Dkim2Result::Pass,
+            "{:?}",
+            output.failure_reason()
+        );
     }
 
     #[tokio::test]

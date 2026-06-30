@@ -58,7 +58,7 @@ impl Dkim2Signed {
     }
 }
 
-impl<T: SigningKey> Dkim2Signer<T, Done> {
+impl Dkim2Signer<Done> {
     /// Signs a message whose content has not changed (Originator or transparent
     /// Forwarder). Adds a DKIM2-Signature, and a Message-Instance only if none
     /// is present yet.
@@ -151,8 +151,7 @@ impl<T: SigningKey> Dkim2Signer<T, Done> {
             RecipeSource::Diff(original) => Some(Recipe::diff(&original, &parsed)),
         };
 
-        let algorithm = self.key.algorithm();
-        let hash_algorithm = HashAlgorithm::from(algorithm);
+        let hash_algorithm = HashAlgorithm::Sha256;
 
         let instances = parsed.dkim2_instances.as_slice();
         let signatures = parsed.dkim2_signatures.as_slice();
@@ -207,23 +206,32 @@ impl<T: SigningKey> Dkim2Signer<T, Done> {
             m: new_m,
             t: now,
             d: self.domain.clone(),
-            s: vec![SignatureValue {
-                selector: self.selector.clone(),
-                a: algorithm,
-                b: Vec::new(),
-            }],
+            s: self
+                .keys
+                .iter()
+                .map(|entry| SignatureValue {
+                    selector: entry.selector.clone(),
+                    a: entry.key.algorithm(),
+                    b: Vec::new(),
+                })
+                .collect(),
             chain,
             n: self.nonce.clone(),
             flags: self.flags.clone(),
         };
 
-        let b = self.key.sign(SignatureInput {
+        let mut input = Vec::with_capacity(256);
+        SignatureInput {
             instances,
             signatures,
             new_signature: &signature,
             new_instance: new_instance.as_ref(),
-        })?;
-        signature.s[0].b = b;
+        }
+        .write(&mut input);
+
+        for (index, entry) in self.keys.iter().enumerate() {
+            signature.s[index].b = entry.key.sign(input.as_slice())?;
+        }
 
         Ok(Dkim2Signed {
             message_instance: new_instance,
@@ -286,7 +294,7 @@ pub(super) fn to_reverse_path(addr: &str) -> String {
 mod test {
     use super::{Dkim2Signer, Envelope, Hop};
     use crate::{
-        common::crypto::{Ed25519Key, RsaKey, Sha256, SigningKey},
+        common::crypto::{DkimKey, Ed25519Key, RsaKey, Sha256},
         dkim2::Dkim2Signed,
     };
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
@@ -366,7 +374,7 @@ mod test {
         out
     }
 
-    fn run_vector<K: SigningKey>(
+    fn run_vector<K: Into<DkimKey>>(
         key: K,
         domain: &str,
         selector: &str,
@@ -511,7 +519,7 @@ mod test {
         let signer = Dkim2Signer::from_key(key).domain("ex.com").selector("sel");
 
         let msg = concat!(
-            "DKIM2-Signature: i=4294967295; m=4294967295; t=0; d=ex.com; mf=YQ==; s=sel:ed25519-sha256:QQ==;\r\n",
+            "DKIM2-Signature: i=4294967295; m=4294967295; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=sel:ed25519-sha256:QQ==;\r\n",
             "Message-Instance: m=4294967295; h=sha256:QQ==:Qg==;\r\n",
             "From: a@ex.com\r\n",
             "\r\n",

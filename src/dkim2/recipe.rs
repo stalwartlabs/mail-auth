@@ -482,6 +482,16 @@ mod test {
                 b"From: a\r\nTo: b\r\n\r\nbody line\r\n",
                 b"From: a\r\nTo: b\r\n\r\nbody line\r\n",
             ),
+            (
+                "header_reorder",
+                b"Subject: one\r\nComment: two\r\nSubject: three\r\n\r\nbody\r\n",
+                b"Comment: two\r\nSubject: three\r\nSubject: one\r\n\r\nbody\r\n",
+            ),
+            (
+                "body_multi_range",
+                b"From: a\r\n\r\none\r\ntwo\r\nthree\r\nfour\r\nfive\r\n",
+                b"From: a\r\n\r\nzero\r\none\r\ntwo\r\nthree\r\nbanana\r\nfour\r\n",
+            ),
         ];
         for (label, original, modified) in cases {
             let recipe = diff_bytes(original, modified);
@@ -490,6 +500,103 @@ mod test {
                 signed_hashes(&reconstructed),
                 signed_hashes(original),
                 "case {label}: recipe={recipe:?} reconstructed={:?}",
+                String::from_utf8_lossy(&reconstructed)
+            );
+        }
+    }
+
+    #[test]
+    fn myers_diff_serialization() {
+        let cases: &[(&str, &[u8], &[u8], &str)] = &[
+            (
+                "deleted",
+                b"Comment: two\r\nSubject: three\r\nSubject: four\r\nSubject: one\r\n\r\nbody\r\n",
+                b"Comment: two\r\nSubject: three\r\nSubject: one\r\n\r\nbody\r\n",
+                r#"{"h":{"Subject":[{"c":[1,1]},{"d":["four"]},{"c":[2,2]}]}}"#,
+            ),
+            (
+                "ranges",
+                b"Subject: one\r\nSubject: two\r\nSubject: three\r\nSubject: four\r\nSubject: five\r\n\r\nbody\r\n",
+                b"Subject: zero\r\nSubject: one\r\nSubject: two\r\nSubject: three\r\nSubject: banana\r\nSubject: four\r\n\r\nbody\r\n",
+                r#"{"h":{"Subject":[{"d":["five"]},{"c":[1,1]},{"c":[3,5]}]}}"#,
+            ),
+            (
+                "reorder",
+                b"Subject: one\r\nComment: two\r\nSubject: three\r\n\r\nbody\r\n",
+                b"Comment: two\r\nSubject: three\r\nSubject: one\r\n\r\nbody\r\n",
+                r#"{"h":{"Subject":[{"d":["three"]},{"c":[1,1]}]}}"#,
+            ),
+            (
+                "body_multi_range",
+                b"From: a\r\n\r\nl1\r\nl2\r\nl3\r\nold-line\r\nl5\r\n",
+                b"From: a\r\n\r\nl1\r\nl2\r\nl3\r\nnew-line\r\nl5\r\n",
+                r#"{"b":[{"c":[1,3]},{"d":["old-line"]},{"c":[5,5]}]}"#,
+            ),
+        ];
+        for (label, original, modified, want) in cases {
+            let recipe = diff_bytes(original, modified);
+            let mut json = Vec::new();
+            recipe.to_json(&mut json).unwrap();
+            assert_eq!(String::from_utf8_lossy(&json), *want, "case {label}");
+            let reconstructed = apply_bytes(&recipe, modified).unwrap();
+            assert_eq!(
+                signed_hashes(&reconstructed),
+                signed_hashes(original),
+                "case {label} round-trip"
+            );
+        }
+    }
+
+    #[test]
+    #[allow(clippy::type_complexity)]
+    fn apply_header_oracles() {
+        fn headers_of(message: &[u8]) -> Vec<(String, String)> {
+            let p = crate::AuthenticatedMessage::parse(message).unwrap();
+            let mut headers: Vec<(String, String)> = p
+                .headers
+                .iter()
+                .map(|(n, v)| {
+                    (
+                        String::from_utf8_lossy(n).trim().to_ascii_lowercase(),
+                        String::from_utf8_lossy(v).trim().to_string(),
+                    )
+                })
+                .collect();
+            headers.sort();
+            headers
+        }
+
+        let input = b"Subject: one\r\nComment: two\r\nSubject: three\r\n\r\n";
+        let cases: &[(&str, &[u8], &[(&str, &str)])] = &[
+            (
+                "copy_one",
+                br#"{"h":{"subject":[{"c":[2,2]}],"comment":[]}}"#,
+                &[("subject", "one")],
+            ),
+            (
+                "preserve_unmentioned",
+                br#"{"h":{"comment":[]}}"#,
+                &[("subject", "one"), ("subject", "three")],
+            ),
+            (
+                "no_change",
+                br#"{}"#,
+                &[("comment", "two"), ("subject", "one"), ("subject", "three")],
+            ),
+        ];
+
+        for (label, json, want) in cases {
+            let recipe = Recipe::from_json(json).unwrap();
+            let reconstructed = apply_bytes(&recipe, input).unwrap();
+            let mut want: Vec<(String, String)> = want
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.to_string()))
+                .collect();
+            want.sort();
+            assert_eq!(
+                headers_of(&reconstructed),
+                want,
+                "case {label}: {}",
                 String::from_utf8_lossy(&reconstructed)
             );
         }

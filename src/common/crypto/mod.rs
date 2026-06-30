@@ -48,6 +48,46 @@ pub trait SigningKey {
     fn algorithm(&self) -> Algorithm;
 }
 
+/// A concrete DKIM signing key, holding either an RSA or an Ed25519 key.
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+pub enum DkimKey {
+    Rsa(RsaKey<Sha256>),
+    Ed25519(Ed25519Key),
+}
+
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+impl SigningKey for DkimKey {
+    type Hasher = Sha256;
+
+    fn sign(&self, input: impl Writable) -> Result<Vec<u8>> {
+        match self {
+            DkimKey::Rsa(key) => key.sign(input),
+            DkimKey::Ed25519(key) => key.sign(input),
+        }
+    }
+
+    fn algorithm(&self) -> Algorithm {
+        match self {
+            DkimKey::Rsa(key) => key.algorithm(),
+            DkimKey::Ed25519(key) => key.algorithm(),
+        }
+    }
+}
+
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+impl From<RsaKey<Sha256>> for DkimKey {
+    fn from(key: RsaKey<Sha256>) -> Self {
+        DkimKey::Rsa(key)
+    }
+}
+
+#[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+impl From<Ed25519Key> for DkimKey {
+    fn from(key: Ed25519Key) -> Self {
+        DkimKey::Ed25519(key)
+    }
+}
+
 pub trait VerifyingKey {
     fn verify<'a>(
         &self,

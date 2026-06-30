@@ -6,7 +6,7 @@
 
 use crate::{
     Dkim2Result,
-    common::crypto::{Algorithm, HashAlgorithm, SigningKey},
+    common::crypto::{Algorithm, DkimKey, HashAlgorithm},
 };
 
 pub mod builder;
@@ -27,14 +27,17 @@ pub struct NeedDomain;
 pub struct NeedSelector;
 pub struct Done;
 
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct Dkim2Signer<T: SigningKey, State = NeedDomain> {
+pub struct Dkim2Signer<State = NeedDomain> {
     _state: std::marker::PhantomData<State>,
-    pub key: T,
+    pub keys: Vec<KeyEntry>,
     pub domain: String,
-    pub selector: String,
     pub flags: Vec<Flag>,
     pub nonce: Option<String>,
+}
+
+pub struct KeyEntry {
+    pub key: DkimKey,
+    pub selector: String,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
@@ -145,6 +148,34 @@ impl<'x> Dkim2Output<'x> {
 
     pub fn failure_reason(&self) -> Option<String> {
         self.error().map(|err| err.to_string())
+    }
+
+    /// Returns true if any signer in the verified chain requested feedback
+    /// (the `feedback` flag, draft-ietf-dkim-dkim2-spec-03 §8.10).
+    pub fn feedback_requested(&self) -> bool {
+        self.chain
+            .iter()
+            .any(|link| link.signature.flags.contains(&Flag::Feedback))
+    }
+
+    /// Domains (`d=`) of the signatures that requested feedback.
+    pub fn feedback_domains(&self) -> Vec<&str> {
+        self.chain
+            .iter()
+            .filter(|link| link.signature.flags.contains(&Flag::Feedback))
+            .map(|link| link.signature.d.as_str())
+            .collect()
+    }
+
+    /// If a privacy-conscious Forwarder set the `feedhere` flag, returns the
+    /// domain of the most recent such hop, via which feedback should be relayed
+    /// instead of being sent directly to the requestor (§8.10). Otherwise `None`.
+    pub fn feedback_relay(&self) -> Option<&str> {
+        self.chain
+            .iter()
+            .filter(|link| link.signature.flags.contains(&Flag::FeedHere))
+            .max_by_key(|link| link.signature.i)
+            .map(|link| link.signature.d.as_str())
     }
 }
 
@@ -275,5 +306,44 @@ impl std::fmt::Display for Dkim2Error {
                 )
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    fn signed(i: u32, domain: &str, flags: Vec<Flag>) -> Signature {
+        Signature {
+            i,
+            d: domain.to_string(),
+            flags,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn feedback_accessors() {
+        let sig1 = signed(1, "a.example", vec![Flag::Feedback]);
+        let sig2 = signed(2, "b.example", vec![Flag::Feedback, Flag::FeedHere]);
+        let link = |signature| ChainLink {
+            signature,
+            instance: None,
+            result: Dkim2Result::Pass,
+            custody_ok: true,
+        };
+        let output = Dkim2Output {
+            result: Dkim2Result::Pass,
+            chain: vec![link(&sig1), link(&sig2)],
+        };
+
+        assert!(output.feedback_requested());
+        assert_eq!(output.feedback_domains(), vec!["a.example", "b.example"]);
+        assert_eq!(output.feedback_relay(), Some("b.example"));
+
+        let none = Dkim2Output::from(Dkim2Result::Pass);
+        assert!(!none.feedback_requested());
+        assert!(none.feedback_domains().is_empty());
+        assert_eq!(none.feedback_relay(), None);
     }
 }
