@@ -16,7 +16,7 @@ use crate::{
         headers::{Header, HeaderIterator, HeaderStream, Writer},
         verify::DomainKey,
     },
-    dkim2::{canonicalize::CanonicalizedFieldWriter, sign::now},
+    dkim2::{canonicalize::CanonicalizedHeaderWriter, sign::now},
 };
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
@@ -37,7 +37,7 @@ impl MessageAuthenticator {
         PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
     {
         let params = params.into();
-        self.verify_dkim2_(params.params, envelope, params.cache_txt, now())
+        self.verify_dkim2_(params.params, envelope, params.cache_txt, now(), true)
             .await
     }
 
@@ -47,6 +47,7 @@ impl MessageAuthenticator {
         envelope: &Envelope<'x>,
         cache_txt: Option<&TXT>,
         now: u64,
+        body_present: bool,
     ) -> Dkim2Output<'x>
     where
         TXT: ResolverCache<Box<str>, Txt>,
@@ -216,7 +217,7 @@ impl MessageAuthenticator {
                         .map(|h| (h.name, h.value)),
                 )
             {
-                let mut w = CanonicalizedFieldWriter::new(&mut input, name);
+                let mut w = CanonicalizedHeaderWriter::new(&mut input, name);
                 w.write(value);
                 w.finalize();
             }
@@ -284,13 +285,17 @@ impl MessageAuthenticator {
                 continue;
             };
 
-            let header_hash = algorithm.header_fields_hash(last_headers.iter().copied());
-            let body_hash = algorithm.body_hash(last_body);
+            let header_hash = algorithm.headers_hash(last_headers.iter().copied());
 
             if header_hash.as_ref() != recorded.header_hash {
                 return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::HeaderHashMismatch(instance.m)))
                     .into();
-            } else if body_hash.as_ref() != recorded.body_hash {
+            }
+            if !body_present {
+                break;
+            }
+            let body_hash = algorithm.body_hash(last_body);
+            if body_hash.as_ref() != recorded.body_hash {
                 return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::BodyHashMismatch(instance.m)))
                     .into();
             }
@@ -435,7 +440,7 @@ fn require_reverse_path() -> bool {
     }
 }
 
-fn relaxed_domain_match(mail_from_domain: &str, signing_domain: &str) -> bool {
+pub(crate) fn relaxed_domain_match(mail_from_domain: &str, signing_domain: &str) -> bool {
     let mut current = mail_from_domain;
     loop {
         if current.eq_ignore_ascii_case(signing_domain) {
@@ -764,7 +769,7 @@ mod test {
         let message = AuthenticatedMessage::parse(&raw).unwrap();
         let params = caches.parameters(&message);
         resolver
-            .verify_dkim2_(&message, envelope, params.cache_txt, NOW)
+            .verify_dkim2_(&message, envelope, params.cache_txt, NOW, true)
             .await
             .result()
             .clone()
@@ -907,7 +912,7 @@ mod test {
             rcpt_to: &["recipient@example.com"],
         };
         let output = resolver
-            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW)
+            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW, true)
             .await;
         assert_eq!(
             output.result(),
@@ -948,7 +953,7 @@ mod test {
             rcpt_to: &["recipient@example.com"],
         };
         let result = resolver
-            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW)
+            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW, true)
             .await;
         assert!(
             matches!(result.result(), Dkim2Result::Fail(_)),
@@ -972,7 +977,7 @@ mod test {
             rcpt_to: &["recipient@example.com"],
         };
         let result = resolver
-            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW)
+            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW, true)
             .await;
         assert!(
             matches!(
@@ -1053,7 +1058,7 @@ mod test {
             };
             let lenient = (!strict).then(super::test_reverse_path::LenientReversePath::new);
             let output = resolver
-                .verify_dkim2_(&message, &envelope, params.cache_txt, now)
+                .verify_dkim2_(&message, &envelope, params.cache_txt, now, true)
                 .await;
             drop(lenient);
             if !state_matches(expected, output.result()) {

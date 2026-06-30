@@ -19,7 +19,7 @@ mod recipe_serializer;
 pub mod sign;
 pub mod verify;
 
-pub use dsn::{Dkim2Dsn, Dkim2DsnOutput, ReturnedMessage};
+pub use dsn::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput};
 pub use recipe::{BodyRecipe, HeaderRecipe, Recipe, Step};
 pub use sign::{Dkim2Signed, Envelope, Hop};
 

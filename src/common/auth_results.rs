@@ -6,8 +6,9 @@
 
 use super::headers::{HeaderWriter, Writer};
 use crate::{
-    ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
-    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, arc::ArcError, dkim::DkimError,
+    ArcOutput, AuthenticationResults, Dkim2Result, DkimOutput, DkimResult, DmarcOutput,
+    DmarcResult, Error, IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, arc::ArcError,
+    dkim::DkimError, dkim2::Dkim2Output,
 };
 use crate::{DnsError, common::crypto::CryptoError};
 use mail_builder::encoders::base64::base64_encode;
@@ -66,6 +67,31 @@ impl<'x> AuthenticationResults<'x> {
         if dkim.is_atps {
             self.auth_results.push_str(" header.from=");
             push_quoted_pvalue(&mut self.auth_results, header_from);
+        }
+    }
+
+    pub fn with_dkim2_result(mut self, dkim2: &Dkim2Output) -> Self {
+        self.set_dkim2_result(dkim2);
+        self
+    }
+
+    pub fn set_dkim2_result(&mut self, dkim2: &Dkim2Output) {
+        self.auth_results.push_str(";\r\n\tdkim2=");
+        dkim2.result().as_auth_result(&mut self.auth_results);
+
+        let link = if matches!(dkim2.result(), Dkim2Result::Pass) {
+            dkim2.chain().first()
+        } else {
+            dkim2
+                .chain()
+                .iter()
+                .find(|link| !matches!(link.result, Dkim2Result::Pass))
+                .or_else(|| dkim2.chain().first())
+        };
+        if let Some(link) = link {
+            self.auth_results.push_str(" header.d=");
+            push_pvalue(&mut self.auth_results, &link.signature.d);
+            write!(self.auth_results, " header.i={}", link.signature.i).ok();
         }
     }
 
@@ -317,6 +343,27 @@ impl AsAuthResult for DkimResult {
                 err.as_auth_result(header);
             }
             DkimResult::None => header.push_str("none"),
+        }
+    }
+}
+
+impl AsAuthResult for Dkim2Result {
+    fn as_auth_result(&self, header: &mut String) {
+        match &self {
+            Dkim2Result::Pass => header.push_str("pass"),
+            Dkim2Result::Fail(err) => {
+                header.push_str("fail");
+                err.as_auth_result(header);
+            }
+            Dkim2Result::PermError(err) => {
+                header.push_str("permerror");
+                err.as_auth_result(header);
+            }
+            Dkim2Result::TempError(err) => {
+                header.push_str("temperror");
+                err.as_auth_result(header);
+            }
+            Dkim2Result::None => header.push_str("none"),
         }
     }
 }
@@ -664,6 +711,85 @@ mod test {
             assert_eq!(
                 auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
                 expected_auth_results
+            );
+        }
+    }
+
+    #[test]
+    fn dkim2_authentication_results() {
+        use crate::{
+            Dkim2Result,
+            dkim2::{ChainLink, Dkim2Error, Dkim2Output, Signature as Dkim2Signature},
+        };
+
+        let originator = Dkim2Signature {
+            i: 1,
+            d: "example.org".into(),
+            ..Default::default()
+        };
+        let relay = Dkim2Signature {
+            i: 2,
+            d: "relay.example.com".into(),
+            ..Default::default()
+        };
+
+        let pass = Dkim2Output {
+            result: Dkim2Result::Pass,
+            chain: vec![
+                ChainLink {
+                    signature: &originator,
+                    instance: None,
+                    result: Dkim2Result::Pass,
+                    custody_ok: true,
+                },
+                ChainLink {
+                    signature: &relay,
+                    instance: None,
+                    result: Dkim2Result::Pass,
+                    custody_ok: true,
+                },
+            ],
+        };
+
+        let fail = Dkim2Output {
+            result: Dkim2Result::Fail(Error::Dkim2(Dkim2Error::BodyHashMismatch(2))),
+            chain: vec![
+                ChainLink {
+                    signature: &originator,
+                    instance: None,
+                    result: Dkim2Result::Pass,
+                    custody_ok: true,
+                },
+                ChainLink {
+                    signature: &relay,
+                    instance: None,
+                    result: Dkim2Result::Fail(Error::Dkim2(Dkim2Error::BodyHashMismatch(2))),
+                    custody_ok: true,
+                },
+            ],
+        };
+
+        let permerror: Dkim2Output =
+            Dkim2Result::PermError(Error::Dkim2(Dkim2Error::SignatureMissing(1))).into();
+
+        let none: Dkim2Output = Dkim2Result::None.into();
+
+        for (expected, output) in [
+            ("dkim2=pass header.d=example.org header.i=1", &pass),
+            (
+                concat!(
+                    "dkim2=fail (Message-Instance m=2 body hash mismatch) ",
+                    "header.d=relay.example.com header.i=2"
+                ),
+                &fail,
+            ),
+            ("dkim2=permerror (DKIM2-Signature i=1 missing)", &permerror),
+            ("dkim2=none", &none),
+        ] {
+            let auth_results = AuthenticationResults::new("mydomain.org").with_dkim2_result(output);
+            assert_eq!(
+                auth_results.auth_results.rsplit_once(';').unwrap().1.trim(),
+                expected
             );
         }
     }

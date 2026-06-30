@@ -298,7 +298,7 @@ fn diff_steps(original: &[&[u8]], modified: &[&[u8]]) -> Vec<Step> {
                 new_index, new_len, ..
             } => {
                 for line in &original[new_index..new_index + new_len] {
-                    data.push(String::from_utf8_lossy(line).into_owned());
+                    data.push(unfold_lossy(line));
                 }
             }
             DiffOp::Delete { .. } => {}
@@ -308,6 +308,29 @@ fn diff_steps(original: &[&[u8]], modified: &[&[u8]]) -> Vec<Step> {
         steps.push(Step::Data(data));
     }
     steps
+}
+
+fn unfold_lossy(value: &[u8]) -> String {
+    let mut result = Vec::with_capacity(value.len());
+    let mut last_is_crlf = false;
+
+    for &ch in value {
+        match ch {
+            b'\r' | b'\n' => {
+                last_is_crlf = true;
+            }
+            _ => {
+                if last_is_crlf && !ch.is_ascii_whitespace() && !result.is_empty() {
+                    result.push(b' ');
+                }
+                result.push(ch);
+                last_is_crlf = false;
+            }
+        }
+    }
+
+    String::from_utf8(result)
+        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
 }
 
 #[cfg(test)]
@@ -406,14 +429,12 @@ mod test {
         recipe.apply(&p.headers, p.raw_body())
     }
 
-    /// The reconstruction is hash-equivalent to the original, not byte-identical:
-    /// compare the signed header hash and the body hash, which is what a verifier checks.
     fn signed_hashes(message: &[u8]) -> (Vec<u8>, Vec<u8>) {
         use crate::common::crypto::HashAlgorithm;
         let p = crate::AuthenticatedMessage::parse(message).unwrap();
         (
             HashAlgorithm::Sha256
-                .header_fields_hash(p.headers.iter().copied())
+                .headers_hash(p.headers.iter().copied())
                 .as_ref()
                 .to_vec(),
             HashAlgorithm::Sha256
@@ -557,5 +578,396 @@ mod test {
         };
         let out = apply_bytes(&recipe, b"From: a\r\nTo: b\r\n\r\nbody\r\n").unwrap();
         assert!(String::from_utf8_lossy(&out).contains("subject: Injected"));
+    }
+
+    fn assert_chain_reconstructs(versions: &[&[u8]], via_json: bool) {
+        assert!(versions.len() >= 2, "a chain needs at least two versions");
+
+        let recipes: Vec<Recipe> = versions
+            .windows(2)
+            .map(|pair| {
+                let recipe = diff_bytes(pair[0], pair[1]);
+                if via_json {
+                    Recipe::from_json(&json(&recipe)).unwrap()
+                } else {
+                    recipe
+                }
+            })
+            .collect();
+
+        let mut current = versions[versions.len() - 1].to_vec();
+        for (hop, recipe) in recipes.iter().enumerate().rev() {
+            let reconstructed = apply_bytes(recipe, &current).unwrap();
+            let expected = versions[hop];
+            assert_eq!(
+                signed_hashes(&reconstructed),
+                signed_hashes(expected),
+                "hop {hop} (via_json={via_json}) recipe={recipe:?}\n  reconstructed={:?}\n  expected={:?}",
+                String::from_utf8_lossy(&reconstructed),
+                String::from_utf8_lossy(expected),
+            );
+            current = reconstructed;
+        }
+    }
+
+    fn assert_chain(versions: &[&[u8]]) {
+        assert_chain_reconstructs(versions, false);
+        assert_chain_reconstructs(versions, true);
+    }
+
+    #[test]
+    fn chain_header_value_changes() {
+        assert_chain(&[
+            b"From: alice@example.com\r\nTo: bob@example.com\r\nSubject: v0\r\n\r\nHello world\r\n",
+            b"From: alice@example.com\r\nTo: bob@example.com\r\nSubject: v1\r\n\r\nHello world\r\n",
+            b"From: alice@example.com\r\nTo: carol@example.com\r\nSubject: v2\r\n\r\nHello world\r\n",
+            b"From: alice@example.com\r\nTo: carol@example.com\r\nSubject: final\r\n\r\nHello world\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_header_insertions() {
+        assert_chain(&[
+            b"From: a\r\nTo: b\r\n\r\nbody\r\n",
+            b"From: a\r\nTo: b\r\nSubject: added\r\n\r\nbody\r\n",
+            b"From: a\r\nReply-To: r\r\nTo: b\r\nSubject: added\r\n\r\nbody\r\n",
+            b"From: a\r\nReply-To: r\r\nTo: b\r\nSubject: added\r\nList-Id: <l>\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_header_deletions() {
+        assert_chain(&[
+            b"From: a\r\nReply-To: r\r\nTo: b\r\nSubject: s\r\nList-Id: <l>\r\n\r\nbody\r\n",
+            b"From: a\r\nTo: b\r\nSubject: s\r\nList-Id: <l>\r\n\r\nbody\r\n",
+            b"From: a\r\nTo: b\r\nList-Id: <l>\r\n\r\nbody\r\n",
+            b"From: a\r\nTo: b\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_mixed_header_insert_change_delete() {
+        assert_chain(&[
+            b"From: a\r\nTo: b\r\nSubject: original\r\n\r\nbody\r\n",
+            b"From: a\r\nReply-To: r\r\nTo: b\r\nSubject: original\r\n\r\nbody\r\n",
+            b"From: a\r\nReply-To: r\r\nTo: b\r\nSubject: edited\r\n\r\nbody\r\n",
+            b"From: a\r\nReply-To: r\r\nTo: b\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_duplicate_header_evolution() {
+        assert_chain(&[
+            b"From: a\r\nComments: alpha\r\nComments: beta\r\n\r\nbody\r\n",
+            b"From: a\r\nComments: alpha\r\nComments: beta\r\nComments: gamma\r\n\r\nbody\r\n",
+            b"From: a\r\nComments: alpha\r\nComments: gamma\r\n\r\nbody\r\n",
+            b"From: a\r\nComments: ALPHA\r\nComments: gamma\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_duplicate_header_interleaved_changes() {
+        assert_chain(&[
+            b"From: a\r\nReceived-SPF: a\r\nComments: 1\r\nComments: 2\r\nComments: 3\r\nComments: 4\r\nComments: 5\r\n\r\nbody\r\n",
+            b"From: a\r\nReceived-SPF: a\r\nComments: 1\r\nComments: 2\r\nComments: THREE\r\nComments: 4\r\nComments: 5\r\n\r\nbody\r\n",
+            b"From: a\r\nReceived-SPF: a\r\nComments: 1\r\nComments: THREE\r\nComments: 5\r\n\r\nbody\r\n",
+            b"From: a\r\nReceived-SPF: a\r\nComments: 0\r\nComments: 1\r\nComments: THREE\r\nComments: 5\r\nComments: 6\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_body_line_changes() {
+        assert_chain(&[
+            b"From: a\r\n\r\nline1\r\nline2\r\nline3\r\n",
+            b"From: a\r\n\r\nline1\r\nCHANGED\r\nline3\r\n",
+            b"From: a\r\n\r\nFIRST\r\nCHANGED\r\nlast\r\n",
+            b"From: a\r\n\r\nFIRST\r\nCHANGED\r\nLAST\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_body_insertions() {
+        assert_chain(&[
+            b"From: a\r\n\r\nline1\r\nline2\r\n",
+            b"From: a\r\n\r\nline1\r\ninserted\r\nline2\r\n",
+            b"From: a\r\n\r\nline1\r\ninserted\r\nline2\r\nappended\r\n",
+            b"From: a\r\n\r\nprepended\r\nline1\r\ninserted\r\nline2\r\nappended\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_body_deletions() {
+        assert_chain(&[
+            b"From: a\r\n\r\nl1\r\nl2\r\nl3\r\nl4\r\nl5\r\n",
+            b"From: a\r\n\r\nl1\r\nl2\r\nl4\r\nl5\r\n",
+            b"From: a\r\n\r\nl2\r\nl4\r\nl5\r\n",
+            b"From: a\r\n\r\nl2\r\nl4\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_body_and_headers_each_hop() {
+        assert_chain(&[
+            b"From: a\r\nSubject: s0\r\n\r\nintro\r\nmiddle\r\nclose\r\n",
+            b"From: a\r\nSubject: s1\r\n\r\nintro\r\nMIDDLE\r\nclose\r\n",
+            b"From: a\r\nSubject: s2\r\nX-Tag: keep\r\n\r\nintro\r\nMIDDLE\r\nadded\r\nclose\r\n",
+            b"From: a\r\nSubject: s2\r\nX-Tag: keep\r\n\r\nMIDDLE\r\nadded\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_with_noop_hop() {
+        assert_chain(&[
+            b"From: a\r\nSubject: keep\r\n\r\nbody line\r\n",
+            b"From: a\r\nSubject: keep\r\n\r\nbody line\r\n",
+            b"From: a\r\nSubject: changed\r\n\r\nbody line\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_body_emptied_then_refilled() {
+        assert_chain(&[
+            b"From: a\r\n\r\nfirst\r\nsecond\r\n",
+            b"From: a\r\n\r\n",
+            b"From: a\r\n\r\nbrand new line\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_empty_header_value() {
+        assert_chain(&[
+            b"From: a\r\nSubject: hello\r\n\r\nbody\r\n",
+            b"From: a\r\nSubject:\r\n\r\nbody\r\n",
+            b"From: a\r\nSubject: world\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_non_utf8_body_copied_lines() {
+        assert_chain(&[
+            b"From: a\r\n\r\nhel\x80lo\r\nworld\r\n\xff\xfe binary\r\n",
+            b"From: a\r\n\r\nhel\x80lo\r\nWORLD\r\n\xff\xfe binary\r\n",
+            b"From: a\r\n\r\nhel\x80lo\r\nWORLD\r\ninserted\r\n\xff\xfe binary\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_body_without_trailing_crlf() {
+        assert_chain(&[
+            b"From: a\r\n\r\nl1\r\nl2\r\nl3",
+            b"From: a\r\n\r\nl1\r\nCHANGED\r\nl3",
+            b"From: a\r\n\r\nl1\r\nCHANGED",
+        ]);
+    }
+
+    #[test]
+    fn chain_header_reinserted_after_deletion() {
+        assert_chain(&[
+            b"From: a\r\nSubject: present\r\n\r\nbody\r\n",
+            b"From: a\r\n\r\nbody\r\n",
+            b"From: a\r\nSubject: back again\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    #[test]
+    fn chain_internal_whitespace_changes_are_reconstructed() {
+        assert_chain(&[
+            b"From: a\r\nSubject: spaced   out   value\r\n\r\nbody\r\n",
+            b"From: a\r\nSubject: spaced out value\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    #[test]
+    fn diff_numbers_duplicate_headers_bottom_up() {
+        let recipe = diff_bytes(
+            b"From: a\r\nComments: top\r\nComments: middle\r\nComments: bottom\r\n\r\nbody\r\n",
+            b"From: a\r\nComments: top\r\nComments: bottom\r\n\r\nbody\r\n",
+        );
+        let header = recipe
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case("comments"))
+            .expect("comments recipe present");
+        assert_eq!(
+            header.steps,
+            vec![
+                Step::Copy { start: 1, end: 1 },
+                Step::Data(vec!["middle".to_string()]),
+                Step::Copy { start: 2, end: 2 },
+            ],
+        );
+    }
+
+    #[test]
+    fn diff_numbers_body_lines_top_down() {
+        let recipe = diff_bytes(
+            b"From: a\r\n\r\nfirst\r\nsecond\r\nthird\r\n",
+            b"From: a\r\n\r\nfirst\r\nCHANGED\r\nthird\r\n",
+        );
+        assert_eq!(
+            recipe.body,
+            BodyRecipe::Steps(vec![
+                Step::Copy { start: 1, end: 1 },
+                Step::Data(vec!["second".to_string()]),
+                Step::Copy { start: 3, end: 3 },
+            ]),
+        );
+    }
+
+    #[test]
+    fn diff_encodes_full_add_and_remove() {
+        let added = diff_bytes(
+            b"From: a\r\nSubject: was here\r\n\r\nbody\r\n",
+            b"From: a\r\n\r\nbody\r\n",
+        );
+        let subject = added
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case("subject"))
+            .unwrap();
+        assert_eq!(
+            subject.steps,
+            vec![Step::Data(vec!["was here".to_string()])]
+        );
+
+        let removed = diff_bytes(
+            b"From: a\r\n\r\nbody\r\n",
+            b"From: a\r\nSubject: injected\r\n\r\nbody\r\n",
+        );
+        let subject = removed
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case("subject"))
+            .unwrap();
+        assert!(
+            subject.steps.is_empty(),
+            "empty recipe removes all instances"
+        );
+    }
+
+    #[test]
+    fn diff_copy_ranges_are_strictly_ascending() {
+        let recipe = diff_bytes(
+            b"From: a\r\nComments: 1\r\nComments: 2\r\nComments: 3\r\nComments: 4\r\nComments: 5\r\n\r\nbody\r\n",
+            b"From: a\r\nComments: 1\r\nComments: TWO\r\nComments: 3\r\nComments: FOUR\r\nComments: 5\r\n\r\nbody\r\n",
+        );
+        let header = recipe
+            .headers
+            .iter()
+            .find(|h| h.name.eq_ignore_ascii_case("comments"))
+            .unwrap();
+        assert_copy_ranges_ascending(&header.steps);
+
+        let body = diff_bytes(
+            b"From: a\r\n\r\na\r\nb\r\nc\r\nd\r\ne\r\nf\r\n",
+            b"From: a\r\n\r\na\r\nB\r\nc\r\nd\r\nE\r\nf\r\n",
+        )
+        .body;
+        if let BodyRecipe::Steps(steps) = body {
+            assert_copy_ranges_ascending(&steps);
+        } else {
+            panic!("expected body steps");
+        }
+    }
+
+    fn assert_no_crlf_in_data(recipe: &Recipe) {
+        let check = |values: &[String], ctx: &str| {
+            for value in values {
+                assert!(
+                    !value.contains('\r') && !value.contains('\n'),
+                    "{ctx} data string contains CR/LF: {value:?}"
+                );
+            }
+        };
+        for header in &recipe.headers {
+            for step in &header.steps {
+                if let Step::Data(values) = step {
+                    check(values, &format!("header {}", header.name));
+                }
+            }
+        }
+        if let BodyRecipe::Steps(steps) = &recipe.body {
+            for step in steps {
+                if let Step::Data(values) = step {
+                    check(values, "body");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn data_strings_never_contain_crlf() {
+        let recipes = [
+            diff_bytes(
+                b"From: a\r\nSubject: short value\r\n\r\nbody\r\n",
+                b"From: a\r\nSubject: a much longer replacement subject value\r\n\r\nbody\r\n",
+            ),
+            diff_bytes(
+                b"From: a\r\nSubject: one\r\n two\r\n three\r\n\r\nbody\r\n",
+                b"From: a\r\nSubject: unrelated\r\n\r\nbody\r\n",
+            ),
+            diff_bytes(
+                b"From: a\r\nSubject: line one;\r\n\tline two;\r\n\tline three\r\n\r\nbody\r\n",
+                b"From: a\r\n\r\nbody\r\n",
+            ),
+            diff_bytes(
+                b"From: a\r\n\r\nplain\r\nbody\r\n",
+                b"From: a\r\n\r\nplain\r\ndifferent\r\n",
+            ),
+        ];
+        for recipe in &recipes {
+            assert_no_crlf_in_data(recipe);
+        }
+    }
+
+    #[test]
+    fn unfold_lossy_replaces_terminators_with_space() {
+        assert_eq!(unfold_lossy(b"one\r\n two"), "one two");
+        assert_eq!(unfold_lossy(b"alpha\r\nbeta"), "alpha beta");
+        assert_eq!(unfold_lossy(b"lone\rcr"), "lone cr");
+        assert_eq!(unfold_lossy(b"lone\nlf"), "lone lf");
+        assert_eq!(unfold_lossy(b"no terminators"), "no terminators");
+    }
+
+    /// A folded header reconstructed from a "d" step must hash identically to the
+    /// original folded header: the fold collapses to whitespace either way.
+    #[test]
+    fn folded_header_data_step_is_hash_equivalent() {
+        let recipe = diff_bytes(
+            b"From: a\r\nSubject: part one\r\n part two\r\n\r\nbody\r\n",
+            b"From: a\r\n\r\nbody\r\n",
+        );
+        assert_no_crlf_in_data(&recipe);
+        let reconstructed = apply_bytes(&recipe, b"From: a\r\n\r\nbody\r\n").unwrap();
+        assert_eq!(
+            signed_hashes(&reconstructed),
+            signed_hashes(b"From: a\r\nSubject: part one part two\r\n\r\nbody\r\n"),
+        );
+    }
+
+    #[test]
+    fn chain_folded_header_round_trips() {
+        assert_chain(&[
+            b"From: a\r\nSubject: a folded header\r\n value spanning\r\n three lines\r\n\r\nbody\r\n",
+            b"From: a\r\nSubject: now unfolded and changed\r\n\r\nbody\r\n",
+            b"From: a\r\nSubject: refolded value\r\n that wraps again\r\n\r\nbody\r\n",
+        ]);
+    }
+
+    fn assert_copy_ranges_ascending(steps: &[Step]) {
+        let mut prev_end = 0u32;
+        for step in steps {
+            if let Step::Copy { start, end } = step {
+                assert!(
+                    *start > prev_end,
+                    "copy start {start} must exceed previous end {prev_end}: {steps:?}"
+                );
+                assert!(
+                    start <= end,
+                    "copy start {start} after end {end}: {steps:?}"
+                );
+                prev_end = *end;
+            }
+        }
     }
 }

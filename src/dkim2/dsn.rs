@@ -4,70 +4,68 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{ChainBinding, Dkim2Result, Signature, sign::Envelope};
+use super::{ChainBinding, Dkim2Result, Signature, sign::Envelope, verify::relaxed_domain_match};
 use crate::{
     AuthenticatedMessage, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache, Txt,
+    dkim2::sign::now,
 };
 use mail_parser::{MessageParser, MimeHeaders, PartType};
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dkim2Dsn<'x> {
-    pub raw: &'x [u8],
-    pub human_readable: &'x [u8],
-    pub delivery_status: &'x [u8],
-    pub returned: ReturnedMessage<'x>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ReturnedMessage<'x> {
-    Full(&'x [u8]),
-    HeadersOnly(&'x [u8]),
-}
-
-impl<'x> ReturnedMessage<'x> {
-    pub fn bytes(&self) -> &'x [u8] {
-        match self {
-            ReturnedMessage::Full(bytes) | ReturnedMessage::HeadersOnly(bytes) => bytes,
-        }
-    }
+    pub raw: AuthenticatedMessage<'x>,
+    pub returned: AuthenticatedMessage<'x>,
+    pub returned_full: bool,
 }
 
 impl<'x> Dkim2Dsn<'x> {
+    /// Creates a new Dkim2Dsn from the raw DSN and the returned message
+    pub fn new(
+        raw: AuthenticatedMessage<'x>,
+        returned: AuthenticatedMessage<'x>,
+        returned_full: bool,
+    ) -> Self {
+        Dkim2Dsn {
+            raw,
+            returned,
+            returned_full,
+        }
+    }
+
     /// Parses a multipart/report DSN and locates the embedded returned message
     /// (message/rfc822 or text/rfc822-headers).
-    pub fn parse(raw_message: &'x [u8]) -> Option<Dkim2Dsn<'x>> {
-        let message = MessageParser::new().parse(raw_message)?;
+    pub fn parse(raw_message: &'x [u8]) -> Result<Dkim2Dsn<'x>, Dkim2DsnFailure> {
+        let message = MessageParser::new()
+            .parse(raw_message)
+            .ok_or(Dkim2DsnFailure::DsnUnparseable)?;
         let PartType::Multipart(children) = &message.root_part().body else {
-            return None;
+            return Err(Dkim2DsnFailure::DsnUnparseable);
         };
 
-        let mut human_readable = None;
-        let mut delivery_status = None;
         let mut returned = None;
-
         for child in children {
-            let part = message.parts.get(*child as usize)?;
-            let slice = raw_message.get(part.offset_body as usize..part.offset_end as usize)?;
-            if part.is_content_type("message", "delivery-status") {
-                delivery_status = Some(slice);
-            } else if part.is_content_type("message", "rfc822") {
-                returned = Some(ReturnedMessage::Full(slice));
+            let part = message
+                .parts
+                .get(*child as usize)
+                .ok_or(Dkim2DsnFailure::DsnUnparseable)?;
+            let slice = raw_message
+                .get(part.offset_body as usize..part.offset_end as usize)
+                .ok_or(Dkim2DsnFailure::DsnUnparseable)?;
+            if part.is_content_type("message", "rfc822") {
+                returned = Some((slice, true));
             } else if part.is_content_type("text", "rfc822-headers") {
-                returned = Some(ReturnedMessage::HeadersOnly(slice));
-            } else if human_readable.is_none() {
-                human_readable = Some(slice);
+                returned = Some((slice, false));
             }
         }
 
-        Some(Dkim2Dsn {
-            raw: raw_message,
-            human_readable: human_readable?,
-            delivery_status: delivery_status?,
-            returned: returned?,
+        let (returned_slice, returned_full) =
+            returned.ok_or(Dkim2DsnFailure::ReturnedUnparseable)?;
+        Ok(Dkim2Dsn {
+            raw: AuthenticatedMessage::parse(raw_message).ok_or(Dkim2DsnFailure::DsnUnparseable)?,
+            returned: AuthenticatedMessage::parse(returned_slice)
+                .ok_or(Dkim2DsnFailure::ReturnedUnparseable)?,
+            returned_full,
         })
     }
 }
@@ -76,23 +74,39 @@ impl<'x> Dkim2Dsn<'x> {
 pub struct Dkim2DsnOutput {
     pub dsn: Dkim2Result,
     pub returned: Dkim2Result,
-    pub aligned: bool,
-    pub(crate) failure: Option<String>,
 }
 
-impl Dkim2DsnOutput {
-    pub fn is_authentic(&self) -> bool {
-        matches!(self.dsn, Dkim2Result::Pass)
-            && matches!(self.returned, Dkim2Result::Pass)
-            && self.aligned
-    }
+/// Why an inbound DSN failed authentication (draft-ietf-dkim-dkim2-spec-03 §12.1.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dkim2DsnFailure {
+    DsnUnparseable,
+    ReturnedUnparseable,
+    DsnNotSigned,
+    DsnChainFailed,
+    ReturnedNotSigned,
+    ReturnedChainFailed,
+    NotAligned,
+}
 
-    pub fn failure_reason(&self) -> Option<&str> {
-        self.failure.as_deref()
+impl std::fmt::Display for Dkim2DsnFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Dkim2DsnFailure::DsnUnparseable => "DSN could not be parsed",
+            Dkim2DsnFailure::ReturnedUnparseable => "Returned message could not be parsed",
+            Dkim2DsnFailure::DsnNotSigned => "DSN is not DKIM2 signed",
+            Dkim2DsnFailure::DsnChainFailed => "DSN signature chain failed",
+            Dkim2DsnFailure::ReturnedNotSigned => "Returned message is not DKIM2 signed",
+            Dkim2DsnFailure::ReturnedChainFailed => "Returned message signature chain failed",
+            Dkim2DsnFailure::NotAligned => {
+                "DSN signer is not aligned with the returned message recipient"
+            }
+        })
     }
 }
 
-fn top_signature(message: &AuthenticatedMessage<'_>) -> Option<(String, String, Vec<String>)> {
+fn top_signature<'x>(
+    message: &'x AuthenticatedMessage<'x>,
+) -> Option<(&'x String, &'x str, &'x [String])> {
     let top = message
         .dkim2_signatures
         .iter()
@@ -100,24 +114,19 @@ fn top_signature(message: &AuthenticatedMessage<'_>) -> Option<(String, String, 
         .max_by_key(|s| s.i)?;
     match &top.chain {
         ChainBinding::Envelope { mail_from, rcpt_to } => {
-            Some((top.d.clone(), mail_from.clone(), rcpt_to.clone()))
+            Some((&top.d, mail_from, rcpt_to.as_slice()))
         }
-        ChainBinding::NextDomain(_) => Some((top.d.clone(), String::new(), Vec::new())),
+        ChainBinding::NextDomain(_) => Some((&top.d, "", &[])),
     }
 }
 
-fn aligned_domain(recipient_domain: &str, signing_domain: &str) -> bool {
-    let signing = signing_domain.to_ascii_lowercase();
-    let mut current = recipient_domain.to_ascii_lowercase();
-    loop {
-        if current == signing {
-            return true;
-        }
-        match current.split_once('.') {
-            Some((_, rest)) if !rest.is_empty() => current = rest.to_string(),
-            _ => return false,
-        }
-    }
+fn domain_of(address: &str) -> &str {
+    let address = address.trim_start_matches('<').trim_end_matches('>');
+    address.rsplit_once('@').map(|(_, d)| d).unwrap_or(address)
+}
+
+fn is_dkim2_signed(message: &AuthenticatedMessage<'_>) -> bool {
+    !message.dkim2_signatures.is_empty() || message.has_dkim2_errors
 }
 
 impl Signature {
@@ -141,7 +150,7 @@ impl MessageAuthenticator {
         &self,
         params: impl Into<Parameters<'x, &'x Dkim2Dsn<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
         envelope: &Envelope<'x>,
-    ) -> Dkim2DsnOutput
+    ) -> Result<Dkim2DsnOutput, Dkim2DsnFailure>
     where
         TXT: ResolverCache<Box<str>, Txt> + 'x,
         MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
@@ -150,11 +159,7 @@ impl MessageAuthenticator {
         PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
     {
         let params = params.into();
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        self.verify_dkim2_dsn_(params.params, envelope, params.cache_txt, now)
+        self.verify_dkim2_dsn_(params.params, envelope, params.cache_txt, now())
             .await
     }
 
@@ -164,82 +169,82 @@ impl MessageAuthenticator {
         envelope: &Envelope<'x>,
         cache_txt: Option<&TXT>,
         now: u64,
-    ) -> Dkim2DsnOutput
+    ) -> Result<Dkim2DsnOutput, Dkim2DsnFailure>
     where
         TXT: ResolverCache<Box<str>, Txt>,
     {
-        let Some(dsn_message) = AuthenticatedMessage::parse(dsn.raw) else {
-            return Dkim2DsnOutput {
-                dsn: Dkim2Result::None,
-                returned: Dkim2Result::None,
-                aligned: false,
-                failure: Some("DSN could not be parsed".to_string()),
-            };
-        };
-        let dsn_output = self
-            .verify_dkim2_(&dsn_message, envelope, cache_txt, now)
-            .await;
-        let dsn_result = dsn_output.result().clone();
-        let dsn_signing_domain = top_signature(&dsn_message).map(|(d, _, _)| d);
+        if !is_dkim2_signed(&dsn.raw) {
+            return Err(Dkim2DsnFailure::DsnNotSigned);
+        } else if !is_dkim2_signed(&dsn.returned) {
+            return Err(Dkim2DsnFailure::ReturnedNotSigned);
+        }
 
-        let Some(returned_message) = AuthenticatedMessage::parse(dsn.returned.bytes()) else {
-            return Dkim2DsnOutput {
-                dsn: dsn_result,
-                returned: Dkim2Result::None,
-                aligned: false,
-                failure: Some("Returned message could not be parsed".to_string()),
-            };
-        };
-        let returned_top = top_signature(&returned_message);
+        let dsn_output = self
+            .verify_dkim2_(&dsn.raw, envelope, cache_txt, now, true)
+            .await;
+        let dsn_result = dsn_output.result;
+        if !matches!(dsn_result, Dkim2Result::Pass) {
+            return Err(Dkim2DsnFailure::DsnChainFailed);
+        }
+
+        let dsn_signing_domain = top_signature(&dsn.raw).map(|(d, _, _)| d);
+        let returned_top = top_signature(&dsn.returned);
         let returned_envelope = returned_top
             .as_ref()
-            .map(|(_, mail_from, rcpt_to)| (mail_from.clone(), rcpt_to.clone()))
+            .map(|(_, mail_from, rcpt_to)| (*mail_from, *rcpt_to))
             .unwrap_or_default();
         let returned_rcpts: Vec<&str> = returned_envelope.1.iter().map(|r| r.as_str()).collect();
-        let returned_output = self
+        let returned_result = self
             .verify_dkim2_(
-                &returned_message,
+                &dsn.returned,
                 &Envelope {
-                    mail_from: &returned_envelope.0,
+                    mail_from: returned_envelope.0,
                     rcpt_to: &returned_rcpts,
                 },
                 cache_txt,
                 now,
+                dsn.returned_full,
             )
-            .await;
-        let returned_result = returned_output.result().clone();
+            .await
+            .result;
+        if !matches!(returned_result, Dkim2Result::Pass) {
+            return Err(Dkim2DsnFailure::ReturnedChainFailed);
+        };
 
-        let aligned = match (dsn_signing_domain, returned_top) {
-            (Some(dsn_domain), Some((_, _, rcpt_to))) => rcpt_to.iter().any(|rcpt| {
-                let rcpt = rcpt.trim_start_matches('<').trim_end_matches('>');
-                let domain = rcpt.rsplit_once('@').map(|(_, d)| d).unwrap_or(rcpt);
-                aligned_domain(domain, &dsn_domain)
-            }),
+        let aligned = match (&dsn_signing_domain, &returned_top) {
+            (Some(dsn_domain), Some((returned_domain, _, rcpt_to))) => {
+                // 12.1.2(1): the DSN signer is aligned with the recipient
+                // recorded in the rt= tag of the returned message's top signature.
+                let recipient_aligned = rcpt_to
+                    .iter()
+                    .any(|rcpt| relaxed_domain_match(domain_of(rcpt), dsn_domain));
+
+                // 12.1.2(2): the returned message's top signature was generated
+                // by us, the system receiving the DSN.
+                let returned_is_ours = envelope
+                    .rcpt_to
+                    .iter()
+                    .any(|rcpt| relaxed_domain_match(domain_of(rcpt), returned_domain));
+
+                recipient_aligned && returned_is_ours
+            }
             _ => false,
         };
 
-        let failure = if !matches!(dsn_result, Dkim2Result::Pass) {
-            Some("DSN signature chain failed".to_string())
-        } else if !matches!(returned_result, Dkim2Result::Pass) {
-            Some("Returned message signature chain failed".to_string())
-        } else if !aligned {
-            Some("DSN signer is not aligned with the returned message recipient".to_string())
+        if aligned {
+            Ok(Dkim2DsnOutput {
+                dsn: dsn_result,
+                returned: returned_result,
+            })
         } else {
-            None
-        };
-
-        Dkim2DsnOutput {
-            dsn: dsn_result,
-            returned: returned_result,
-            aligned,
-            failure,
+            Err(Dkim2DsnFailure::NotAligned)
         }
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::{Dkim2Dsn, Signature};
+    use super::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput, Signature};
     use crate::{
         MessageAuthenticator,
         common::{
@@ -308,6 +313,89 @@ mod test {
         out
     }
 
+    const RETURNED_PLAIN: &str = concat!(
+        "From: sender@test1.dkim2.com\r\n",
+        "To: user@test2.dkim2.com\r\n",
+        "Subject: Hello\r\n",
+        "Date: Sat, 01 Mar 2026 12:00:00 +0000\r\n",
+        "Message-ID: <m@test1.dkim2.com>\r\n",
+        "\r\n",
+        "This is the original body.\r\n",
+    );
+
+    fn signed_returned() -> Vec<u8> {
+        sign_full(
+            load_key("test1.dkim2.com", "ed25519"),
+            "test1.dkim2.com",
+            "ed25519",
+            RETURNED_PLAIN.as_bytes(),
+            &Hop::Real(Envelope {
+                mail_from: "sender@test1.dkim2.com",
+                rcpt_to: &["user@test2.dkim2.com"],
+            }),
+        )
+    }
+
+    fn headers_only(message: &[u8]) -> Vec<u8> {
+        let end = message.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4;
+        message[..end].to_vec()
+    }
+
+    fn make_dsn(returned: &[u8], returned_ct: &str, dsn_signed: bool) -> Vec<u8> {
+        let mut body = Vec::new();
+        body.extend_from_slice(b"--BOUNDARY\r\nContent-Type: text/plain\r\n\r\n");
+        body.extend_from_slice(b"Delivery to user@test2.dkim2.com failed.\r\n");
+        body.extend_from_slice(b"--BOUNDARY\r\nContent-Type: message/delivery-status\r\n\r\n");
+        body.extend_from_slice(b"Reporting-MTA: dns; test2.dkim2.com\r\n\r\n");
+        body.extend_from_slice(b"Final-Recipient: rfc822; user@test2.dkim2.com\r\n");
+        body.extend_from_slice(b"Action: failed\r\nStatus: 5.1.1\r\n");
+        body.extend_from_slice(b"--BOUNDARY\r\nContent-Type: ");
+        body.extend_from_slice(returned_ct.as_bytes());
+        body.extend_from_slice(b"\r\n\r\n");
+        body.extend_from_slice(returned);
+        body.extend_from_slice(b"\r\n--BOUNDARY--\r\n");
+
+        let mut dsn_plain = Vec::new();
+        dsn_plain.extend_from_slice(b"From: postmaster@test2.dkim2.com\r\n");
+        dsn_plain.extend_from_slice(b"To: sender@test1.dkim2.com\r\n");
+        dsn_plain.extend_from_slice(b"Subject: Delivery Status Notification (Failure)\r\n");
+        dsn_plain.extend_from_slice(b"Date: Sat, 01 Mar 2026 12:05:00 +0000\r\n");
+        dsn_plain.extend_from_slice(
+            b"Content-Type: multipart/report; report-type=delivery-status; boundary=\"BOUNDARY\"\r\n",
+        );
+        dsn_plain.extend_from_slice(b"\r\n");
+        dsn_plain.extend_from_slice(&body);
+
+        if dsn_signed {
+            sign_full(
+                load_key("test2.dkim2.com", "ed25519"),
+                "test2.dkim2.com",
+                "ed25519",
+                &dsn_plain,
+                &Hop::Real(Envelope {
+                    mail_from: "<>",
+                    rcpt_to: &["sender@test1.dkim2.com"],
+                }),
+            )
+        } else {
+            dsn_plain
+        }
+    }
+
+    async fn verify(dsn_bytes: &[u8]) -> Result<Dkim2DsnOutput, Dkim2DsnFailure> {
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = load_caches();
+        let dsn = Dkim2Dsn::parse(dsn_bytes).expect("parse DSN");
+        let params = caches.parameters(&dsn);
+        let envelope = Envelope {
+            mail_from: "<>",
+            rcpt_to: &["sender@test1.dkim2.com"],
+        };
+        resolver
+            .verify_dkim2_dsn_(&dsn, &envelope, params.cache_txt, NOW)
+            .await
+    }
+
     #[test]
     fn dsn_return_path_null() {
         let mut signature = Signature {
@@ -335,80 +423,39 @@ mod test {
 
     #[tokio::test]
     async fn verify_dsn_round_trip() {
-        let returned_plain = concat!(
-            "From: sender@test1.dkim2.com\r\n",
-            "To: user@test2.dkim2.com\r\n",
-            "Subject: Hello\r\n",
-            "Date: Sat, 01 Mar 2026 12:00:00 +0000\r\n",
-            "Message-ID: <m@test1.dkim2.com>\r\n",
-            "\r\n",
-            "This is the original body.\r\n",
+        let dsn_signed = make_dsn(&signed_returned(), "message/rfc822", true);
+        assert!(Dkim2Dsn::parse(&dsn_signed).unwrap().returned_full);
+
+        let output = verify(&dsn_signed).await;
+        assert!(output.is_ok(), "{output:?}");
+    }
+
+    #[tokio::test]
+    async fn verify_dsn_returned_headers_only() {
+        let dsn_signed = make_dsn(
+            &headers_only(&signed_returned()),
+            "text/rfc822-headers",
+            true,
         );
-        let returned = sign_full(
-            load_key("test1.dkim2.com", "ed25519"),
-            "test1.dkim2.com",
-            "ed25519",
-            returned_plain.as_bytes(),
-            &Hop::Real(Envelope {
-                mail_from: "sender@test1.dkim2.com",
-                rcpt_to: &["user@test2.dkim2.com"],
-            }),
-        );
+        assert!(!Dkim2Dsn::parse(&dsn_signed).unwrap().returned_full);
 
-        let mut body = Vec::new();
-        body.extend_from_slice(b"--BOUNDARY\r\nContent-Type: text/plain\r\n\r\n");
-        body.extend_from_slice(b"Delivery to user@test2.dkim2.com failed.\r\n");
-        body.extend_from_slice(b"--BOUNDARY\r\nContent-Type: message/delivery-status\r\n\r\n");
-        body.extend_from_slice(b"Reporting-MTA: dns; test2.dkim2.com\r\n\r\n");
-        body.extend_from_slice(b"Final-Recipient: rfc822; user@test2.dkim2.com\r\n");
-        body.extend_from_slice(b"Action: failed\r\nStatus: 5.1.1\r\n");
-        body.extend_from_slice(b"--BOUNDARY\r\nContent-Type: message/rfc822\r\n\r\n");
-        body.extend_from_slice(&returned);
-        body.extend_from_slice(b"\r\n--BOUNDARY--\r\n");
+        let output = verify(&dsn_signed).await;
+        assert!(output.is_ok(), "{output:?}");
+    }
 
-        let mut dsn_plain = Vec::new();
-        dsn_plain.extend_from_slice(b"From: postmaster@test2.dkim2.com\r\n");
-        dsn_plain.extend_from_slice(b"To: sender@test1.dkim2.com\r\n");
-        dsn_plain.extend_from_slice(b"Subject: Delivery Status Notification (Failure)\r\n");
-        dsn_plain.extend_from_slice(b"Date: Sat, 01 Mar 2026 12:05:00 +0000\r\n");
-        dsn_plain.extend_from_slice(
-            b"Content-Type: multipart/report; report-type=delivery-status; boundary=\"BOUNDARY\"\r\n",
-        );
-        dsn_plain.extend_from_slice(b"\r\n");
-        dsn_plain.extend_from_slice(&body);
+    #[tokio::test]
+    async fn verify_dsn_returned_not_signed() {
+        let dsn_signed = make_dsn(RETURNED_PLAIN.as_bytes(), "message/rfc822", true);
 
-        let dsn_signed = sign_full(
-            load_key("test2.dkim2.com", "ed25519"),
-            "test2.dkim2.com",
-            "ed25519",
-            &dsn_plain,
-            &Hop::Real(Envelope {
-                mail_from: "<>",
-                rcpt_to: &["sender@test1.dkim2.com"],
-            }),
-        );
+        let output = verify(&dsn_signed).await;
+        assert_eq!(output, Err(Dkim2DsnFailure::ReturnedNotSigned));
+    }
 
-        let dsn = Dkim2Dsn::parse(&dsn_signed).expect("parse DSN");
-        assert!(matches!(dsn.returned, super::ReturnedMessage::Full(_)));
+    #[tokio::test]
+    async fn verify_dsn_not_signed() {
+        let dsn_unsigned = make_dsn(&signed_returned(), "message/rfc822", false);
 
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = load_caches();
-        let params = caches.parameters(&dsn);
-        let envelope = Envelope {
-            mail_from: "<>",
-            rcpt_to: &["sender@test1.dkim2.com"],
-        };
-        let output = resolver
-            .verify_dkim2_dsn_(&dsn, &envelope, params.cache_txt, NOW)
-            .await;
-
-        assert!(
-            output.is_authentic(),
-            "dsn={:?} returned={:?} aligned={} reason={:?}",
-            output.dsn,
-            output.returned,
-            output.aligned,
-            output.failure_reason()
-        );
+        let output = verify(&dsn_unsigned).await;
+        assert_eq!(output, Err(Dkim2DsnFailure::DsnNotSigned));
     }
 }

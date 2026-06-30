@@ -14,7 +14,7 @@ use crate::{
         crypto::{HashAlgorithm, SigningKey},
         headers::{Header, Writable, Writer},
     },
-    dkim2::canonicalize::CanonicalizedFieldWriter,
+    dkim2::canonicalize::CanonicalizedHeaderWriter,
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -162,7 +162,7 @@ impl<T: SigningKey> Dkim2Signer<T, Done> {
 
         let new_instance = if instances.is_empty() || content_changed {
             let header_hash = hash_algorithm
-                .header_fields_hash(parsed.headers.iter().copied())
+                .headers_hash(parsed.headers.iter().copied())
                 .as_ref()
                 .to_vec();
             let body_hash = hash_algorithm
@@ -242,24 +242,24 @@ struct SignatureInput<'x> {
 impl<'x> Writable for SignatureInput<'x> {
     fn write(self, writer: &mut impl Writer) {
         for header in self.instances {
-            let mut w = CanonicalizedFieldWriter::new(writer, header.name);
+            let mut w = CanonicalizedHeaderWriter::new(writer, header.name);
             w.write(header.value);
             w.finalize();
         }
 
         if let Some(instance) = self.new_instance {
-            let mut w = CanonicalizedFieldWriter::new(writer, b"Message-Instance");
+            let mut w = CanonicalizedHeaderWriter::new(writer, b"Message-Instance");
             instance.write_value(&mut w);
             w.finalize();
         }
 
         for header in self.signatures {
-            let mut w = CanonicalizedFieldWriter::new(writer, header.name);
+            let mut w = CanonicalizedHeaderWriter::new(writer, header.name);
             w.write(header.value);
             w.finalize();
         }
 
-        let mut w = CanonicalizedFieldWriter::new(writer, b"DKIM2-Signature");
+        let mut w = CanonicalizedHeaderWriter::new(writer, b"DKIM2-Signature");
         self.new_signature.write_value(&mut w, true);
         w.finalize();
     }

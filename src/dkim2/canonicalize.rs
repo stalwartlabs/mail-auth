@@ -15,7 +15,7 @@ use std::cmp::Ordering;
 
 impl crate::common::crypto::HashAlgorithm {
     /// Computes the DKIM2 header-fields hash
-    pub fn header_fields_hash<'x>(
+    pub fn headers_hash<'x>(
         &self,
         headers: impl IntoIterator<Item = (&'x [u8], &'x [u8])>,
     ) -> HashOutput {
@@ -46,11 +46,11 @@ impl crate::common::crypto::HashAlgorithm {
     }
 }
 
-pub(crate) struct CanonicalizedFieldWriter<'x, W: Writer> {
+pub(crate) struct CanonicalizedHeaderWriter<'x, W: Writer> {
     inner: &'x mut W,
 }
 
-impl<'x, W: Writer> CanonicalizedFieldWriter<'x, W> {
+impl<'x, W: Writer> CanonicalizedHeaderWriter<'x, W> {
     pub fn new(inner: &'x mut W, field: &[u8]) -> Self {
         for &ch in field {
             if !ch.is_ascii_whitespace() {
@@ -67,7 +67,7 @@ impl<'x, W: Writer> CanonicalizedFieldWriter<'x, W> {
     }
 }
 
-impl<'x, W: Writer> Writer for CanonicalizedFieldWriter<'x, W> {
+impl<'x, W: Writer> Writer for CanonicalizedHeaderWriter<'x, W> {
     fn write(&mut self, buf: &[u8]) {
         for &ch in buf {
             if !ch.is_ascii_whitespace() {
