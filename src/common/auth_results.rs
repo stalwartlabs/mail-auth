@@ -5,10 +5,11 @@
  */
 
 use super::headers::{HeaderWriter, Writer};
+#[cfg(feature = "arc")]
+use crate::{ArcOutput, arc::ArcError};
 use crate::{
-    ArcOutput, AuthenticationResults, Dkim2Result, DkimOutput, DkimResult, DmarcOutput,
-    DmarcResult, Error, IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, arc::ArcError,
-    dkim::DkimError, dkim2::Dkim2Output,
+    AuthenticationResults, Dkim2Result, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
+    IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, dkim::DkimError, dkim2::Dkim2Output,
 };
 use crate::{DnsError, common::crypto::CryptoError};
 use mail_builder::encoders::base64::base64_encode;
@@ -142,6 +143,7 @@ impl<'x> AuthenticationResults<'x> {
         self
     }
 
+    #[cfg(feature = "arc")]
     pub fn with_arc_result(mut self, arc: &ArcOutput, remote_ip: IpAddr) -> Self {
         self.auth_results.push_str(";\r\n\tarc=");
         arc.result.as_auth_result(&mut self.auth_results);
@@ -388,23 +390,33 @@ impl AsAuthResult for Error {
             Error::Dns(DnsError::Resolver(_)) => "dns error",
             Error::Dns(DnsError::RecordNotFound(_)) => "dns record not found",
             Error::Dkim(DkimError::UnsupportedVersion) => "unsupported version",
-            Error::Dkim(DkimError::FailedBodyHashMatch)
-            | Error::Arc(ArcError::FailedBodyHashMatch) => "body hash did not verify",
+            Error::Dkim(DkimError::FailedBodyHashMatch) => "body hash did not verify",
+            #[cfg(feature = "arc")]
+            Error::Arc(ArcError::FailedBodyHashMatch) => "body hash did not verify",
             Error::Dkim(DkimError::FailedAuidMatch) => "auid does not match",
             Error::Dkim(DkimError::RevokedPublicKey) => "revoked public key",
-            Error::Dkim(DkimError::SignatureExpired) | Error::Arc(ArcError::SignatureExpired) => {
-                "signature error"
-            }
-            Error::Dkim(DkimError::SignatureLength) | Error::Arc(ArcError::SignatureLength) => {
+            Error::Dkim(DkimError::SignatureExpired) => "signature error",
+            #[cfg(feature = "arc")]
+            Error::Arc(ArcError::SignatureExpired) => "signature error",
+            Error::Dkim(DkimError::SignatureLength) => {
                 "signature length ignored due to security risk"
             }
+            #[cfg(feature = "arc")]
+            Error::Arc(ArcError::SignatureLength) => {
+                "signature length ignored due to security risk"
+            }
+            #[cfg(feature = "arc")]
             Error::Arc(ArcError::InvalidInstance(i)) => {
                 write!(header, "invalid ARC instance {i})").ok();
                 return;
             }
+            #[cfg(feature = "arc")]
             Error::Arc(ArcError::InvalidCV) => "invalid ARC cv",
+            #[cfg(feature = "arc")]
             Error::Arc(ArcError::ChainTooLong) => "too many ARC headers",
+            #[cfg(feature = "arc")]
             Error::Arc(ArcError::HasHeaderTag) => "ARC has header tag",
+            #[cfg(feature = "arc")]
             Error::Arc(ArcError::BrokenChain) => "broken ARC chain",
             Error::NotAligned => "policy not aligned",
             Error::Dns(DnsError::InvalidRecordType) => "invalid dns record type",
@@ -476,10 +488,12 @@ fn push_qcontent(header: &mut String, value: &str) {
 
 #[cfg(test)]
 mod test {
+    #[cfg(feature = "arc")]
+    use crate::{ArcOutput, arc::ArcError};
     use crate::{
-        ArcOutput, AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult,
-        DnsError, Error, IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult,
-        arc::ArcError, common::crypto::CryptoError, dkim::Signature, dmarc::Policy,
+        AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, DnsError, Error,
+        IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, common::crypto::CryptoError,
+        dkim::Signature, dmarc::Policy,
     };
 
     #[test]
@@ -664,6 +678,7 @@ mod test {
             );
         }
 
+        #[cfg(feature = "arc")]
         for (expected_auth_results, arc, remote_ip) in [
             (
                 "arc=pass smtp.remote-ip=192.127.9.2",

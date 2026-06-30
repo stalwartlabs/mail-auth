@@ -5,25 +5,30 @@
 [![docs.rs](https://img.shields.io/docsrs/mail-auth)](https://docs.rs/mail-auth)
 [![crates.io](https://img.shields.io/crates/l/mail-auth)](http://www.apache.org/licenses/LICENSE-2.0)
 
-_mail-auth_ is an e-mail authentication and reporting library written in Rust that supports the **DKIM**, **ARC**, **SPF** and **DMARC**
+_mail-auth_ is an e-mail authentication and reporting library written in Rust that supports the **DKIM2**, **DKIM1**, **ARC**, **SPF** and **DMARC**
 protocols. The library aims to be fast, safe and correct while supporting all major [message authentication and reporting RFCs](#conformed-rfcs). 
 
 Features:
 
-- **DomainKeys Identified Mail (DKIM)**:
+- **DomainKeys Identified Mail v1 (DKIMv1)**:
   - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 signing and verification.
   - DKIM Authorized Third-Party Signatures.
   - DKIM failure reporting using the Abuse Reporting Format.
   - Key-pair generation for both RSA and Ed25519 (enabled by the `generate` feature).
-- **Authenticated Received Chain (ARC)**:
-  - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 chain verification.
-  - ARC sealing.
+- **DomainKeys Identified Mail v2 (DKIMv2)**:
+  - ED25519-SHA256 and RSA-SHA256 signing and chain verification (SHA-256 only, as required by the draft).
+  - Algorithmic dexterity: a single DKIM2-Signature can carry several signatures under different selectors and algorithms.
+  - SMTP envelope (MAIL FROM / RCPT TO) and next-domain chain binding, with per-hop Message-Instance hashes and modification recipes.
+  - Verifiable delivery status notification (DSN) authentication.
 - **Sender Policy Framework (SPF)**:
   - Policy evaluation.
   - SPF failure reporting using the Abuse Reporting Format.
 - **Domain-based Message Authentication, Reporting, and Conformance (DMARC)**:
   - Policy evaluation.
   - DMARC aggregate report parsing and generation.
+- **Authenticated Received Chain (ARC)** (now [historic](https://datatracker.ietf.org/doc/draft-ietf-dmarc-arc-to-historic/)):
+  - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 chain verification.
+  - ARC sealing.
 - **Abuse Reporting Format (ARF)**:
   - Abuse and Authentication failure reporting.
   - Feedback report parsing and generation.
@@ -32,7 +37,56 @@ Features:
 
 ## Usage examples
 
-### DKIM Signature Verification
+### DKIM2 Signing
+
+```rust
+    // Sign a message with both RSA-SHA256 and Ed25519-SHA256 under different
+    // selectors (algorithmic dexterity).
+    let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+    let pk_ed = Ed25519Key::from_pkcs8_der(&ED25519_PKCS8).unwrap();
+
+    let signed = Dkim2Signer::from_key(pk_rsa)
+        .domain("example.com")
+        .selector("rsa-sel")
+        .additional_key(pk_ed, "ed-sel")
+        .sign(
+            RFC5322_MESSAGE.as_bytes(),
+            &Hop::Real(Envelope {
+                mail_from: "sender@example.com",
+                rcpt_to: &["recipient@example.org"],
+            }),
+        )
+        .unwrap();
+
+    // Prepend the DKIM2-Signature (and a Message-Instance, if needed) to the message
+    println!("{}{}", signed.to_header(), RFC5322_MESSAGE);
+```
+
+### DKIM2 Chain Verification
+
+```rust
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
+
+    // Parse message
+    let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
+
+    // DKIM2 binds the SMTP envelope, so verification needs the MAIL FROM and RCPT TO
+    let envelope = Envelope {
+        mail_from: "sender@example.com",
+        rcpt_to: &["recipient@example.org"],
+    };
+
+    // Validate the DKIM2 signature chain
+    let result = authenticator
+        .verify_dkim2(&authenticated_message, &envelope)
+        .await;
+
+    // Make sure the chain passed verification
+    assert_eq!(result.result(), &Dkim2Result::Pass);
+```
+
+### DKIM1 Signature Verification
 
 ```rust
     // Create an authenticator using Cloudflare DNS
@@ -48,7 +102,7 @@ Features:
     assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
 ```
 
-### DKIM Signing
+### DKIM1 Signing
 
 ```rust
     // Sign an e-mail message using RSA-SHA256
@@ -80,58 +134,6 @@ Features:
         signature_ed.to_header(),
         RFC5322_MESSAGE
     );
-```
-
-### ARC Chain Verification
-
-```rust
-    // Create an authenticator using Cloudflare DNS
-    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
-
-    // Parse message
-    let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
-
-    // Validate ARC chain
-    let result = authenticator.verify_arc(&authenticated_message).await;
-
-    // Make sure ARC passed verification
-    assert_eq!(result.result(), &DkimResult::Pass);
-```
-
-### ARC Chain Sealing
-
-```rust
-    // Create an authenticator using Cloudflare DNS
-    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
-
-    // Parse message to be sealed
-    let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
-
-    // Verify ARC and DKIM signatures
-    let arc_result = authenticator.verify_arc(&authenticated_message).await;
-    let dkim_result = authenticator.verify_dkim(&authenticated_message).await;
-
-    // Build Authenticated-Results header
-    let auth_results = AuthenticationResults::new("mx.mydomain.org")
-        .with_dkim_result(&dkim_result, "sender@example.org")
-        .with_arc_result(&arc_result, "127.0.0.1".parse().unwrap());
-
-    // Seal message
-    if arc_result.can_be_sealed() {
-        // Seal the e-mail message using RSA-SHA256
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        let arc_set = ArcSealer::from_key(pk_rsa)
-            .domain("example.org")
-            .selector("default")
-            .headers(["From", "To", "Subject", "DKIM-Signature"])
-            .seal(&authenticated_message, &auth_results, &arc_result)
-            .unwrap();
-
-        // Print the sealed message to stdout
-        println!("{}{}", arc_set.to_header(), RFC5322_MESSAGE)
-    } else {
-        eprintln!("The message could not be sealed, probably an ARC chain with cv=fail was found.")
-    }
 ```
 
 ### SPF Policy Evaluation
@@ -200,6 +202,60 @@ Features:
 
 More examples available under the [examples](examples) directory.
 
+### ARC Chain Verification
+
+ARC has been [reclassified as Historic](https://datatracker.ietf.org/doc/draft-ietf-dmarc-arc-to-historic/), the experiment is over and implementers should not rely on it going forward, with DKIM2 as its intended successor. It remains available, but is opt-in behind the `arc` feature and is no longer enabled by default. New deployments should prefer DKIM2.
+
+```rust
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
+
+    // Parse message
+    let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
+
+    // Validate ARC chain
+    let result = authenticator.verify_arc(&authenticated_message).await;
+
+    // Make sure ARC passed verification
+    assert_eq!(result.result(), &DkimResult::Pass);
+```
+
+### ARC Chain Sealing
+
+```rust
+    // Create an authenticator using Cloudflare DNS
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
+
+    // Parse message to be sealed
+    let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
+
+    // Verify ARC and DKIM signatures
+    let arc_result = authenticator.verify_arc(&authenticated_message).await;
+    let dkim_result = authenticator.verify_dkim(&authenticated_message).await;
+
+    // Build Authenticated-Results header
+    let auth_results = AuthenticationResults::new("mx.mydomain.org")
+        .with_dkim_result(&dkim_result, "sender@example.org")
+        .with_arc_result(&arc_result, "127.0.0.1".parse().unwrap());
+
+    // Seal message
+    if arc_result.can_be_sealed() {
+        // Seal the e-mail message using RSA-SHA256
+        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+        let arc_set = ArcSealer::from_key(pk_rsa)
+            .domain("example.org")
+            .selector("default")
+            .headers(["From", "To", "Subject", "DKIM-Signature"])
+            .seal(&authenticated_message, &auth_results, &arc_result)
+            .unwrap();
+
+        // Print the sealed message to stdout
+        println!("{}{}", arc_set.to_header(), RFC5322_MESSAGE)
+    } else {
+        eprintln!("The message could not be sealed, probably an ARC chain with cv=fail was found.")
+    }
+```
+
 ## Testing & Fuzzing
 
 To run the testsuite:
@@ -216,7 +272,11 @@ To fuzz the library with `cargo-fuzz`:
 
 ## Conformed RFCs
 
-### DKIM
+### DKIM2
+- [draft-ietf-dkim-dkim2-spec - DKIM2 Signatures](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/)
+- [draft-chuang-dkim2-dns - DKIM2 DNS Records](https://datatracker.ietf.org/doc/draft-chuang-dkim2-dns/)
+
+### DKIM1
 
 - [RFC 6376 - DomainKeys Identified Mail (DKIM) Signatures](https://datatracker.ietf.org/doc/html/rfc6376)
 - [RFC 6541 - DomainKeys Identified Mail (DKIM) Authorized Third-Party Signatures](https://datatracker.ietf.org/doc/html/rfc6541)
@@ -235,7 +295,7 @@ To fuzz the library with `cargo-fuzz`:
 
 ### DMARC
 - [RFC 7489 - Domain-based Message Authentication, Reporting, and Conformance (DMARC)](https://datatracker.ietf.org/doc/html/rfc7489)
-- [RFC 8617 - The Authenticated Received Chain (ARC) Protocol](https://datatracker.ietf.org/doc/html/rfc8617)
+- [RFC 8617 - The Authenticated Received Chain (ARC) Protocol](https://datatracker.ietf.org/doc/html/rfc8617) (being reclassified as [Historic](https://datatracker.ietf.org/doc/draft-ietf-dmarc-arc-to-historic/))
 - [RFC 8601 - Message Header Field for Indicating Message Authentication Status](https://datatracker.ietf.org/doc/html/rfc8601)
 - [RFC 8616 - Email Authentication for Internationalized Mail](https://datatracker.ietf.org/doc/html/rfc8616)
 - [RFC 7960 - Interoperability Issues between Domain-based Message Authentication, Reporting, and Conformance (DMARC) and Indirect Email Flows](https://datatracker.ietf.org/doc/html/rfc7960)

@@ -247,9 +247,10 @@ impl MessageAuthenticator {
                             | Error::Dns(DnsError::InvalidRecordType)
                             | Error::ParseError
                             | Error::Dkim(DkimError::RevokedPublicKey) => (record.rr & RR_DNS) != 0,
+                            #[cfg(feature = "arc")]
+                            Error::Arc(_) => (record.rr & RR_OTHER) != 0,
                             Error::MissingParameters
                             | Error::NoHeadersFound
-                            | Error::Arc(_)
                             | Error::Dkim(DkimError::SignatureLength)
                             | Error::NotAligned
                             | Error::Dkim2(_) => (record.rr & RR_OTHER) != 0,

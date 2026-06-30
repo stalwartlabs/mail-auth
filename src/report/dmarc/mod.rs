@@ -7,8 +7,10 @@
 pub mod generate;
 pub mod parse;
 use super::PolicyPublished;
+#[cfg(feature = "arc")]
+use crate::ArcOutput;
 use crate::{
-    ArcOutput, DkimOutput, DmarcOutput, SpfOutput,
+    DkimOutput, DmarcOutput, SpfOutput,
     dmarc::Dmarc,
     report::{
         ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
@@ -16,6 +18,7 @@ use crate::{
         SpfResult,
     },
 };
+#[cfg(feature = "arc")]
 use std::fmt::Write;
 use std::net::IpAddr;
 
@@ -258,6 +261,7 @@ impl Record {
         self
     }
 
+    #[cfg(feature = "arc")]
     pub fn with_arc_output(mut self, arc_output: &ArcOutput) -> Self {
         if arc_output.result == crate::DkimResult::Pass {
             let mut comment = "arc=pass".to_string();

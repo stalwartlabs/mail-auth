@@ -49,8 +49,11 @@ pub(crate) enum AuthenticatedHeader<'x> {
     Ds(&'x [u8]),
     D2s(&'x [u8]),
     D2i(&'x [u8]),
+    #[cfg(feature = "arc")]
     Aar(&'x [u8]),
+    #[cfg(feature = "arc")]
     Ams(&'x [u8]),
+    #[cfg(feature = "arc")]
     As(&'x [u8]),
     From(&'x [u8]),
     Other(&'x [u8]),
@@ -278,7 +281,9 @@ impl<'x> Iterator for HeaderParser<'x> {
                         AuthenticatedHeader::Other(header_name)
                     }
                     FROM => AuthenticatedHeader::From(header_name),
+                    #[cfg(feature = "arc")]
                     AS => AuthenticatedHeader::As(header_name),
+                    #[cfg(feature = "arc")]
                     AAR if self
                         .message
                         .get(token_start + 8..token_end + 1)
@@ -287,6 +292,7 @@ impl<'x> Iterator for HeaderParser<'x> {
                     {
                         AuthenticatedHeader::Aar(header_name)
                     }
+                    #[cfg(feature = "arc")]
                     AMS if self
                         .message
                         .get(token_start + 8..token_end + 1)
@@ -402,6 +408,7 @@ const DKIM2: u64 = (b'd' as u64)
     | ((b'-' as u64) << 40)
     | ((b's' as u64) << 48)
     | ((b'i' as u64) << 56);
+#[cfg(feature = "arc")]
 const AAR: u64 = (b'a' as u64)
     | ((b'r' as u64) << 8)
     | ((b'c' as u64) << 16)
@@ -410,6 +417,7 @@ const AAR: u64 = (b'a' as u64)
     | ((b'u' as u64) << 40)
     | ((b't' as u64) << 48)
     | ((b'h' as u64) << 56);
+#[cfg(feature = "arc")]
 const AMS: u64 = (b'a' as u64)
     | ((b'r' as u64) << 8)
     | ((b'c' as u64) << 16)
@@ -418,6 +426,7 @@ const AMS: u64 = (b'a' as u64)
     | ((b'e' as u64) << 40)
     | ((b's' as u64) << 48)
     | ((b's' as u64) << 56);
+#[cfg(feature = "arc")]
 const AS: u64 = (b'a' as u64)
     | ((b'r' as u64) << 8)
     | ((b'c' as u64) << 16)
@@ -504,12 +513,13 @@ mod test {
                     .map(|(h, v)| {
                         (
                             std::str::from_utf8(match h {
+                                #[cfg(feature = "arc")]
+                                AuthenticatedHeader::Aar(v)
+                                | AuthenticatedHeader::Ams(v)
+                                | AuthenticatedHeader::As(v) => v,
                                 AuthenticatedHeader::Ds(v)
                                 | AuthenticatedHeader::D2s(v)
                                 | AuthenticatedHeader::D2i(v)
-                                | AuthenticatedHeader::Aar(v)
-                                | AuthenticatedHeader::Ams(v)
-                                | AuthenticatedHeader::As(v)
                                 | AuthenticatedHeader::From(v)
                                 | AuthenticatedHeader::Other(v) => v,
                             })
@@ -523,6 +533,7 @@ mod test {
         }
     }
 
+    #[cfg(feature = "arc")]
     #[test]
     fn header_parser() {
         let message = concat!(

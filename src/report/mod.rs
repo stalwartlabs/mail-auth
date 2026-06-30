@@ -414,8 +414,11 @@ impl From<&crate::DkimResult> for AuthFailureType {
             | crate::DkimResult::Fail(err)
             | crate::DkimResult::PermError(err)
             | crate::DkimResult::TempError(err) => match err {
-                crate::Error::Dkim(crate::dkim::DkimError::FailedBodyHashMatch)
-                | crate::Error::Arc(crate::arc::ArcError::FailedBodyHashMatch) => {
+                crate::Error::Dkim(crate::dkim::DkimError::FailedBodyHashMatch) => {
+                    AuthFailureType::BodyHash
+                }
+                #[cfg(feature = "arc")]
+                crate::Error::Arc(crate::arc::ArcError::FailedBodyHashMatch) => {
                     AuthFailureType::BodyHash
                 }
                 crate::Error::Dkim(crate::dkim::DkimError::RevokedPublicKey) => {

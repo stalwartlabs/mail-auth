@@ -20,6 +20,7 @@ default = ["aws-lc-rs", "report"]
 aws-lc-rs = ["dep:aws-lc-rs", "hickory-resolver/tls-aws-lc-rs", "hickory-resolver/dnssec-aws-lc-rs", "hickory-resolver/rustls-platform-verifier"]
 ring = ["dep:ring", "hickory-resolver/tls-ring", "hickory-resolver/dnssec-ring", "hickory-resolver/rustls-platform-verifier"]
 generate = ["rsa", "rand"]
+arc = []
 report = ["quick-xml", "zip", "hashify"]
 test = []
 rkyv = ["dep:rkyv", "mail-parser/rkyv"]
@@ -46,3 +47,13 @@ rkyv = { version = "0.8", optional = true }
 tokio = { version = "1.51", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
 rustls-pki-types = "1.14"
 psl = "2.1"
+testcontainers = "0.27"
+tempfile = "3"
+
+[[example]]
+name = "arc_seal"
+required-features = ["arc"]
+
+[[example]]
+name = "arc_verify"
+required-features = ["arc"]

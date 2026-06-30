@@ -5,9 +5,10 @@
  */
 
 use crate::DnsError;
+#[cfg(feature = "arc")]
+use crate::{ArcOutput, arc::Set};
 use crate::{
-    ArcOutput, DkimOutput, DkimResult, Error, Version,
-    arc::Set,
+    DkimOutput, DkimResult, Error, Version,
     common::{
         crypto::{Algorithm, HashAlgorithm, SigningKey},
         verify::VerifySignature,
@@ -277,6 +278,7 @@ impl<'x> DkimOutput<'x> {
     }
 }
 
+#[cfg(feature = "arc")]
 impl ArcOutput<'_> {
     pub fn result(&self) -> &DkimResult {
         &self.result

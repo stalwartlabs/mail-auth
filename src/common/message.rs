@@ -5,7 +5,9 @@
  */
 
 use super::headers::{AuthenticatedHeader, Header, HeaderParser};
-use crate::{AuthenticatedMessage, Error, arc, common::crypto::HashAlgorithm, dkim, dkim2};
+#[cfg(feature = "arc")]
+use crate::arc;
+use crate::{AuthenticatedMessage, Error, common::crypto::HashAlgorithm, dkim, dkim2};
 use mail_parser::{Address, HeaderName, HeaderValue, Message, parsers::MessageStream};
 
 impl<'x> AuthenticatedMessage<'x> {
@@ -44,12 +46,15 @@ impl<'x> AuthenticatedMessage<'x> {
                 HeaderName::DkimSignature => {
                     message.parse_dkim(name, value, strict);
                 }
+                #[cfg(feature = "arc")]
                 HeaderName::ArcAuthenticationResults => {
                     message.parse_aar(name, value);
                 }
+                #[cfg(feature = "arc")]
                 HeaderName::ArcSeal => {
                     message.parse_as(name, value);
                 }
+                #[cfg(feature = "arc")]
                 HeaderName::ArcMessageSignature => {
                     message.parse_ams(name, value, strict);
                 }
@@ -90,14 +95,17 @@ impl<'x> AuthenticatedMessage<'x> {
                     message.parse_dkim2_instance(name, value);
                     name
                 }
+                #[cfg(feature = "arc")]
                 AuthenticatedHeader::Aar(name) => {
                     message.parse_aar(name, value);
                     name
                 }
+                #[cfg(feature = "arc")]
                 AuthenticatedHeader::Ams(name) => {
                     message.parse_ams(name, value, strict);
                     name
                 }
+                #[cfg(feature = "arc")]
                 AuthenticatedHeader::As(name) => {
                     message.parse_as(name, value);
                     name
@@ -169,6 +177,7 @@ impl<'x> AuthenticatedMessage<'x> {
         }
     }
 
+    #[cfg(feature = "arc")]
     fn parse_aar(&mut self, name: &'x [u8], value: &'x [u8]) {
         match arc::Results::parse(value) {
             Ok(results) => self.aar_headers.push(Header::new(name, value, results)),
@@ -176,6 +185,7 @@ impl<'x> AuthenticatedMessage<'x> {
         }
     }
 
+    #[cfg(feature = "arc")]
     fn parse_ams(&mut self, name: &'x [u8], value: &'x [u8], strict: bool) {
         match arc::Signature::parse(value) {
             Ok(signature) if signature.l == 0 || !strict => {
@@ -197,6 +207,7 @@ impl<'x> AuthenticatedMessage<'x> {
         }
     }
 
+    #[cfg(feature = "arc")]
     fn parse_as(&mut self, name: &'x [u8], value: &'x [u8]) {
         match arc::Seal::parse(value) {
             Ok(seal) => self.as_headers.push(Header::new(name, value, seal)),
@@ -214,6 +225,7 @@ impl<'x> AuthenticatedMessage<'x> {
         self.errors.push(Header::new(name, value, err));
     }
 
+    #[cfg(feature = "arc")]
     fn push_arc_error(&mut self, name: &'x [u8], value: &'x [u8], err: Error) {
         self.has_arc_errors = true;
         self.errors.push(Header::new(name, value, err));
@@ -251,6 +263,7 @@ impl<'x> AuthenticatedMessage<'x> {
         }
 
         // Sort ARC headers
+        #[cfg(feature = "arc")]
         if !self.as_headers.is_empty() && !self.has_arc_errors {
             self.as_headers.sort_unstable_by_key(|h| h.header.i);
             self.ams_headers.sort_unstable_by_key(|h| h.header.i);

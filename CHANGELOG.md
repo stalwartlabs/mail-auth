@@ -1,3 +1,8 @@
+mail-auth 0.11.0
+================================
+- DKIM2 support ([draft-ietf-dkim-dkim2-spec-03](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-03))
+- ARC is now gated under the `arc` feature. The ARC implementation is now considered historic, see [Reclassifying ARC as Historic](https://datatracker.ietf.org/doc/draft-ietf-dmarc-arc-to-historic/).
+
 mail-auth 0.10.0
 ================================
 - Include DNSSEC status in cache entries.

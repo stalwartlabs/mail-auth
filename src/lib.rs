@@ -6,6 +6,7 @@
 
 #![doc = include_str!("../README.md")]
 
+#[cfg(feature = "arc")]
 use arc::Set;
 use common::{
     crypto::{CryptoError, HashAlgorithm},
@@ -28,6 +29,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 
+#[cfg(feature = "arc")]
 pub mod arc;
 pub mod common;
 pub mod dkim;
@@ -134,14 +136,18 @@ pub struct AuthenticatedMessage<'x> {
     pub dkim_headers: Vec<Header<'x, dkim::Signature>>,
     pub dkim2_signatures: Vec<Header<'x, dkim2::Signature>>,
     pub dkim2_instances: Vec<Header<'x, dkim2::MessageInstance>>,
+    #[cfg(feature = "arc")]
     pub ams_headers: Vec<Header<'x, arc::Signature>>,
+    #[cfg(feature = "arc")]
     pub as_headers: Vec<Header<'x, arc::Seal>>,
+    #[cfg(feature = "arc")]
     pub aar_headers: Vec<Header<'x, arc::Results>>,
     pub received_headers_count: usize,
     pub date_header_present: bool,
     pub message_id_header_present: bool,
     pub errors: Vec<Header<'x, Error>>,
     pub has_dkim_errors: bool,
+    #[cfg(feature = "arc")]
     pub has_arc_errors: bool,
     pub has_dkim2_errors: bool,
 }
@@ -196,6 +202,7 @@ pub struct DkimOutput<'x> {
     is_atps: bool,
 }
 
+#[cfg(feature = "arc")]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct ArcOutput<'x> {
     result: DkimResult,
@@ -303,6 +310,7 @@ pub enum Error {
     Crypto(CryptoError),
     Dns(DnsError),
     Dkim(crate::dkim::DkimError),
+    #[cfg(feature = "arc")]
     Arc(crate::arc::ArcError),
     Dkim2(crate::dkim2::Dkim2Error),
 }
@@ -323,6 +331,7 @@ impl Display for Error {
             Error::Crypto(e) => e.fmt(f),
             Error::Dns(e) => e.fmt(f),
             Error::Dkim(e) => e.fmt(f),
+            #[cfg(feature = "arc")]
             Error::Arc(e) => e.fmt(f),
             Error::Dkim2(e) => e.fmt(f),
         }
