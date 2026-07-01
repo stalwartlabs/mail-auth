@@ -61,7 +61,11 @@ impl Dkim2Signer<Done> {
 
     /// Sets the flags (f= tag) to add to the signature.
     pub fn flags(mut self, flags: impl IntoIterator<Item = Flag>) -> Self {
-        self.flags = flags.into_iter().collect();
+        for flag in flags {
+            if !self.flags.contains(&flag) {
+                self.flags.push(flag);
+            }
+        }
         self
     }
 

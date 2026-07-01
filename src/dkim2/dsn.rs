@@ -117,17 +117,17 @@ impl std::fmt::Display for Dkim2DsnFailure {
 fn top_signature<'x>(
     message: &'x AuthenticatedMessage<'x>,
 ) -> Option<(&'x String, &'x str, &'x [String])> {
-    let top = message
+    message
         .dkim2_signatures
         .iter()
         .map(|h| &h.header)
-        .max_by_key(|s| s.i)?;
-    match &top.chain {
-        ChainBinding::Envelope { mail_from, rcpt_to } => {
-            Some((&top.d, mail_from, rcpt_to.as_slice()))
-        }
-        ChainBinding::NextDomain(_) => Some((&top.d, "", &[])),
-    }
+        .max_by_key(|s| s.i)
+        .map(|top| match &top.chain {
+            ChainBinding::Envelope { mail_from, rcpt_to } => {
+                (&top.d, mail_from.as_str(), rcpt_to.as_slice())
+            }
+            ChainBinding::NextDomain(_) => (&top.d, "", &[][..]),
+        })
 }
 
 fn domain_of(address: &str) -> &str {
@@ -142,24 +142,26 @@ fn is_dkim2_signed(message: &AuthenticatedMessage<'_>) -> bool {
 impl Signature {
     /// Returns the address a DSN for this message must be returned to
     pub fn dsn_return_path(signatures: &[Signature]) -> Option<&str> {
-        let top = signatures.iter().max_by_key(|s| s.i)?;
-        match &top.chain {
-            ChainBinding::Envelope { mail_from, .. }
-                if !mail_from.is_empty() && mail_from != "<>" =>
-            {
-                Some(mail_from)
-            }
-            _ => None,
-        }
+        signatures
+            .iter()
+            .max_by_key(|s| s.i)
+            .and_then(|top| match &top.chain {
+                ChainBinding::Envelope { mail_from, .. }
+                    if !mail_from.is_empty() && mail_from != "<>" =>
+                {
+                    Some(mail_from.as_str())
+                }
+                _ => None,
+            })
     }
 }
 
 impl MessageAuthenticator {
     /// Authenticates an inbound DKIM2-signed DSN
-    pub async fn verify_dkim2_dsn<'x, 'y, R, S, TXT, MXX, IPV4, IPV6, PTR>(
+    pub async fn verify_dkim2_dsn<'x, R, S, TXT, MXX, IPV4, IPV6, PTR, A, RT>(
         &self,
         params: impl Into<Parameters<'x, &'x Dkim2Dsn<'x, R, S>, TXT, MXX, IPV4, IPV6, PTR>>,
-        envelope: &Envelope<'y>,
+        envelope: Envelope<A, RT>,
     ) -> Result<Dkim2DsnOutput, Dkim2DsnFailure>
     where
         R: AsRef<AuthenticatedMessage<'x>> + 'x,
@@ -169,16 +171,18 @@ impl MessageAuthenticator {
         IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
         IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
         PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
+        A: AsRef<str> + Clone,
+        RT: IntoIterator<Item: AsRef<str>> + Clone,
     {
         let params = params.into();
         self.verify_dkim2_dsn_(params.params, envelope, params.cache_txt, now())
             .await
     }
 
-    pub(crate) async fn verify_dkim2_dsn_<'x, 'y, R, S, TXT>(
+    pub(crate) async fn verify_dkim2_dsn_<'x, R, S, TXT, A, RT>(
         &self,
         dsn: &'x Dkim2Dsn<'x, R, S>,
-        envelope: &Envelope<'y>,
+        envelope: Envelope<A, RT>,
         cache_txt: Option<&TXT>,
         now: u64,
     ) -> Result<Dkim2DsnOutput, Dkim2DsnFailure>
@@ -186,6 +190,8 @@ impl MessageAuthenticator {
         R: AsRef<AuthenticatedMessage<'x>> + 'x,
         S: AsRef<AuthenticatedMessage<'x>> + 'x,
         TXT: ResolverCache<Box<str>, Txt>,
+        A: AsRef<str> + Clone,
+        RT: IntoIterator<Item: AsRef<str>> + Clone,
     {
         if !is_dkim2_signed(dsn.raw.as_ref()) {
             return Err(Dkim2DsnFailure::DsnNotSigned);
@@ -194,7 +200,7 @@ impl MessageAuthenticator {
         }
 
         let dsn_output = self
-            .verify_dkim2_(dsn.raw.as_ref(), envelope, cache_txt, now, true)
+            .verify_dkim2_(dsn.raw.as_ref(), envelope.clone(), cache_txt, now, true)
             .await;
         let dsn_result = dsn_output.result;
         if !matches!(dsn_result, Dkim2Result::Pass) {
@@ -203,18 +209,14 @@ impl MessageAuthenticator {
 
         let dsn_signing_domain = top_signature(dsn.raw.as_ref()).map(|(d, _, _)| d);
         let returned_top = top_signature(dsn.returned.as_ref());
-        let returned_envelope = returned_top
+        let (returned_mail_from, returned_rcpt_to) = returned_top
             .as_ref()
             .map(|(_, mail_from, rcpt_to)| (*mail_from, *rcpt_to))
             .unwrap_or_default();
-        let returned_rcpts: Vec<&str> = returned_envelope.1.iter().map(|r| r.as_str()).collect();
         let returned_result = self
             .verify_dkim2_(
                 dsn.returned.as_ref(),
-                &Envelope {
-                    mail_from: returned_envelope.0,
-                    rcpt_to: &returned_rcpts,
-                },
+                Envelope::new(returned_mail_from, returned_rcpt_to),
                 cache_txt,
                 now,
                 dsn.returned_full,
@@ -235,10 +237,13 @@ impl MessageAuthenticator {
 
                 // 12.1.2(2): the returned message's top signature was generated
                 // by us, the system receiving the DSN.
-                let returned_is_ours = envelope
-                    .rcpt_to
-                    .iter()
-                    .any(|rcpt| relaxed_domain_match(domain_of(rcpt), returned_domain));
+                let Envelope {
+                    rcpt_to: envelope_rcpt_to,
+                    ..
+                } = envelope;
+                let returned_is_ours = envelope_rcpt_to
+                    .into_iter()
+                    .any(|rcpt| relaxed_domain_match(domain_of(rcpt.as_ref()), returned_domain));
 
                 recipient_aligned && returned_is_ours
             }
@@ -313,13 +318,18 @@ mod test {
         caches
     }
 
-    fn sign_full(
+    fn sign_full<A, R, I>(
         key: Ed25519Key,
         domain: &str,
         selector: &str,
         message: &[u8],
-        hop: &Hop,
-    ) -> Vec<u8> {
+        hop: Hop<A, R, I>,
+    ) -> Vec<u8>
+    where
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
+    {
         let signer = Dkim2Signer::from_key(key).domain(domain).selector(selector);
         let signed = signer.sign_at(message, hop, T).unwrap();
         let mut out = signed.to_header().into_bytes();
@@ -343,10 +353,7 @@ mod test {
             "test1.dkim2.com",
             "ed25519",
             RETURNED_PLAIN.as_bytes(),
-            &Hop::Real(Envelope {
-                mail_from: "sender@test1.dkim2.com",
-                rcpt_to: &["user@test2.dkim2.com"],
-            }),
+            Hop::real("sender@test1.dkim2.com", ["user@test2.dkim2.com"]),
         )
     }
 
@@ -386,10 +393,7 @@ mod test {
                 "test2.dkim2.com",
                 "ed25519",
                 &dsn_plain,
-                &Hop::Real(Envelope {
-                    mail_from: "<>",
-                    rcpt_to: &["sender@test1.dkim2.com"],
-                }),
+                Hop::real("<>", ["sender@test1.dkim2.com"]),
             )
         } else {
             dsn_plain
@@ -401,12 +405,9 @@ mod test {
         let caches = load_caches();
         let dsn = Dkim2Dsn::parse(dsn_bytes).expect("parse DSN");
         let params = caches.parameters(&dsn);
-        let envelope = Envelope {
-            mail_from: "<>",
-            rcpt_to: &["sender@test1.dkim2.com"],
-        };
+        let envelope = Envelope::new("<>", ["sender@test1.dkim2.com"]);
         resolver
-            .verify_dkim2_dsn_(&dsn, &envelope, params.cache_txt, NOW)
+            .verify_dkim2_dsn_(&dsn, envelope, params.cache_txt, NOW)
             .await
     }
 

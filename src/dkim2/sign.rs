@@ -26,15 +26,33 @@ enum RecipeSource<'x> {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Envelope<'x> {
-    pub mail_from: &'x str,
-    pub rcpt_to: &'x [&'x str],
+pub struct Envelope<A, R> {
+    pub mail_from: A,
+    pub rcpt_to: R,
+}
+
+impl<A, R> Envelope<A, R> {
+    pub fn new(mail_from: A, rcpt_to: R) -> Self {
+        Envelope { mail_from, rcpt_to }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Hop<'x> {
-    Real(Envelope<'x>),
-    Imaginary { next_domain: &'x str },
+pub enum Hop<A, R, I> {
+    Real(Envelope<A, R>),
+    Imaginary { next_domain: I },
+}
+
+impl<A, R> Hop<A, R, String> {
+    pub fn real(mail_from: A, rcpt_to: R) -> Self {
+        Hop::Real(Envelope::new(mail_from, rcpt_to))
+    }
+}
+
+impl<I> Hop<&'static str, [&'static str; 0], I> {
+    pub fn imaginary(next_domain: I) -> Self {
+        Hop::Imaginary { next_domain }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,85 +80,111 @@ impl Dkim2Signer<Done> {
     /// Signs a message whose content has not changed (Originator or transparent
     /// Forwarder). Adds a DKIM2-Signature, and a Message-Instance only if none
     /// is present yet.
-    pub fn sign<'x, M>(&self, message: M, hop: &Hop) -> crate::Result<Dkim2Signed>
+    pub fn sign<'x, M, A, R, I>(&self, message: M, hop: Hop<A, R, I>) -> crate::Result<Dkim2Signed>
     where
         M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
     {
         self.sign_at(message, hop, now())
     }
 
     /// Signs a message whose content changed, computing the recipe by diffing
     /// `original` against `modified` (the form to be sent).
-    pub fn sign_revised<'x, O, M>(
+    pub fn sign_revised<'x, O, M, A, R, I>(
         &self,
         original: O,
         modified: M,
-        hop: &Hop,
+        hop: Hop<A, R, I>,
     ) -> crate::Result<Dkim2Signed>
     where
         O: TryInto<AuthenticatedMessage<'x>, Error = Error>,
         M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
     {
         self.sign_revised_at(original, modified, hop, now())
     }
 
-    pub fn sign_revised_at<'x, O, M>(
+    pub fn sign_revised_at<'x, O, M, A, R, I>(
         &self,
         original: O,
         modified: M,
-        hop: &Hop,
+        hop: Hop<A, R, I>,
         now: u64,
     ) -> crate::Result<Dkim2Signed>
     where
         O: TryInto<AuthenticatedMessage<'x>, Error = Error>,
         M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
     {
         self.sign_internal(modified, hop, RecipeSource::Diff(original.try_into()?), now)
     }
 
     /// Signs a changed message using a caller-supplied recipe describing how to
     /// reconstruct the previous state from `modified`.
-    pub fn sign_with_recipe<'x, M>(
+    pub fn sign_with_recipe<'x, M, A, R, I>(
         &self,
         modified: M,
         recipe: Recipe,
-        hop: &Hop,
+        hop: Hop<A, R, I>,
     ) -> crate::Result<Dkim2Signed>
     where
         M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
     {
         self.sign_with_recipe_at(modified, recipe, hop, now())
     }
 
-    pub fn sign_at<'x, M>(&self, message: M, hop: &Hop, now: u64) -> crate::Result<Dkim2Signed>
-    where
-        M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
-    {
-        self.sign_internal(message, hop, RecipeSource::None, now)
-    }
-
-    pub fn sign_with_recipe_at<'x, M>(
+    pub fn sign_at<'x, M, A, R, I>(
         &self,
-        modified: M,
-        recipe: Recipe,
-        hop: &Hop,
+        message: M,
+        hop: Hop<A, R, I>,
         now: u64,
     ) -> crate::Result<Dkim2Signed>
     where
         M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
+    {
+        self.sign_internal(message, hop, RecipeSource::None, now)
+    }
+
+    pub fn sign_with_recipe_at<'x, M, A, R, I>(
+        &self,
+        modified: M,
+        recipe: Recipe,
+        hop: Hop<A, R, I>,
+        now: u64,
+    ) -> crate::Result<Dkim2Signed>
+    where
+        M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
     {
         self.sign_internal(modified, hop, RecipeSource::Given(recipe), now)
     }
 
-    fn sign_internal<'x, M>(
+    fn sign_internal<'x, M, A, R, I>(
         &self,
         message: M,
-        hop: &Hop,
+        hop: Hop<A, R, I>,
         recipe_source: RecipeSource<'x>,
         now: u64,
     ) -> crate::Result<Dkim2Signed>
     where
         M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
     {
         let parsed = message.try_into()?;
 
@@ -191,14 +235,14 @@ impl Dkim2Signer<Done> {
 
         let chain = match hop {
             Hop::Real(envelope) => ChainBinding::Envelope {
-                mail_from: to_reverse_path(envelope.mail_from),
+                mail_from: to_reverse_path(envelope.mail_from.as_ref()),
                 rcpt_to: envelope
                     .rcpt_to
-                    .iter()
-                    .map(|r| to_reverse_path(r))
+                    .into_iter()
+                    .map(|rcpt| to_reverse_path(rcpt.as_ref()))
                     .collect(),
             },
-            Hop::Imaginary { next_domain } => ChainBinding::NextDomain(next_domain.to_string()),
+            Hop::Imaginary { next_domain } => ChainBinding::NextDomain(next_domain.into()),
         };
 
         let mut signature = Signature {
@@ -292,7 +336,7 @@ pub(super) fn to_reverse_path(addr: &str) -> String {
 
 #[cfg(test)]
 mod test {
-    use super::{Dkim2Signer, Envelope, Hop};
+    use super::{Dkim2Signer, Hop};
     use crate::{
         common::crypto::{DkimKey, Ed25519Key, RsaKey, Sha256},
         dkim2::Dkim2Signed,
@@ -388,7 +432,7 @@ mod test {
         let signed = signer
             .sign_internal(
                 &input,
-                &Hop::Real(Envelope { mail_from, rcpt_to }),
+                Hop::real(mail_from, rcpt_to),
                 super::RecipeSource::None,
                 TIMESTAMP,
             )
@@ -525,14 +569,7 @@ mod test {
             "\r\n",
             "body\r\n",
         );
-        let result = signer.sign_at(
-            msg.as_bytes(),
-            &Hop::Real(Envelope {
-                mail_from: "a@ex.com",
-                rcpt_to: &["b@x.com"],
-            }),
-            1000,
-        );
+        let result = signer.sign_at(msg.as_bytes(), Hop::real("a@ex.com", ["b@x.com"]), 1000);
         assert!(result.is_err(), "sequence overflow must be a clean error");
     }
 }

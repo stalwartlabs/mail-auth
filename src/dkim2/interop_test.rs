@@ -224,21 +224,17 @@ fn key_path(hop: &HopSpec) -> String {
 }
 
 fn rust_sign(message: &[u8], hop: &HopSpec) -> Vec<u8> {
-    let rcpts: Vec<&str> = hop.rcpt_to.to_vec();
-    let envelope = Hop::Real(Envelope {
-        mail_from: hop.mail_from,
-        rcpt_to: &rcpts,
-    });
+    let envelope = Hop::real(hop.mail_from, hop.rcpt_to);
     let signed = match hop.alg {
         Alg::Ed25519 => Dkim2Signer::from_key(load_ed25519(hop.domain, hop.selector))
             .domain(hop.domain)
             .selector(hop.selector)
-            .sign_at(message, &envelope, TS)
+            .sign_at(message, envelope, TS)
             .unwrap(),
         Alg::Rsa => Dkim2Signer::from_key(load_rsa(hop.domain, hop.selector))
             .domain(hop.domain)
             .selector(hop.selector)
-            .sign_at(message, &envelope, TS)
+            .sign_at(message, envelope, TS)
             .unwrap(),
     };
     prepend(&signed, message)
@@ -255,9 +251,9 @@ async fn rust_verify(
         return (false, "parse failed".to_string());
     };
     let params = caches.parameters(&parsed);
-    let envelope = Envelope { mail_from, rcpt_to };
+    let envelope = Envelope::new(mail_from, rcpt_to);
     let output = resolver
-        .verify_dkim2_(&parsed, &envelope, params.cache_txt, NOW, true)
+        .verify_dkim2_(&parsed, envelope, params.cache_txt, NOW, true)
         .await;
     let ok = *output.result() == Dkim2Result::Pass;
     let detail = if ok {

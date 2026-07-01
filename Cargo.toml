@@ -39,7 +39,7 @@ rsa = { version = "0.9.8", optional = true }
 ed25519-dalek = { version = "2", optional = true, features = ["pkcs8", "rand_core"] }
 sha1 = { version = "0.11", optional = true }
 sha2 = { version = "0.11", optional = true }
-rustls-pki-types = "1.14"
+rustls-pki-types = "1.15"
 web-time = { version = "1", optional = true }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -63,7 +63,6 @@ getrandom_v04 = { package = "getrandom", version = "0.4", features = ["wasm_js"]
 
 [dev-dependencies]
 tokio = { version = "1.51", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
-rustls-pki-types = "1.14"
 psl = "2.1"
 testcontainers = "0.27"
 tempfile = "3"

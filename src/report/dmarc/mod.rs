@@ -10,7 +10,8 @@ use super::PolicyPublished;
 #[cfg(feature = "arc")]
 use crate::ArcOutput;
 use crate::{
-    DkimOutput, DmarcOutput, SpfOutput,
+    Dkim2Result, DkimOutput, DmarcOutput, SpfOutput,
+    dkim2::Dkim2Output,
     dmarc::Dmarc,
     report::{
         ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
@@ -220,6 +221,31 @@ impl Record {
                     human_result,
                 });
             }
+        }
+        self
+    }
+
+    pub fn with_dkim2_output(mut self, dkim2_output: &Dkim2Output) -> Self {
+        for link in dkim2_output.chain() {
+            let (result, human_result) = match &link.result {
+                Dkim2Result::Pass => (DkimResult::Pass, None),
+                Dkim2Result::Fail(err) => (DkimResult::Fail, err.to_string().into()),
+                Dkim2Result::PermError(err) => (DkimResult::PermError, err.to_string().into()),
+                Dkim2Result::TempError(err) => (DkimResult::TempError, err.to_string().into()),
+                Dkim2Result::None => (DkimResult::None, None),
+            };
+
+            self.auth_results.dkim.push(DKIMAuthResult {
+                domain: link.signature.d.to_string(),
+                selector: link
+                    .signature
+                    .s
+                    .first()
+                    .map(|value| value.selector.clone())
+                    .unwrap_or_default(),
+                result,
+                human_result,
+            });
         }
         self
     }

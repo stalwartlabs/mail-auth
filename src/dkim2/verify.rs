@@ -25,10 +25,10 @@ const MAX_AGE: u64 = 14 * 86400;
 
 impl MessageAuthenticator {
     /// Verifies the DKIM2 signature chain of an RFC5322 message.
-    pub async fn verify_dkim2<'x, 'y, TXT, MXX, IPV4, IPV6, PTR>(
+    pub async fn verify_dkim2<'x, TXT, MXX, IPV4, IPV6, PTR, A, R>(
         &self,
         params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
-        envelope: &Envelope<'y>,
+        envelope: Envelope<A, R>,
     ) -> Dkim2Output<'x>
     where
         TXT: ResolverCache<Box<str>, Txt> + 'x,
@@ -36,26 +36,34 @@ impl MessageAuthenticator {
         IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
         IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
         PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
     {
         let params = params.into();
         self.verify_dkim2_(params.params, envelope, params.cache_txt, now(), true)
             .await
     }
 
-    pub(crate) async fn verify_dkim2_<'x, 'y, TXT>(
+    pub(crate) async fn verify_dkim2_<'x, TXT, A, R>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
-        envelope: &Envelope<'y>,
+        envelope: Envelope<A, R>,
         cache_txt: Option<&TXT>,
         now: u64,
         body_present: bool,
     ) -> Dkim2Output<'x>
     where
         TXT: ResolverCache<Box<str>, Txt>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
     {
         if message.has_dkim2_errors {
             for header in &message.errors {
-                if is_dkim2_signature_field(header.name) || is_message_instance_field(header.name) {
+                let name = header.name.trim_ascii();
+
+                if name.eq_ignore_ascii_case(b"dkim2-signature")
+                    || name.eq_ignore_ascii_case(b"message-instance")
+                {
                     return Dkim2Result::from(header.header.clone()).into();
                 }
             }
@@ -133,14 +141,14 @@ impl MessageAuthenticator {
         let top_signature = &signatures.last().unwrap().header;
         match &top_signature.chain {
             ChainBinding::Envelope { mail_from, rcpt_to } => {
-                if !address_matches(envelope.mail_from, mail_from) {
+                if !address_matches(envelope.mail_from.as_ref(), mail_from) {
                     return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::MailFromMismatch(
                         top_signature.i,
                     )))
                     .into();
                 }
                 for rcpt in envelope.rcpt_to {
-                    if !rcpt_to.iter().any(|r| address_matches(rcpt, r)) {
+                    if !rcpt_to.iter().any(|r| address_matches(rcpt.as_ref(), r)) {
                         return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::RcptToMismatch(
                             top_signature.i,
                         )))
@@ -393,14 +401,6 @@ fn flag_violation(
     }
 
     None
-}
-
-fn is_dkim2_signature_field(name: &[u8]) -> bool {
-    name.trim_ascii().eq_ignore_ascii_case(b"dkim2-signature")
-}
-
-fn is_message_instance_field(name: &[u8]) -> bool {
-    name.trim_ascii().eq_ignore_ascii_case(b"message-instance")
 }
 
 fn local_and_domain(address: &str) -> (&str, &str) {
@@ -757,12 +757,16 @@ mod test {
         caches
     }
 
-    async fn verify_file(
+    async fn verify_file<A, R>(
         resolver: &MessageAuthenticator,
         caches: &DummyCaches,
         name: &str,
-        envelope: &Envelope<'_>,
-    ) -> Dkim2Result {
+        envelope: Envelope<A, R>,
+    ) -> Dkim2Result
+    where
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+    {
         let raw = std::fs::read(resource(&["expected", name])).unwrap();
         let message = AuthenticatedMessage::parse(&raw).unwrap();
         let params = caches.parameters(&message);
@@ -834,12 +838,8 @@ mod test {
     ) {
         for &name in names {
             let (mail_from, rcpt_to) = top_envelope(name);
-            let rcpts: Vec<&str> = rcpt_to.iter().map(|s| s.as_str()).collect();
-            let envelope = Envelope {
-                mail_from: &mail_from,
-                rcpt_to: &rcpts,
-            };
-            let result = verify_file(resolver, caches, name, &envelope).await;
+            let result =
+                verify_file(resolver, caches, name, Envelope::new(&mail_from, &rcpt_to)).await;
             assert_eq!(result, Dkim2Result::Pass, "vector {name}");
         }
     }
@@ -855,7 +855,7 @@ mod test {
     async fn sign_then_verify_multi_hop() {
         use crate::{
             common::crypto::Ed25519Key,
-            dkim2::{Dkim2Signer, Envelope as HopEnvelope, Hop},
+            dkim2::{Dkim2Signer, Envelope, Hop},
         };
         use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
 
@@ -879,10 +879,7 @@ mod test {
         let sign1 = hop1
             .sign(
                 &original,
-                &Hop::Real(HopEnvelope {
-                    mail_from: "sender@test1.dkim2.com",
-                    rcpt_to: &["list@test2.dkim2.com"],
-                }),
+                Hop::real("sender@test1.dkim2.com", ["list@test2.dkim2.com"]),
             )
             .unwrap();
         let message1 = prepend(&sign1, &original);
@@ -893,10 +890,7 @@ mod test {
         let sign2 = hop2
             .sign(
                 &message1,
-                &Hop::Real(HopEnvelope {
-                    mail_from: "relay@test2.dkim2.com",
-                    rcpt_to: &["recipient@example.com"],
-                }),
+                Hop::real("relay@test2.dkim2.com", ["recipient@example.com"]),
             )
             .unwrap();
         let message2 = prepend(&sign2, &message1);
@@ -905,12 +899,9 @@ mod test {
         let caches = load_caches();
         let message = AuthenticatedMessage::parse(&message2).unwrap();
         let params = caches.parameters(&message);
-        let envelope = Envelope {
-            mail_from: "relay@test2.dkim2.com",
-            rcpt_to: &["recipient@example.com"],
-        };
+        let envelope = Envelope::new("relay@test2.dkim2.com", ["recipient@example.com"]);
         let output = resolver
-            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW, true)
+            .verify_dkim2_(&message, envelope, params.cache_txt, NOW, true)
             .await;
         assert_eq!(
             output.result(),
@@ -925,7 +916,7 @@ mod test {
     async fn sign_multi_algorithm_then_verify() {
         use crate::{
             common::crypto::{Algorithm, Ed25519Key, RsaKey, Sha256},
-            dkim2::{Dkim2Signer, Envelope as HopEnvelope, Hop},
+            dkim2::{Dkim2Signer, Envelope, Hop},
         };
         use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
 
@@ -957,10 +948,7 @@ mod test {
             .additional_key(load_rsa("test1.dkim2.com", "sel1"), "sel1")
             .sign(
                 &original,
-                &Hop::Real(HopEnvelope {
-                    mail_from: "sender@test1.dkim2.com",
-                    rcpt_to: &["recipient@example.com"],
-                }),
+                Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]),
             )
             .unwrap();
 
@@ -975,12 +963,9 @@ mod test {
         let caches = load_caches();
         let parsed = AuthenticatedMessage::parse(&message).unwrap();
         let params = caches.parameters(&parsed);
-        let envelope = Envelope {
-            mail_from: "sender@test1.dkim2.com",
-            rcpt_to: &["recipient@example.com"],
-        };
+        let envelope = Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]);
         let output = resolver
-            .verify_dkim2_(&parsed, &envelope, params.cache_txt, NOW, true)
+            .verify_dkim2_(&parsed, envelope, params.cache_txt, NOW, true)
             .await;
         assert_eq!(
             output.result(),
@@ -994,11 +979,8 @@ mod test {
     async fn verify_rejects_wrong_envelope() {
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
         let caches = load_caches();
-        let envelope = Envelope {
-            mail_from: "attacker@evil.example",
-            rcpt_to: &["recipient@example.com"],
-        };
-        let result = verify_file(&resolver, &caches, "simple-ed25519.eml", &envelope).await;
+        let envelope = Envelope::new("attacker@evil.example", ["recipient@example.com"]);
+        let result = verify_file(&resolver, &caches, "simple-ed25519.eml", envelope).await;
         assert!(
             matches!(result, Dkim2Result::PermError(_)),
             "got {result:?}"
@@ -1015,12 +997,9 @@ mod test {
         tampered[pos] = b'J';
         let message = AuthenticatedMessage::parse(&tampered).unwrap();
         let params = caches.parameters(&message);
-        let envelope = Envelope {
-            mail_from: "sender@test1.dkim2.com",
-            rcpt_to: &["recipient@example.com"],
-        };
+        let envelope = Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]);
         let result = resolver
-            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW, true)
+            .verify_dkim2_(&message, envelope, params.cache_txt, NOW, true)
             .await;
         assert!(
             matches!(result.result(), Dkim2Result::Fail(_)),
@@ -1039,12 +1018,9 @@ mod test {
         tampered[pos] = b'X';
         let message = AuthenticatedMessage::parse(&tampered).unwrap();
         let params = caches.parameters(&message);
-        let envelope = Envelope {
-            mail_from: "sender@test1.dkim2.com",
-            rcpt_to: &["recipient@example.com"],
-        };
+        let envelope = Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]);
         let result = resolver
-            .verify_dkim2_(&message, &envelope, params.cache_txt, NOW, true)
+            .verify_dkim2_(&message, envelope, params.cache_txt, NOW, true)
             .await;
         assert!(
             matches!(
@@ -1060,11 +1036,8 @@ mod test {
     async fn verify_rejects_rcpt_not_in_rt() {
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
         let caches = load_caches();
-        let envelope = Envelope {
-            mail_from: "sender@test1.dkim2.com",
-            rcpt_to: &["someone-else@example.com"],
-        };
-        let result = verify_file(&resolver, &caches, "simple-ed25519.eml", &envelope).await;
+        let envelope = Envelope::new("sender@test1.dkim2.com", ["someone-else@example.com"]);
+        let result = verify_file(&resolver, &caches, "simple-ed25519.eml", envelope).await;
         assert!(
             matches!(
                 result,
@@ -1118,14 +1091,10 @@ mod test {
                 continue;
             };
             let params = caches.parameters(&message);
-            let rcpts: Vec<&str> = rcpt_to.iter().map(|s| s.as_str()).collect();
-            let envelope = Envelope {
-                mail_from: &mail_from,
-                rcpt_to: &rcpts,
-            };
+            let envelope = Envelope::new(&mail_from, &rcpt_to);
             let lenient = (!strict).then(super::test_reverse_path::LenientReversePath::new);
             let output = resolver
-                .verify_dkim2_(&message, &envelope, params.cache_txt, now, true)
+                .verify_dkim2_(&message, envelope, params.cache_txt, now, true)
                 .await;
             drop(lenient);
             if !state_matches(expected, output.result()) {
