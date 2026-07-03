@@ -23,7 +23,7 @@ Date: Tue, 30 Jun 2026 10:00:00 +0000
 
 Hi Bob,
 
-This message was signed in your browser with mail-auth.
+This message was signed in the browser with mail-auth.
 
 Cheers,
 Alice
@@ -36,7 +36,7 @@ Date: Tue, 30 Jun 2026 10:00:00 +0000
 
 Hi Bob,
 
-This message was signed in your browser with mail-auth.
+This message was signed in the browser with mail-auth.
 
 Cheers,
 Alice

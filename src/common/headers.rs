@@ -24,6 +24,48 @@ pub trait HeaderStream<'x> {
     fn body(&mut self) -> &'x [u8];
 }
 
+const MAX_HEADER_LINE_LEN: usize = 76;
+
+pub struct HeaderFolder {
+    writer: Vec<u8>,
+}
+
+impl HeaderFolder {
+    pub fn with_capacity(capacity: usize) -> Self {
+        HeaderFolder {
+            writer: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn fold(&mut self, header: &[u8]) {
+        let mut bytes_left = MAX_HEADER_LINE_LEN;
+
+        for chunk in header.split_inclusive(|ch| *ch == b';') {
+            if chunk.len() < bytes_left {
+                self.writer.extend_from_slice(chunk);
+                bytes_left -= chunk.len();
+            } else if chunk.len() >= MAX_HEADER_LINE_LEN {
+                let mut add_new_line = bytes_left != MAX_HEADER_LINE_LEN;
+                for chunk in chunk.chunks(MAX_HEADER_LINE_LEN) {
+                    if add_new_line {
+                        self.writer.extend_from_slice(b"\r\n\t");
+                    }
+                    add_new_line = true;
+                    self.writer.extend_from_slice(chunk);
+                }
+            } else {
+                self.writer.extend_from_slice(b"\r\n\t");
+                self.writer.extend_from_slice(chunk);
+                bytes_left = MAX_HEADER_LINE_LEN - chunk.len();
+            }
+        }
+    }
+
+    pub fn finish(self) -> Vec<u8> {
+        self.writer
+    }
+}
+
 pub(crate) struct ChainedHeaderIterator<'x, T: Iterator<Item = &'x [u8]>> {
     parts: T,
     iter: HeaderIterator<'x>,

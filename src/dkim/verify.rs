@@ -460,6 +460,7 @@ pub mod test {
                 message,
                 AuthenticatedMessage::from_parsed(
                     &MessageParser::new().parse(&raw_message).unwrap(),
+                    raw_message.as_bytes(),
                     true
                 )
             );

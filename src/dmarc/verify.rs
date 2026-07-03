@@ -447,6 +447,7 @@ mod test {
                 auth_message,
                 AuthenticatedMessage::from_parsed(
                     &MessageParser::new().parse(message).unwrap(),
+                    message.as_bytes(),
                     true
                 )
             );

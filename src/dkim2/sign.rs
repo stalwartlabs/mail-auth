@@ -9,6 +9,7 @@ use super::{
     recipe::Recipe,
 };
 use crate::SystemTime;
+use crate::dkim2::BodyRecipe;
 use crate::{
     AuthenticatedMessage, Error,
     common::{
@@ -18,38 +19,51 @@ use crate::{
     dkim2::canonicalize::CanonicalizedHeaderWriter,
 };
 
-#[allow(clippy::large_enum_variant)]
-enum RecipeSource<'x> {
-    None,
-    Given(Recipe),
-    Diff(AuthenticatedMessage<'x>),
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Envelope<A, R> {
+pub struct Envelope<A, R>
+where
+    A: AsRef<str>,
+    R: IntoIterator<Item: AsRef<str>>,
+{
     pub mail_from: A,
     pub rcpt_to: R,
 }
 
-impl<A, R> Envelope<A, R> {
+impl<A, R> Envelope<A, R>
+where
+    A: AsRef<str>,
+    R: IntoIterator<Item: AsRef<str>>,
+{
     pub fn new(mail_from: A, rcpt_to: R) -> Self {
         Envelope { mail_from, rcpt_to }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Hop<A, R, I> {
+pub enum Hop<A, R, I>
+where
+    A: AsRef<str>,
+    R: IntoIterator<Item: AsRef<str>>,
+    I: Into<String>,
+{
     Real(Envelope<A, R>),
     Imaginary { next_domain: I },
 }
 
-impl<A, R> Hop<A, R, String> {
+impl<A, R> Hop<A, R, String>
+where
+    A: AsRef<str>,
+    R: IntoIterator<Item: AsRef<str>>,
+{
     pub fn real(mail_from: A, rcpt_to: R) -> Self {
         Hop::Real(Envelope::new(mail_from, rcpt_to))
     }
 }
 
-impl<I> Hop<&'static str, [&'static str; 0], I> {
+impl<I> Hop<&'static str, [&'static str; 0], I>
+where
+    I: Into<String>,
+{
     pub fn imaginary(next_domain: I) -> Self {
         Hop::Imaginary { next_domain }
     }
@@ -108,7 +122,7 @@ impl Dkim2Signer<Done> {
         self.sign_revised_at(original, modified, hop, now())
     }
 
-    pub fn sign_revised_at<'x, O, M, A, R, I>(
+    pub(crate) fn sign_revised_at<'x, O, M, A, R, I>(
         &self,
         original: O,
         modified: M,
@@ -122,7 +136,14 @@ impl Dkim2Signer<Done> {
         R: IntoIterator<Item: AsRef<str>>,
         I: Into<String>,
     {
-        self.sign_internal(modified, hop, RecipeSource::Diff(original.try_into()?), now)
+        let modified = modified.try_into()?;
+        let new_instance = MessageInstance::from_message(&modified, Some(&original.try_into()?));
+
+        self.sign_internal(&modified, hop, new_instance.as_ref(), now)
+            .map(|signature| Dkim2Signed {
+                message_instance: new_instance,
+                signature,
+            })
     }
 
     /// Signs a changed message using a caller-supplied recipe describing how to
@@ -142,7 +163,22 @@ impl Dkim2Signer<Done> {
         self.sign_with_recipe_at(modified, recipe, hop, now())
     }
 
-    pub fn sign_at<'x, M, A, R, I>(
+    /// Signs a message with a caller-supplied `Message-Instance` header.
+    pub fn sign_with_message_instance<'x, A, R, I>(
+        &self,
+        modified: &AuthenticatedMessage<'x>,
+        instance: Option<&MessageInstance>,
+        hop: Hop<A, R, I>,
+    ) -> crate::Result<Signature>
+    where
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
+    {
+        self.sign_internal(modified, hop, instance, now())
+    }
+
+    pub(crate) fn sign_at<'x, M, A, R, I>(
         &self,
         message: M,
         hop: Hop<A, R, I>,
@@ -154,10 +190,17 @@ impl Dkim2Signer<Done> {
         R: IntoIterator<Item: AsRef<str>>,
         I: Into<String>,
     {
-        self.sign_internal(message, hop, RecipeSource::None, now)
+        let message = message.try_into()?;
+        let new_instance = MessageInstance::from_message(&message, None);
+
+        self.sign_internal(&message, hop, new_instance.as_ref(), now)
+            .map(|signature| Dkim2Signed {
+                message_instance: new_instance,
+                signature,
+            })
     }
 
-    pub fn sign_with_recipe_at<'x, M, A, R, I>(
+    pub(crate) fn sign_with_recipe_at<'x, M, A, R, I>(
         &self,
         modified: M,
         recipe: Recipe,
@@ -170,63 +213,33 @@ impl Dkim2Signer<Done> {
         R: IntoIterator<Item: AsRef<str>>,
         I: Into<String>,
     {
-        self.sign_internal(modified, hop, RecipeSource::Given(recipe), now)
+        let message = modified.try_into()?;
+        let new_instance = MessageInstance::from_recipe(&message, Some(recipe));
+
+        self.sign_internal(&message, hop, new_instance.as_ref(), now)
+            .map(|signature| Dkim2Signed {
+                message_instance: new_instance,
+                signature,
+            })
     }
 
-    fn sign_internal<'x, M, A, R, I>(
+    fn sign_internal<'x, A, R, I>(
         &self,
-        message: M,
+        parsed: &AuthenticatedMessage<'x>,
         hop: Hop<A, R, I>,
-        recipe_source: RecipeSource<'x>,
+        new_instance: Option<&MessageInstance>,
         now: u64,
-    ) -> crate::Result<Dkim2Signed>
+    ) -> crate::Result<Signature>
     where
-        M: TryInto<AuthenticatedMessage<'x>, Error = Error>,
         A: AsRef<str>,
         R: IntoIterator<Item: AsRef<str>>,
         I: Into<String>,
     {
-        let parsed = message.try_into()?;
-
-        let content_changed = !matches!(recipe_source, RecipeSource::None);
-        let recipe = match recipe_source {
-            RecipeSource::None => None,
-            RecipeSource::Given(recipe) => Some(recipe),
-            RecipeSource::Diff(original) => Some(Recipe::diff(&original, &parsed)),
-        };
-
-        let hash_algorithm = HashAlgorithm::Sha256;
-
         let instances = parsed.dkim2_instances.as_slice();
         let signatures = parsed.dkim2_signatures.as_slice();
 
         let highest_m = instances.last().map(|h| h.header.m).unwrap_or(0);
         let highest_i = signatures.last().map(|h| h.header.i).unwrap_or(0);
-
-        let new_instance = if instances.is_empty() || content_changed {
-            let header_hash = hash_algorithm
-                .headers_hash(parsed.headers.iter().copied())
-                .as_ref()
-                .to_vec();
-            let body_hash = hash_algorithm
-                .body_hash(parsed.raw_body())
-                .as_ref()
-                .to_vec();
-
-            Some(MessageInstance {
-                m: highest_m
-                    .checked_add(1)
-                    .ok_or(Error::Dkim2(super::Dkim2Error::SequenceOverflow))?,
-                hashes: vec![MessageHash {
-                    name: HashAlgorithm::Sha256.into(),
-                    header_hash,
-                    body_hash,
-                }],
-                recipe,
-            })
-        } else {
-            None
-        };
 
         let new_m = new_instance.as_ref().map(|mi| mi.m).unwrap_or(highest_m);
         let next_i = highest_i
@@ -269,7 +282,7 @@ impl Dkim2Signer<Done> {
             instances,
             signatures,
             new_signature: &signature,
-            new_instance: new_instance.as_ref(),
+            new_instance,
         }
         .write(&mut input);
 
@@ -277,9 +290,44 @@ impl Dkim2Signer<Done> {
             signature.s[index].b = entry.key.sign(input.as_slice())?;
         }
 
-        Ok(Dkim2Signed {
-            message_instance: new_instance,
-            signature,
+        Ok(signature)
+    }
+}
+
+impl MessageInstance {
+    pub fn from_message(
+        message: &AuthenticatedMessage<'_>,
+        original: Option<&AuthenticatedMessage<'_>>,
+    ) -> Option<Self> {
+        Self::from_recipe(
+            message,
+            original
+                .map(|original| Recipe::diff(original, original))
+                .filter(|r| !r.headers.is_empty() || r.body != BodyRecipe::None),
+        )
+    }
+
+    pub fn from_recipe(message: &AuthenticatedMessage<'_>, recipe: Option<Recipe>) -> Option<Self> {
+        let instances = message.dkim2_instances.as_slice();
+
+        (instances.is_empty() || recipe.is_some()).then(|| MessageInstance {
+            m: instances
+                .last()
+                .map(|h| h.header.m)
+                .unwrap_or(0)
+                .saturating_add(1),
+            hashes: vec![MessageHash {
+                name: HashAlgorithm::Sha256.into(),
+                header_hash: HashAlgorithm::Sha256
+                    .headers_hash(message.headers.iter().copied())
+                    .as_ref()
+                    .to_vec(),
+                body_hash: HashAlgorithm::Sha256
+                    .body_hash(message.raw_body())
+                    .as_ref()
+                    .to_vec(),
+            }],
+            recipe,
         })
     }
 }
@@ -339,7 +387,7 @@ mod test {
     use super::{Dkim2Signer, Hop};
     use crate::{
         common::crypto::{DkimKey, Ed25519Key, RsaKey, Sha256},
-        dkim2::Dkim2Signed,
+        dkim2::{Dkim2Signed, MessageInstance},
     };
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
     use std::{borrow::Cow, path::PathBuf};
@@ -427,17 +475,23 @@ mod test {
         rcpt_to: &[&str],
         expected_file: &str,
     ) {
-        let input = std::fs::read(resource(&["emails", email])).unwrap();
+        let input_raw = std::fs::read(resource(&["emails", email])).unwrap();
+        let input = input_raw.as_slice().try_into().unwrap();
         let signer = Dkim2Signer::from_key(key).domain(domain).selector(selector);
+        let instance = MessageInstance::from_message(&input, None);
         let signed = signer
             .sign_internal(
                 &input,
                 Hop::real(mail_from, rcpt_to),
-                super::RecipeSource::None,
+                instance.as_ref(),
                 TIMESTAMP,
             )
+            .map(|signature| Dkim2Signed {
+                message_instance: instance,
+                signature,
+            })
             .unwrap();
-        let normalized = normalize_crlf(&input);
+        let normalized = normalize_crlf(&input_raw);
         let produced = prepend(&signed, normalized.as_ref());
 
         if std::env::var("REGEN_DKIM2").is_ok() {

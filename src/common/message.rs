@@ -12,23 +12,21 @@ use mail_parser::{Address, HeaderName, HeaderValue, Message, parsers::MessageStr
 
 impl<'x> AuthenticatedMessage<'x> {
     pub fn parse(raw_message: &'x [u8]) -> Option<Self> {
-        Self::parse_with_opts(raw_message, true)
+        Self::parse_with_opts(raw_message, None, true)
     }
 
-    pub fn from_parsed(parsed: &'x Message<'x>, strict: bool) -> Self {
+    pub fn from_parsed<'y>(parsed: &'y Message<'x>, raw_message: &'x [u8], strict: bool) -> Self {
         let root = parsed.root_part();
         let mut message = AuthenticatedMessage {
-            raw_message: parsed.raw_message(),
+            raw_message,
             body_offset: root.raw_body_offset(),
             headers: Vec::with_capacity(root.headers.len()),
             ..Default::default()
         };
 
         for header in root.headers() {
-            let name =
-                &parsed.raw_message[header.offset_field as usize..header.offset_start as usize - 1];
-            let value =
-                &parsed.raw_message[header.offset_start as usize..header.offset_end as usize];
+            let name = &raw_message[header.offset_field as usize..header.offset_start as usize - 1];
+            let value = &raw_message[header.offset_start as usize..header.offset_end as usize];
 
             match &header.name {
                 HeaderName::From => {
@@ -73,61 +71,25 @@ impl<'x> AuthenticatedMessage<'x> {
         message.finalize()
     }
 
-    pub fn parse_with_opts(raw_message: &'x [u8], strict: bool) -> Option<Self> {
+    pub fn parse_with_opts(
+        raw_message: &'x [u8],
+        prepend_headers: Option<&'x [u8]>,
+        strict: bool,
+    ) -> Option<Self> {
         let mut message = AuthenticatedMessage {
             raw_message,
             ..Default::default()
         };
 
-        let mut headers = HeaderParser::new(raw_message);
-
-        for (header, value) in &mut headers {
-            let name = match header {
-                AuthenticatedHeader::Ds(name) => {
-                    message.parse_dkim(name, value, strict);
-                    name
-                }
-                AuthenticatedHeader::D2s(name) => {
-                    message.parse_dkim2_signature(name, value);
-                    name
-                }
-                AuthenticatedHeader::D2i(name) => {
-                    message.parse_dkim2_instance(name, value);
-                    name
-                }
-                #[cfg(feature = "arc")]
-                AuthenticatedHeader::Aar(name) => {
-                    message.parse_aar(name, value);
-                    name
-                }
-                #[cfg(feature = "arc")]
-                AuthenticatedHeader::Ams(name) => {
-                    message.parse_ams(name, value, strict);
-                    name
-                }
-                #[cfg(feature = "arc")]
-                AuthenticatedHeader::As(name) => {
-                    message.parse_as(name, value);
-                    name
-                }
-                AuthenticatedHeader::From(name) => {
-                    message.parse_from(&MessageStream::new(value).parse_address());
-                    name
-                }
-                AuthenticatedHeader::Other(name) => name,
-            };
-
-            message.headers.push((name, value));
+        if let Some(headers) = prepend_headers {
+            message.parse_headers(headers, strict);
         }
 
-        if !message.headers.is_empty() {
-            // Update header counts
-            message.received_headers_count = headers.num_received;
-            message.message_id_header_present = headers.has_message_id;
-            message.date_header_present = headers.has_date;
+        let body_offset = message.parse_headers(raw_message, strict);
 
+        if !message.headers.is_empty() {
             // Obtain message body
-            if let Some(offset) = headers.body_offset() {
+            if let Some(offset) = body_offset {
                 message.body_offset = offset as u32;
             } else {
                 message.body_offset = raw_message.len() as u32;
@@ -136,6 +98,56 @@ impl<'x> AuthenticatedMessage<'x> {
         } else {
             None
         }
+    }
+
+    fn parse_headers(&mut self, headers: &'x [u8], strict: bool) -> Option<usize> {
+        let mut headers = HeaderParser::new(headers);
+
+        for (header, value) in &mut headers {
+            let name = match header {
+                AuthenticatedHeader::Ds(name) => {
+                    self.parse_dkim(name, value, strict);
+                    name
+                }
+                AuthenticatedHeader::D2s(name) => {
+                    self.parse_dkim2_signature(name, value);
+                    name
+                }
+                AuthenticatedHeader::D2i(name) => {
+                    self.parse_dkim2_instance(name, value);
+                    name
+                }
+                #[cfg(feature = "arc")]
+                AuthenticatedHeader::Aar(name) => {
+                    self.parse_aar(name, value);
+                    name
+                }
+                #[cfg(feature = "arc")]
+                AuthenticatedHeader::Ams(name) => {
+                    self.parse_ams(name, value, strict);
+                    name
+                }
+                #[cfg(feature = "arc")]
+                AuthenticatedHeader::As(name) => {
+                    self.parse_as(name, value);
+                    name
+                }
+                AuthenticatedHeader::From(name) => {
+                    self.parse_from(&MessageStream::new(value).parse_address());
+                    name
+                }
+                AuthenticatedHeader::Other(name) => name,
+            };
+
+            self.headers.push((name, value));
+        }
+
+        // Update header counts
+        self.received_headers_count += headers.num_received;
+        self.message_id_header_present |= headers.has_message_id;
+        self.date_header_present |= headers.has_date;
+
+        headers.body_offset()
     }
 
     fn parse_dkim(&mut self, name: &'x [u8], value: &'x [u8], strict: bool) {

@@ -32,10 +32,10 @@ impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a chained message.
     pub fn sign_chained<'x>(
         &self,
-        chunks: impl Iterator<Item = &'x [u8]>,
+        chunks: impl IntoIterator<Item = &'x [u8]>,
     ) -> crate::Result<Signature> {
         self.sign_stream(
-            ChainedHeaderIterator::new(chunks),
+            ChainedHeaderIterator::new(chunks.into_iter()),
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map(|d| d.as_secs())
@@ -565,11 +565,12 @@ pub mod test {
         signature.write(&mut raw_message, true);
         raw_message.extend_from_slice(message_.as_bytes());
 
-        let message = AuthenticatedMessage::parse_with_opts(&raw_message, strict).unwrap();
+        let message = AuthenticatedMessage::parse_with_opts(&raw_message, None, strict).unwrap();
         assert_eq!(
             message,
             AuthenticatedMessage::from_parsed(
                 &MessageParser::new().parse(&raw_message).unwrap(),
+                &raw_message,
                 strict
             )
         );
