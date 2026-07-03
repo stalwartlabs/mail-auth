@@ -9,7 +9,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use mail_auth::{
     common::headers::HeaderWriter,
     dkim::DkimSigner,
-    dkim2::{BodyRecipe, Dkim2Signer, Envelope, Hop, MessageInstance, Recipe, Step},
+    dkim2::{BodyRecipe, Dkim2Signed, Dkim2Signer, Hop, MessageInstance, Recipe, Step},
 };
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
@@ -47,16 +47,21 @@ pub fn sign_dkim2(
     let key = load_key(key_pem, algorithm)?;
     let body = normalize_eol(message);
     let rcpts: Vec<&str> = rcpt_to.iter().map(String::as_str).collect();
-    let hop = Hop::Real(Envelope {
-        mail_from,
-        rcpt_to: &rcpts,
-    });
+    let hop = Hop::real(mail_from, rcpts);
     let signed = Dkim2Signer::from_key(key)
         .domain(domain)
         .selector(selector)
-        .sign(body.as_bytes(), &hop)
+        .sign(body.as_bytes(), hop)
         .map_err(|err| err.to_string())?;
-    Ok(format!("{}{}", signed.to_header(), body))
+    Ok(format!("{}{}", fold_dkim2(&signed), body))
+}
+
+fn fold_dkim2(signed: &Dkim2Signed) -> String {
+    let mut header = signed.signature.to_header();
+    if let Some(instance) = &signed.message_instance {
+        header.push_str(&instance.to_header());
+    }
+    header
 }
 
 #[derive(Serialize)]
@@ -80,17 +85,14 @@ pub fn sign_dkim2_revised(
     let original = normalize_eol(original);
     let modified = normalize_eol(modified);
     let rcpts: Vec<&str> = rcpt_to.iter().map(String::as_str).collect();
-    let hop = Hop::Real(Envelope {
-        mail_from,
-        rcpt_to: &rcpts,
-    });
+    let hop = Hop::real(mail_from, rcpts);
     let signed = Dkim2Signer::from_key(key)
         .domain(domain)
         .selector(selector)
-        .sign_revised(original.as_bytes(), modified.as_bytes(), &hop)
+        .sign_revised(original.as_bytes(), modified.as_bytes(), hop)
         .map_err(|err| err.to_string())?;
     let result = RevisedResult {
-        signed_message: format!("{}{}", signed.to_header(), modified),
+        signed_message: format!("{}{}", fold_dkim2(&signed), modified),
         recipe_debug: instance_to_json(signed.message_instance.as_ref()),
     };
     serde_wasm_bindgen::to_value(&result).map_err(|err| err.to_string())

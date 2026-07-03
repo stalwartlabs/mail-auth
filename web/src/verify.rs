@@ -114,12 +114,9 @@ pub async fn verify(opts: JsValue) -> Result<JsValue, String> {
 
     if opts.check_dkim2 {
         let rcpts: Vec<&str> = opts.rcpt_to.iter().map(String::as_str).collect();
-        let envelope = Envelope {
-            mail_from: &opts.mail_from,
-            rcpt_to: &rcpts,
-        };
+        let envelope = Envelope::new(opts.mail_from.as_str(), rcpts);
         let output = resolver
-            .verify_dkim2(params(&message, &cache), &envelope)
+            .verify_dkim2(params(&message, &cache), envelope)
             .await;
         results.dkim2 = Some(dkim2_check(&output));
     }

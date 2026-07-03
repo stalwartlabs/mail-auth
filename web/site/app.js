@@ -201,6 +201,7 @@ async function handleDkim2Sign() {
     );
     showOutput("d2-output-wrap", "d2-output", out);
     $("d2-original").value = out;
+    updateReviseButton();
   } catch (err) {
     showError("d2-error", String(err));
   }
@@ -220,11 +221,30 @@ async function handleDkim2Revise() {
       $("d2-original").value,
       $("d2-modified").value
     );
-    showOutput("d2-recipe-wrap", "d2-recipe", result.recipe_debug);
+    let hasRecipe = false;
+    try {
+      const parsed = JSON.parse(result.recipe_debug);
+      hasRecipe = parsed && parsed.recipe != null;
+    } catch (_) {
+      hasRecipe = false;
+    }
+    showOutput(
+      "d2-recipe-wrap",
+      "d2-recipe",
+      hasRecipe
+        ? result.recipe_debug
+        : "No differences found between the original and modified messages."
+    );
     showOutput("d2-revout-wrap", "d2-revout", result.signed_message);
   } catch (err) {
     showError("d2-rev-error", String(err));
   }
+}
+
+function updateReviseButton() {
+  const ready =
+    $("d2-original").value.trim() !== "" && $("d2-modified").value.trim() !== "";
+  $("d2-revise").disabled = !ready;
 }
 
 function chipClass(status) {
@@ -419,6 +439,7 @@ function setupGenericButtons() {
         $("d2-original").value = SAMPLE_MESSAGE;
         $("d2-modified").value = SAMPLE_MODIFIED;
       }
+      updateReviseButton();
     });
   });
 
@@ -437,7 +458,11 @@ function setupGenericButtons() {
 
   $("d2-copy-orig").addEventListener("click", () => {
     $("d2-modified").value = $("d2-original").value;
+    updateReviseButton();
   });
+
+  $("d2-original").addEventListener("input", updateReviseButton);
+  $("d2-modified").addEventListener("input", updateReviseButton);
 
   $("d1-sign").addEventListener("click", handleDkim1Sign);
   $("d2-sign").addEventListener("click", handleDkim2Sign);
@@ -466,6 +491,7 @@ async function boot() {
 
   $("d2-message").value = SAMPLE_MESSAGE;
   $("d1-message").value = SAMPLE_MESSAGE;
+  updateReviseButton();
 
   showTab("dkim2");
 }

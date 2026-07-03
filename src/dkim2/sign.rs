@@ -302,7 +302,7 @@ impl MessageInstance {
         Self::from_recipe(
             message,
             original
-                .map(|original| Recipe::diff(original, original))
+                .map(|original| Recipe::diff(original, message))
                 .filter(|r| !r.headers.is_empty() || r.body != BodyRecipe::None),
         )
     }

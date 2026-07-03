@@ -26,43 +26,47 @@ pub trait HeaderStream<'x> {
 
 const MAX_HEADER_LINE_LEN: usize = 76;
 
-pub struct HeaderFolder {
-    writer: Vec<u8>,
+pub struct HeaderFolder<'x, W: Writer> {
+    writer: &'x mut W,
+    bytes_left: usize,
 }
 
-impl HeaderFolder {
-    pub fn with_capacity(capacity: usize) -> Self {
+impl<'x, W: Writer> HeaderFolder<'x, W> {
+    pub fn new(writer: &'x mut W) -> Self {
         HeaderFolder {
-            writer: Vec::with_capacity(capacity),
+            writer,
+            bytes_left: MAX_HEADER_LINE_LEN,
         }
     }
+}
 
-    pub fn fold(&mut self, header: &[u8]) {
-        let mut bytes_left = MAX_HEADER_LINE_LEN;
-
-        for chunk in header.split_inclusive(|ch| *ch == b';') {
-            if chunk.len() < bytes_left {
-                self.writer.extend_from_slice(chunk);
-                bytes_left -= chunk.len();
+impl<'x, W: Writer> Writer for HeaderFolder<'x, W> {
+    fn write(&mut self, buf: &[u8]) {
+        for chunk in buf.split_inclusive(|ch| *ch == b';') {
+            if chunk == b"\r\n" {
+                self.writer.write(chunk);
+                self.bytes_left = MAX_HEADER_LINE_LEN;
+            } else if chunk.len() < self.bytes_left {
+                self.writer.write(chunk);
+                self.bytes_left -= chunk.len();
             } else if chunk.len() >= MAX_HEADER_LINE_LEN {
-                let mut add_new_line = bytes_left != MAX_HEADER_LINE_LEN;
+                let mut add_new_line = self.bytes_left != MAX_HEADER_LINE_LEN;
+                let mut last_piece_len = MAX_HEADER_LINE_LEN;
                 for chunk in chunk.chunks(MAX_HEADER_LINE_LEN) {
                     if add_new_line {
-                        self.writer.extend_from_slice(b"\r\n\t");
+                        self.writer.write(b"\r\n\t");
                     }
                     add_new_line = true;
-                    self.writer.extend_from_slice(chunk);
+                    self.writer.write(chunk);
+                    last_piece_len = chunk.len();
                 }
+                self.bytes_left = MAX_HEADER_LINE_LEN - last_piece_len;
             } else {
-                self.writer.extend_from_slice(b"\r\n\t");
-                self.writer.extend_from_slice(chunk);
-                bytes_left = MAX_HEADER_LINE_LEN - chunk.len();
+                self.writer.write(b"\r\n\t");
+                self.writer.write(chunk);
+                self.bytes_left = MAX_HEADER_LINE_LEN - chunk.len();
             }
         }
-    }
-
-    pub fn finish(self) -> Vec<u8> {
-        self.writer
     }
 }
 
@@ -432,6 +436,12 @@ impl Writer for Vec<u8> {
     }
 }
 
+impl Writer for &mut Vec<u8> {
+    fn write(&mut self, buf: &[u8]) {
+        self.extend(buf);
+    }
+}
+
 const FROM: u64 =
     (b'f' as u64) | ((b'r' as u64) << 8) | ((b'o' as u64) << 16) | ((b'm' as u64) << 24);
 const DKIM: u64 = (b'd' as u64)
@@ -498,9 +508,9 @@ const MSGID: u64 = (b'm' as u64)
 
 #[cfg(test)]
 mod test {
-    use crate::common::headers::{AuthenticatedHeader, HeaderParser};
-
     use super::{ChainedHeaderIterator, HeaderIterator, HeaderStream};
+    use super::{HeaderFolder, MAX_HEADER_LINE_LEN};
+    use crate::common::headers::{AuthenticatedHeader, HeaderParser, Writer};
 
     #[test]
     fn header_iterator() {
@@ -645,5 +655,185 @@ mod test {
             );
         }
         assert_eq!(it.body(), b"hey");
+    }
+
+    fn fold(header: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::with_capacity(header.len() + 16);
+        let mut folder = HeaderFolder::new(&mut buf);
+        folder.write(header);
+        buf
+    }
+
+    fn unfold(folded: &[u8]) -> Vec<u8> {
+        let mut out = Vec::with_capacity(folded.len());
+        let mut i = 0;
+        while i < folded.len() {
+            if folded[i..].starts_with(b"\r\n\t") {
+                i += 3;
+            } else {
+                out.push(folded[i]);
+                i += 1;
+            }
+        }
+        out
+    }
+
+    fn assert_folded(original: &[u8]) -> Vec<u8> {
+        let folded = fold(original);
+
+        assert_eq!(
+            unfold(&folded),
+            original,
+            "folding must only insert CRLF+TAB fold points, never alter bytes: {:?}",
+            String::from_utf8_lossy(original)
+        );
+
+        for (n, line) in folded.split(|&c| c == b'\n').enumerate() {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            let content = line.strip_prefix(b"\t").unwrap_or(line);
+            assert!(
+                content.len() <= MAX_HEADER_LINE_LEN,
+                "line {n} of {content_len} bytes exceeds {MAX_HEADER_LINE_LEN}: {:?}",
+                String::from_utf8_lossy(content),
+                content_len = content.len(),
+            );
+        }
+
+        for (i, &ch) in folded.iter().enumerate() {
+            if ch == b'\n' {
+                assert!(
+                    i >= 1 && folded[i - 1] == b'\r' && folded.get(i + 1) == Some(&b'\t'),
+                    "every LF must be part of a CRLF+TAB fold at offset {i}: {:?}",
+                    String::from_utf8_lossy(&folded)
+                );
+            }
+        }
+
+        assert!(
+            !folded.starts_with(b"\r\n\t"),
+            "output must never begin with a fold"
+        );
+
+        folded
+    }
+
+    fn extract_header<'a>(eml: &'a str, name: &str) -> &'a [u8] {
+        eml.lines()
+            .find(|l| {
+                l.len() > name.len()
+                    && l.as_bytes()[..name.len()].eq_ignore_ascii_case(name.as_bytes())
+                    && l.as_bytes()[name.len()] == b':'
+            })
+            .unwrap_or_else(|| panic!("header {name} not found"))
+            .as_bytes()
+    }
+
+    #[test]
+    fn header_folder_passthrough() {
+        for input in [
+            &b""[..],
+            &b";"[..],
+            &b"a;;b;;;c"[..],
+            &b"Subject: hello world"[..],
+            &b"Dkim2-Signature: i=1; m=1; d=test.dkim2.eu"[..],
+        ] {
+            assert_eq!(
+                fold(input),
+                input,
+                "should pass through unchanged: {:?}",
+                String::from_utf8_lossy(input)
+            );
+        }
+
+        let just_under = vec![b'a'; MAX_HEADER_LINE_LEN - 1];
+        assert_eq!(fold(&just_under), just_under);
+    }
+
+    #[test]
+    fn header_folder_boundaries() {
+        let exactly_max = vec![b'a'; MAX_HEADER_LINE_LEN];
+        let folded = assert_folded(&exactly_max);
+        assert_eq!(folded, exactly_max, "76 bytes fit on one line, no fold");
+
+        let over_max = vec![b'a'; MAX_HEADER_LINE_LEN + 1];
+        let folded = assert_folded(&over_max);
+        let mut expected = vec![b'a'; MAX_HEADER_LINE_LEN];
+        expected.extend_from_slice(b"\r\n\t");
+        expected.push(b'a');
+        assert_eq!(folded, expected, "77 bytes wrap into 76 + fold + 1");
+
+        let two_pieces = vec![b'a'; MAX_HEADER_LINE_LEN * 2];
+        let folded = assert_folded(&two_pieces);
+        assert_eq!(
+            folded.iter().filter(|&&c| c == b'\n').count(),
+            1,
+            "an exact multiple of the limit yields exactly one fold"
+        );
+    }
+
+    #[test]
+    fn header_folder_large_chunk_followed_by_tags() {
+        let big = vec![b'A'; MAX_HEADER_LINE_LEN * 2 - 3];
+        let mut input = b"v=".to_vec();
+        input.extend_from_slice(&big);
+        input.extend_from_slice(b";a=1;b=2;c=3;d=4;e=5");
+        assert_folded(&input);
+
+        let big = vec![b'A'; MAX_HEADER_LINE_LEN + 20];
+        let mut input = b"s=".to_vec();
+        input.extend_from_slice(&big);
+        input.extend_from_slice(b";f=feedback");
+        assert_folded(&input);
+    }
+
+    #[test]
+    fn header_folder_consecutive_large_chunks() {
+        let mf = vec![b'A'; 100];
+        let rt = vec![b'B'; 90];
+        let mut input = b"Dkim2-Signature:mf=".to_vec();
+        input.extend_from_slice(&mf);
+        input.extend_from_slice(b";rt=");
+        input.extend_from_slice(&rt);
+        input.extend_from_slice(b";f=feedback");
+        assert_folded(&input);
+    }
+
+    #[test]
+    fn header_folder_many_small_tags() {
+        let mut input = b"Dkim2-Signature:".to_vec();
+        for i in 0..40 {
+            input.extend_from_slice(format!(" tag{i}=value{i};").as_bytes());
+        }
+        assert_folded(&input);
+    }
+
+    #[test]
+    fn header_folder_large_leading_chunk_over_partial_line() {
+        let mut input = b"Message-Instance: m=1; h=sha256:".to_vec();
+        input.extend_from_slice(&[b'Z'; 120]);
+        assert_folded(&input);
+    }
+
+    #[test]
+    fn header_folder_real_dkim2_headers() {
+        const FILES: [&str; 2] = [
+            include_str!("../../resources/dkim2/expected/d2_duplicate_rt_tag.eml"),
+            include_str!("../../resources/dkim2/expected/pkix_rsa8192.eml"),
+        ];
+
+        for eml in FILES {
+            for name in ["Message-Instance", "Dkim2-Signature"] {
+                let header = extract_header(eml, name);
+                assert!(
+                    header.len() > MAX_HEADER_LINE_LEN,
+                    "{name} should exceed the fold limit to exercise folding"
+                );
+                let folded = assert_folded(header);
+                assert!(
+                    folded.windows(3).any(|w| w == b"\r\n\t"),
+                    "long real header {name} should have been folded"
+                );
+            }
+        }
     }
 }
