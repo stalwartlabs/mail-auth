@@ -4,11 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+/*
+    DISCLAIMER:
+    This test suite has been written by an LLM and is inefficient and unidiomatic.
+    It was created to test mail-auth interoperability and is not intended for production use.
+*/
+
 use crate::{
     AuthenticatedMessage, Dkim2Result, MessageAuthenticator,
     common::{
         cache::test::DummyCaches,
         crypto::{Ed25519Key, RsaKey, Sha256},
+        headers::HeaderWriter,
         parse::TxtRecordParser,
         verify::DomainKey,
     },
@@ -38,9 +45,13 @@ FROM golang:1.26-bookworm
 # Default branches resolve to upstream HEAD (latest). Pin with a build arg.
 ARG GO_DKIM2_REF=
 ARG PY_INTEROP_REF=
+# PhoenixDKIM ships DKIM2 on a feature branch; pin a commit with the build arg.
+ARG PHOENIX_REF=feature/dkim2
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-pip git ca-certificates \
+      build-essential cmake pkg-config libssl-dev liblmdb-dev libmilter-dev \
+      libidn2-dev libcjson-dev libbsd-dev \
  && rm -rf /var/lib/apt/lists/*
 
 RUN pip3 install --break-system-packages --no-cache-dir cryptography dnslib
@@ -59,6 +70,19 @@ RUN go build -C /src/go -o /usr/local/bin/dkim2recipe ./cmd/dkim2recipe
 RUN git clone https://github.com/dkim2wg/interop.git /src/interop \
  && if [ -n "${PY_INTEROP_REF}" ]; then git -C /src/interop checkout "${PY_INTEROP_REF}"; fi
 ENV PYTHONPATH=/src/interop/python
+
+# PhoenixDKIM (C, OpenDKIM-derived) exposes standalone DKIM2 sign/verify CLIs
+# under WITH_DKIM2. Only those two tools are needed for the interop matrix, so
+# the milter daemon, IDN, Lua and unbound support are all left out of the build.
+RUN git clone https://github.com/edmundlod/PhoenixDKIM.git /src/phoenix \
+ && git -C /src/phoenix checkout "${PHOENIX_REF}" \
+ && cmake -S /src/phoenix -B /src/phoenix/build \
+      -DWITH_DKIM2=ON -DWITH_UNBOUND=OFF -DWITH_LUA=OFF -DWITH_IDN=OFF \
+      -DCMAKE_BUILD_TYPE=Release \
+ && cmake --build /src/phoenix/build \
+      --target phoenixdkim2-sign phoenixdkim2-verify -j"$(nproc)" \
+ && cp /src/phoenix/build/libphoenixdkim/phoenixdkim2-sign \
+       /src/phoenix/build/libphoenixdkim/phoenixdkim2-verify /usr/local/bin/
 
 COPY dns_server.py /usr/local/bin/dns_server.py
 
@@ -235,6 +259,7 @@ enum Im {
     Rust,
     Py,
     Go,
+    Phoenix,
 }
 
 impl Im {
@@ -243,11 +268,14 @@ impl Im {
             Im::Rust => "rust",
             Im::Py => "py",
             Im::Go => "go",
+            Im::Phoenix => "phoenix",
         }
     }
 }
 
-const ALL: [Im; 3] = [Im::Rust, Im::Py, Im::Go];
+const ALL: [Im; 4] = [Im::Rust, Im::Py, Im::Go, Im::Phoenix];
+
+const PHOENIX_FIXTURE: &str = "/work/dns.fixture";
 
 #[derive(Clone, Copy)]
 struct HopSpec {
@@ -307,6 +335,22 @@ fn load_caches() -> DummyCaches {
     caches
 }
 
+/// PhoenixDKIM's verifier resolves keys from a "qname<WSP>TXT-record" fixture
+/// rather than the DNS server the Go/Python tools query. Project the same
+/// dns.json into that format so every implementation shares one key source.
+fn write_phoenix_fixture(work: &std::path::Path) {
+    let dns = std::fs::read(resource(&["dns.json"])).unwrap();
+    let dns: serde_json::Value = serde_json::from_slice(&dns).unwrap();
+    let mut out = String::new();
+    for (domain, selectors) in dns.as_object().unwrap() {
+        for (selector, records) in selectors.as_object().unwrap() {
+            let record = records[0][1].as_str().unwrap();
+            out.push_str(&format!("{selector}.{domain} {record}\n"));
+        }
+    }
+    std::fs::write(work.join("dns.fixture"), out).unwrap();
+}
+
 fn normalize_crlf(message: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(message.len() + 16);
     let mut iter = message.iter().peekable();
@@ -329,9 +373,16 @@ fn normalize_crlf(message: &[u8]) -> Vec<u8> {
     out
 }
 
-fn prepend(signed: &Dkim2Signed, message: &[u8]) -> Vec<u8> {
+fn prepend(signed: &Dkim2Signed, message: &[u8], fold: bool) -> Vec<u8> {
     let mut out = Vec::with_capacity(message.len() + 512);
-    signed.write(&mut out);
+    if fold {
+        signed.signature.write_header(&mut out);
+        if let Some(instance) = &signed.message_instance {
+            instance.write_header(&mut out);
+        }
+    } else {
+        signed.write(&mut out);
+    }
     out.extend_from_slice(message);
     out
 }
@@ -363,7 +414,7 @@ fn rust_sign(message: &[u8], hop: &HopSpec) -> Vec<u8> {
             .sign_at(message, envelope, TS)
             .unwrap(),
     };
-    prepend(&signed, message)
+    prepend(&signed, message, false)
 }
 
 async fn rust_verify(
@@ -465,6 +516,22 @@ async fn ext_sign(
             }
             a
         }
+        Im::Phoenix => {
+            let mut cmd = format!(
+                "phoenixdkim2-sign --key '{}' --domain '{}' --selector '{}' \
+                 --mail-from '{}' --time {}",
+                key_path(hop),
+                hop.domain,
+                hop.selector,
+                wrap(hop.mail_from),
+                TS
+            );
+            for rcpt in hop.rcpt_to {
+                cmd.push_str(&format!(" --rcpt-to '{}'", wrap(rcpt)));
+            }
+            cmd.push_str(&format!(" < '{container_in}'"));
+            vec!["sh".into(), "-c".into(), cmd]
+        }
         Im::Rust => unreachable!(),
     };
 
@@ -488,7 +555,7 @@ async fn ext_verify(
     message: &[u8],
     mail_from: &str,
     rcpt_to: &[&str],
-) -> bool {
+) -> (bool, String) {
     let vfile = format!("verify_in_{idx}.eml");
     std::fs::write(work.join(&vfile), message).unwrap();
     let container_in = format!("/work/{vfile}");
@@ -503,8 +570,13 @@ async fn ext_verify(
                 "/res/dns.json".into(),
                 "--ignore-timestamps".into(),
             ];
-            let (code, _, _) = exec_raw(container, args).await;
-            code == 0
+            let (code, stdout, stderr) = exec_raw(container, args).await;
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&stdout).trim(),
+                String::from_utf8_lossy(&stderr).trim()
+            );
+            (code == 0, combined)
         }
         Im::Go => {
             let mut args = vec![
@@ -524,10 +596,30 @@ async fn ext_verify(
             let (_, stdout, stderr) = exec_raw(container, args).await;
             let combined = format!(
                 "{}{}",
-                String::from_utf8_lossy(&stdout),
-                String::from_utf8_lossy(&stderr)
+                String::from_utf8_lossy(&stdout).trim(),
+                String::from_utf8_lossy(&stderr).trim()
             );
-            combined.contains("Authentication result:") && !combined.contains("Error:")
+            let ok = combined.contains("Authentication result:") && !combined.contains("Error:");
+            (ok, combined)
+        }
+        Im::Phoenix => {
+            let mut cmd = format!(
+                "phoenixdkim2-verify --mail-from '{}' --ignore-timestamps --dns-fixture '{}'",
+                wrap(mail_from),
+                PHOENIX_FIXTURE
+            );
+            for rcpt in rcpt_to {
+                cmd.push_str(&format!(" --rcpt-to '{}'", wrap(rcpt)));
+            }
+            cmd.push_str(&format!(" < '{container_in}'"));
+            let args = vec!["sh".into(), "-c".into(), cmd];
+            let (code, stdout, stderr) = exec_raw(container, args).await;
+            let combined = format!(
+                "{}{}",
+                String::from_utf8_lossy(&stdout).trim(),
+                String::from_utf8_lossy(&stderr).trim()
+            );
+            (code == 0, combined)
         }
         Im::Rust => unreachable!(),
     }
@@ -561,10 +653,7 @@ async fn verify_msg(
 ) -> (bool, String) {
     match im {
         Im::Rust => rust_verify(resolver, caches, message, mail_from, rcpt_to).await,
-        other => (
-            ext_verify(container, work, idx, other, message, mail_from, rcpt_to).await,
-            String::new(),
-        ),
+        other => ext_verify(container, work, idx, other, message, mail_from, rcpt_to).await,
     }
 }
 
@@ -584,6 +673,7 @@ async fn dkim2_interop_matrix() {
 
     let res_dir = resource(&[]);
     let work = tempfile::tempdir().expect("tempdir");
+    write_phoenix_fixture(work.path());
 
     let image = GenericBuildableImage::new("mail-auth-dkim2-interop", "latest")
         .with_dockerfile_string(DOCKERFILE)
@@ -716,6 +806,9 @@ async fn dkim2_interop_matrix() {
                 continue;
             };
             for verifier in ALL {
+                if skip_phoenix_vs_gopy(&[s1, s2], verifier) {
+                    continue;
+                }
                 idx += 1;
                 let (ok, detail) = verify_msg(
                     &container,
@@ -766,9 +859,12 @@ async fn dkim2_interop_matrix() {
     let patterns = [
         [Im::Rust, Im::Py, Im::Go],
         [Im::Go, Im::Py, Im::Rust],
+        [Im::Phoenix, Im::Go, Im::Rust],
+        [Im::Rust, Im::Py, Im::Phoenix],
         [Im::Rust, Im::Rust, Im::Rust],
         [Im::Py, Im::Py, Im::Py],
         [Im::Go, Im::Go, Im::Go],
+        [Im::Phoenix, Im::Phoenix, Im::Phoenix],
     ];
 
     for pattern in patterns {
@@ -805,6 +901,9 @@ async fn dkim2_interop_matrix() {
             continue;
         }
         for verifier in ALL {
+            if skip_phoenix_vs_gopy(&pattern, verifier) {
+                continue;
+            }
             idx += 1;
             let (ok, detail) = verify_msg(
                 &container,
@@ -845,6 +944,20 @@ fn alg_tag(alg: Alg) -> &'static str {
         Alg::Ed25519 => "ed25519",
         Alg::Rsa => "rsa",
     }
+}
+
+/// TEMPORARY exclusion: skip PhoenixDKIM verifying a chain that carries a Go- or
+/// Python-produced re-sign.
+///
+/// draft-ietf-dkim-dkim2-spec §9.1 says a forwarder that leaves the hashes
+/// unchanged SHOULD NOT add a new Message-Instance. mail-auth (and PhoenixDKIM's
+/// own signer) honour this; the Go and Python references instead add a
+/// recipe-less Message-Instance (m>=2) on every re-sign, and PhoenixDKIM's
+/// verifier rejects any non-first Message-Instance without a recipe (PERMERROR).
+/// The clash is purely Go/Python producer x PhoenixDKIM verifier and does not
+/// involve mail-auth, so the matrix skips these cells rather than asserting them.
+fn skip_phoenix_vs_gopy(producers: &[Im], verifier: Im) -> bool {
+    verifier == Im::Phoenix && producers.iter().skip(1).any(|p| matches!(p, Im::Py | Im::Go))
 }
 
 // ---------------------------------------------------------------------------
@@ -926,7 +1039,7 @@ fn rust_recipe_sign(signed1: &[u8], inflight: &[u8], hop: &HopSpec) -> Vec<u8> {
             .sign_revised_at(signed1, inflight, envelope, TS)
             .unwrap(),
     };
-    prepend(&signed, inflight)
+    prepend(&signed, inflight, false)
 }
 
 /// The Go reference library generates the recipe (DiffMail) and signs hop 2.
@@ -969,6 +1082,46 @@ async fn go_recipe_sign(
     if code != 0 || stdout.is_empty() {
         eprintln!(
             "[go recipe-sign] exit={code} stderr={}",
+            String::from_utf8_lossy(&stderr)
+        );
+        return None;
+    }
+    Some(stdout)
+}
+
+/// PhoenixDKIM generates the recipe by diffing the pre-modification message
+/// (`--orig`) against the message on stdin, then signs hop 2 with it.
+async fn phoenix_recipe_sign(
+    container: &ContainerAsync<impl Image>,
+    work: &std::path::Path,
+    idx: u32,
+    signed1: &[u8],
+    inflight: &[u8],
+    hop: &HopSpec,
+) -> Option<Vec<u8>> {
+    let old_name = format!("recipe_old_{idx}.eml");
+    let new_name = format!("recipe_new_{idx}.eml");
+    std::fs::write(work.join(&old_name), signed1).unwrap();
+    std::fs::write(work.join(&new_name), inflight).unwrap();
+
+    let mut cmd = format!(
+        "phoenixdkim2-sign --key '{}' --domain '{}' --selector '{}' --mail-from '{}' \
+         --time {} --orig '/work/{old_name}'",
+        key_path(hop),
+        hop.domain,
+        hop.selector,
+        wrap(hop.mail_from),
+        TS
+    );
+    for rcpt in hop.rcpt_to {
+        cmd.push_str(&format!(" --rcpt-to '{}'", wrap(rcpt)));
+    }
+    cmd.push_str(&format!(" < '/work/{new_name}'"));
+
+    let (code, stdout, stderr) = exec_raw(container, vec!["sh".into(), "-c".into(), cmd]).await;
+    if code != 0 || stdout.is_empty() {
+        eprintln!(
+            "[phoenix recipe-sign] exit={code} stderr={}",
             String::from_utf8_lossy(&stderr)
         );
         return None;
@@ -1146,6 +1299,7 @@ async fn dkim2_recipe_interop() {
 
     let res_dir = resource(&[]);
     let work = tempfile::tempdir().expect("tempdir");
+    write_phoenix_fixture(work.path());
 
     let image = GenericBuildableImage::new("mail-auth-dkim2-interop", "latest")
         .with_dockerfile_string(DOCKERFILE)
@@ -1174,6 +1328,7 @@ async fn dkim2_recipe_interop() {
 
     let mut idx = 0u32;
     let mut failures: Vec<String> = Vec::new();
+    let mut dumped = false;
 
     for case in recipe_cases() {
         let tag = alg_tag(case.alg);
@@ -1212,6 +1367,13 @@ async fn dkim2_recipe_interop() {
             );
             if !ok {
                 failures.push(format!("{label}: {detail}"));
+                if !dumped {
+                    dumped = true;
+                    eprintln!(
+                        "\n===== FAILING MESSAGE ({label}) =====\n{}\n===== detail: {detail} =====\n",
+                        String::from_utf8_lossy(&signed2_rust)
+                    );
+                }
             }
             println!("{label}: {}", if ok { "pass" } else { "FAIL" });
         }
@@ -1243,6 +1405,38 @@ async fn dkim2_recipe_interop() {
             }
             None => failures.push(format!(
                 "recipe/{}/{}: go recipe-sign failed",
+                case.name, tag
+            )),
+        }
+
+        // ---- Reverse: Phoenix generates the recipe, all three verify. ----
+        idx += 1;
+        match phoenix_recipe_sign(&container, work.path(), idx, &signed1, &inflight, &hop2).await {
+            Some(signed2_phoenix) => {
+                for verifier in [Im::Rust, Im::Go, Im::Phoenix] {
+                    idx += 1;
+                    let (ok, detail) = verify_msg(
+                        &container,
+                        &resolver,
+                        &caches,
+                        work.path(),
+                        idx,
+                        verifier,
+                        &signed2_phoenix,
+                        hop2.mail_from,
+                        hop2.rcpt_to,
+                    )
+                    .await;
+                    let label =
+                        format!("recipe/{}/{}: phoenix->{}", case.name, tag, verifier.name());
+                    if !ok {
+                        failures.push(format!("{label}: {detail}"));
+                    }
+                    println!("{label}: {}", if ok { "pass" } else { "FAIL" });
+                }
+            }
+            None => failures.push(format!(
+                "recipe/{}/{}: phoenix recipe-sign failed",
                 case.name, tag
             )),
         }

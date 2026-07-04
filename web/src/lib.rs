@@ -4,6 +4,14 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+/*
+    DISCLAIMER:
+    This code has been written by an LLM and is inefficient and unidiomatic.
+    It was created to demonstrate mail-auth in the browser and is not intended for production use.
+    It may contain errors, security vulnerabilities, or other issues that could cause harm if used
+    in a real-world application. Use at your own risk.
+*/
+
 mod cache;
 mod keys;
 mod sign;
