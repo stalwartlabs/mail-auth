@@ -120,7 +120,9 @@ impl Recipe {
 
                 let steps = diff_steps(&values.original, &values.modified);
                 headers.push(HeaderRecipe {
-                    name: String::from_utf8_lossy(header.0).into_owned(),
+                    name: std::str::from_utf8(header.0)
+                        .map(str::to_ascii_lowercase)
+                        .unwrap_or_else(|_| String::from_utf8_lossy(header.0).to_ascii_lowercase()),
                     steps,
                 });
             }
@@ -512,19 +514,19 @@ mod test {
                 "deleted",
                 b"Comment: two\r\nSubject: three\r\nSubject: four\r\nSubject: one\r\n\r\nbody\r\n",
                 b"Comment: two\r\nSubject: three\r\nSubject: one\r\n\r\nbody\r\n",
-                r#"{"h":{"Subject":[{"c":[1,1]},{"d":["four"]},{"c":[2,2]}]}}"#,
+                r#"{"h":{"subject":[{"c":[1,1]},{"d":["four"]},{"c":[2,2]}]}}"#,
             ),
             (
                 "ranges",
                 b"Subject: one\r\nSubject: two\r\nSubject: three\r\nSubject: four\r\nSubject: five\r\n\r\nbody\r\n",
                 b"Subject: zero\r\nSubject: one\r\nSubject: two\r\nSubject: three\r\nSubject: banana\r\nSubject: four\r\n\r\nbody\r\n",
-                r#"{"h":{"Subject":[{"d":["five"]},{"c":[1,1]},{"c":[3,5]}]}}"#,
+                r#"{"h":{"subject":[{"d":["five"]},{"c":[1,1]},{"c":[3,5]}]}}"#,
             ),
             (
                 "reorder",
                 b"Subject: one\r\nComment: two\r\nSubject: three\r\n\r\nbody\r\n",
                 b"Comment: two\r\nSubject: three\r\nSubject: one\r\n\r\nbody\r\n",
-                r#"{"h":{"Subject":[{"d":["three"]},{"c":[1,1]}]}}"#,
+                r#"{"h":{"subject":[{"d":["three"]},{"c":[1,1]}]}}"#,
             ),
             (
                 "body_multi_range",

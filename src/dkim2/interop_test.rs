@@ -50,6 +50,12 @@ RUN git clone https://forge.turscar.ie/turscar/dkim2.git /src/go \
  && go build -C /src/go -o /usr/local/bin/dkim2sign ./cmd/dkim2sign \
  && go build -C /src/go -o /usr/local/bin/dkim2verify ./cmd/dkim2verify
 
+# dkim2recipe exposes the Go library's DiffMail + Sign(Modifications:) so that a
+# genuine Go-generated recipe can be produced (the shipped dkim2sign CLI never
+# wires up recipe generation).
+COPY dkim2recipe.go /src/go/cmd/dkim2recipe/main.go
+RUN go build -C /src/go -o /usr/local/bin/dkim2recipe ./cmd/dkim2recipe
+
 RUN git clone https://github.com/dkim2wg/interop.git /src/interop \
  && if [ -n "${PY_INTEROP_REF}" ]; then git -C /src/interop checkout "${PY_INTEROP_REF}"; fi
 ENV PYTHONPATH=/src/interop/python
@@ -96,6 +102,126 @@ DNSServer(resolver, port=53, address="0.0.0.0", tcp=True).start_thread()
 print("dkim2-interop-dns-ready", flush=True)
 while True:
     time.sleep(3600)
+"#;
+
+/// A minimal Go program that computes a recipe with the reference library's
+/// `DiffMail(old, new)` and signs `new` with that recipe as `Modifications`.
+/// The result is a Message-Instance whose r= tag is a genuine Go-generated
+/// recipe reconstructing `old` from `new`.
+const DKIM2RECIPE_GO: &str = r#"
+package main
+
+import (
+	"bytes"
+	"crypto"
+	"crypto/ed25519"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
+	"log"
+	"net/mail"
+	"os"
+	"regexp"
+	"strings"
+
+	flag "github.com/spf13/pflag"
+
+	"go.turscar.ie/dkim2"
+)
+
+var crlfRe = regexp.MustCompile(`\r?\n`)
+
+func mustReadCRLF(path string) []byte {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Fatalf("read %s: %v", path, err)
+	}
+	return crlfRe.ReplaceAll(data, []byte("\r\n"))
+}
+
+func loadPrivateKey(filename string) (crypto.Signer, error) {
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("read key: %w", err)
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block in %s", filename)
+	}
+	k, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse key: %w", err)
+	}
+	switch key := k.(type) {
+	case *rsa.PrivateKey:
+		return key, nil
+	case ed25519.PrivateKey:
+		return key, nil
+	}
+	return nil, fmt.Errorf("unsupported key type")
+}
+
+func wrapAddress(addr string) string {
+	if addr == "" {
+		return ""
+	}
+	if !strings.HasPrefix(addr, "<") {
+		addr = "<" + addr
+	}
+	if !strings.HasSuffix(addr, ">") {
+		addr = addr + ">"
+	}
+	return addr
+}
+
+func main() {
+	var oldPath, newPath, domain, selector, keyfile, mailFrom string
+	var rcptTo []string
+	var timestamp int64
+
+	flag.StringVar(&oldPath, "old", "", "original (previous) message file")
+	flag.StringVar(&newPath, "new", "", "modified (current) message file")
+	flag.StringVar(&domain, "domain", "", "signing domain")
+	flag.StringVar(&selector, "selector", "", "selector")
+	flag.StringVar(&keyfile, "key", "", "private key file")
+	flag.StringVar(&mailFrom, "from", "", "mail from")
+	flag.StringSliceVar(&rcptTo, "to", nil, "rcpt to")
+	flag.Int64Var(&timestamp, "timestamp", 0, "signing timestamp")
+	flag.Parse()
+
+	oldBytes := mustReadCRLF(oldPath)
+	newBytes := mustReadCRLF(newPath)
+
+	oldMsg, err := mail.ReadMessage(bytes.NewReader(oldBytes))
+	if err != nil {
+		log.Fatalf("parse old: %v", err)
+	}
+	newMsg, err := mail.ReadMessage(bytes.NewReader(newBytes))
+	if err != nil {
+		log.Fatalf("parse new: %v", err)
+	}
+
+	recipe := dkim2.DiffMail(*oldMsg, *newMsg)
+
+	key, err := loadPrivateKey(keyfile)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	opts := dkim2.SignOptions{
+		Timestamp:     timestamp,
+		Domain:        domain,
+		Keys:          []dkim2.SigningKey{{Selector: selector, Signer: key}},
+		MailFrom:      wrapAddress(mailFrom),
+		RcptTo:        rcptTo,
+		Modifications: &recipe,
+	}
+
+	if err := dkim2.Sign(os.Stdout, bytes.NewReader(newBytes), opts); err != nil {
+		log.Fatalf("sign: %v", err)
+	}
+}
 "#;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -462,6 +588,7 @@ async fn dkim2_interop_matrix() {
     let image = GenericBuildableImage::new("mail-auth-dkim2-interop", "latest")
         .with_dockerfile_string(DOCKERFILE)
         .with_data(DNS_SERVER_PY, "./dns_server.py")
+        .with_data(DKIM2RECIPE_GO, "./dkim2recipe.go")
         .build_image()
         .await
         .expect("failed to build interop image (is Docker running?)");
@@ -718,4 +845,413 @@ fn alg_tag(alg: Alg) -> &'static str {
         Alg::Ed25519 => "ed25519",
         Alg::Rsa => "rsa",
     }
+}
+
+// ---------------------------------------------------------------------------
+// Recipe interoperability
+//
+// The matrix above passes messages between hops unchanged, so recipes are never
+// exercised. The tests below deliberately modify the message between two hops so
+// that a recipe must reconstruct the previous instance, and check that both
+// external reference implementations agree with mail-auth in both directions:
+//
+//   * mail-auth generates the recipe -> Go and Python reconstruct + hash-verify
+//   * Go generates the recipe (DiffMail) -> mail-auth reconstructs + hash-verify
+//
+// The Python reference tool has no recipe-generation path, so the reverse
+// direction is Go-only. Every case stresses whitespace (empty lines, leading /
+// trailing spaces, internal multiple spaces) in both the body and header fields,
+// since body reconstruction is byte-exact.
+// ---------------------------------------------------------------------------
+
+const RECIPE_HOP1: HopSpec = HopSpec {
+    domain: "test1.dkim2.com",
+    selector: "ed25519",
+    alg: Alg::Ed25519,
+    mail_from: "sender@test1.dkim2.com",
+    rcpt_to: &["relay@test1.dkim2.com"],
+};
+
+fn recipe_hop2(alg: Alg) -> HopSpec {
+    HopSpec {
+        domain: "test1.dkim2.com",
+        selector: match alg {
+            Alg::Ed25519 => "ed25519",
+            Alg::Rsa => "sel1",
+        },
+        alg,
+        mail_from: "relay@test1.dkim2.com",
+        rcpt_to: &["recipient@example.com"],
+    }
+}
+
+struct RecipeCase {
+    name: &'static str,
+    alg: Alg,
+    original: Vec<u8>,
+    modified: Vec<u8>,
+}
+
+/// Assembles an RFC5322 message from header field lines and body lines using
+/// CRLF terminators. A header line may itself contain folding (an embedded
+/// "\r\n " sequence); body lines are emitted verbatim, preserving any leading,
+/// trailing or internal whitespace.
+fn assemble(headers: &[&str], body: &[&str]) -> Vec<u8> {
+    let mut out = String::new();
+    for header in headers {
+        out.push_str(header);
+        out.push_str("\r\n");
+    }
+    out.push_str("\r\n");
+    for line in body {
+        out.push_str(line);
+        out.push_str("\r\n");
+    }
+    out.into_bytes()
+}
+
+/// mail-auth signs the modified message at hop 2, computing the recipe by
+/// diffing the pristine hop-1 message against the modified one.
+fn rust_recipe_sign(signed1: &[u8], inflight: &[u8], hop: &HopSpec) -> Vec<u8> {
+    let envelope = Hop::real(hop.mail_from, hop.rcpt_to);
+    let signed = match hop.alg {
+        Alg::Ed25519 => Dkim2Signer::from_key(load_ed25519(hop.domain, hop.selector))
+            .domain(hop.domain)
+            .selector(hop.selector)
+            .sign_revised_at(signed1, inflight, envelope, TS)
+            .unwrap(),
+        Alg::Rsa => Dkim2Signer::from_key(load_rsa(hop.domain, hop.selector))
+            .domain(hop.domain)
+            .selector(hop.selector)
+            .sign_revised_at(signed1, inflight, envelope, TS)
+            .unwrap(),
+    };
+    prepend(&signed, inflight)
+}
+
+/// The Go reference library generates the recipe (DiffMail) and signs hop 2.
+async fn go_recipe_sign(
+    container: &ContainerAsync<impl Image>,
+    work: &std::path::Path,
+    idx: u32,
+    signed1: &[u8],
+    inflight: &[u8],
+    hop: &HopSpec,
+) -> Option<Vec<u8>> {
+    let old_name = format!("recipe_old_{idx}.eml");
+    let new_name = format!("recipe_new_{idx}.eml");
+    std::fs::write(work.join(&old_name), signed1).unwrap();
+    std::fs::write(work.join(&new_name), inflight).unwrap();
+
+    let mut args: Vec<String> = vec![
+        "dkim2recipe".into(),
+        "--old".into(),
+        format!("/work/{old_name}"),
+        "--new".into(),
+        format!("/work/{new_name}"),
+        "--domain".into(),
+        hop.domain.into(),
+        "--selector".into(),
+        hop.selector.into(),
+        "--key".into(),
+        key_path(hop),
+        "--from".into(),
+        wrap(hop.mail_from),
+        "--timestamp".into(),
+        TS.to_string(),
+    ];
+    for rcpt in hop.rcpt_to {
+        args.push("--to".into());
+        args.push(wrap(rcpt));
+    }
+
+    let (code, stdout, stderr) = exec_raw(container, args).await;
+    if code != 0 || stdout.is_empty() {
+        eprintln!(
+            "[go recipe-sign] exit={code} stderr={}",
+            String::from_utf8_lossy(&stderr)
+        );
+        return None;
+    }
+    Some(stdout)
+}
+
+/// The recipe test cases. Every case modifies the message between two hops; the
+/// recipe must reconstruct the pristine message (verified via hash equality).
+/// Body reconstruction is byte-exact (simple canonicalization), so whitespace in
+/// the body is the most demanding surface.
+fn recipe_cases() -> Vec<RecipeCase> {
+    let headers = &["From: sender@test1.dkim2.com", "To: recipient@example.com"];
+
+    vec![
+        // Whitespace-heavy lines are COPIED unchanged while a neighbour changes:
+        // copy steps must preserve leading, trailing and internal spaces exactly.
+        RecipeCase {
+            name: "body_copy_preserves_whitespace",
+            alg: Alg::Ed25519,
+            original: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &[
+                    "  two leading spaces",
+                    "trailing spaces here   ",
+                    "mid    multiple   internal   spaces",
+                    "REPLACE THIS LINE",
+                ],
+            ),
+            modified: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &[
+                    "  two leading spaces",
+                    "trailing spaces here   ",
+                    "mid    multiple   internal   spaces",
+                    "line was replaced",
+                ],
+            ),
+        },
+        // The whitespace-heavy line is the one that CHANGED: the recipe must
+        // carry the exact bytes (leading + internal + trailing spaces) in a
+        // "d" step so the body hash matches on reconstruction.
+        RecipeCase {
+            name: "body_data_preserves_whitespace",
+            alg: Alg::Ed25519,
+            original: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &[
+                    "stable first line",
+                    "   spaced   original   line   ",
+                    "stable last line",
+                ],
+            ),
+            modified: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &[
+                    "stable first line",
+                    "totally different content",
+                    "stable last line",
+                ],
+            ),
+        },
+        // Empty lines and a spaces-only line surround the change: line numbering
+        // must agree across blank lines, and the spaces-only line must survive.
+        RecipeCase {
+            name: "body_empty_and_blank_lines",
+            alg: Alg::Ed25519,
+            original: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &["alpha", "", "beta", "   ", "", "gamma REPLACE"],
+            ),
+            modified: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &["alpha", "", "beta", "   ", "", "gamma replaced"],
+            ),
+        },
+        // An empty line is inserted between two hops; reconstructing the pristine
+        // message means numbering has to skip the inserted blank line.
+        RecipeCase {
+            name: "body_empty_line_inserted",
+            alg: Alg::Ed25519,
+            original: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &["first line", "second line"],
+            ),
+            modified: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &["first line", "", "second line"],
+            ),
+        },
+        // Header-only change: a signed header carrying leading/internal/trailing
+        // whitespace is replaced. Header hashing is relaxed, so this checks the
+        // header recipe path (not byte equality) with awkward whitespace.
+        RecipeCase {
+            name: "header_value_whitespace",
+            alg: Alg::Ed25519,
+            original: assemble(
+                &[
+                    headers[0],
+                    headers[1],
+                    "Subject:   Weekly    Status   Report   ",
+                    "Comment: keep    me    unchanged",
+                ],
+                &["body stays the same"],
+            ),
+            modified: assemble(
+                &[
+                    headers[0],
+                    headers[1],
+                    "Subject: changed subject",
+                    "Comment: keep    me    unchanged",
+                ],
+                &["body stays the same"],
+            ),
+        },
+        // A folded (multi-line) header is unfolded/changed at hop 2. The recipe
+        // must reconstruct a header that hashes identically to the folded one.
+        RecipeCase {
+            name: "header_folded",
+            alg: Alg::Ed25519,
+            original: assemble(
+                &[
+                    headers[0],
+                    headers[1],
+                    "Subject: folded part one\r\n\tpart two   \r\n part three",
+                ],
+                &["body stays the same"],
+            ),
+            modified: assemble(
+                &[headers[0], headers[1], "Subject: now on a single line"],
+                &["body stays the same"],
+            ),
+        },
+        // Combined header + body change, signed with RSA at hop 2: exercises a
+        // recipe with both "h" and "b" sections and an RSA recipe signature.
+        RecipeCase {
+            name: "header_and_body_rsa",
+            alg: Alg::Rsa,
+            original: assemble(
+                &[headers[0], headers[1], "Subject: original   subject"],
+                &["keep   this   spaced   line", "change me"],
+            ),
+            modified: assemble(
+                &[headers[0], headers[1], "Subject: new subject"],
+                &["keep   this   spaced   line", "changed"],
+            ),
+        },
+        // A trailing blank line is present in both versions while an interior
+        // line changes; trailing-blank canonicalization must not desync numbers.
+        RecipeCase {
+            name: "body_trailing_blank_line",
+            alg: Alg::Ed25519,
+            original: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &["line a", "REPLACE", "line c", ""],
+            ),
+            modified: assemble(
+                &[headers[0], headers[1], "Subject: report"],
+                &["line a", "was replaced", "line c", ""],
+            ),
+        },
+    ]
+}
+
+/// Independent DKIM2 recipe interoperability tests, in both directions against
+/// each external reference implementation. See the module comment above.
+///
+/// Run with:
+///
+///   cargo test --lib dkim2::interop_test::dkim2_recipe_interop -- --ignored --nocapture
+#[tokio::test]
+#[ignore = "requires Docker and network access to upstream DKIM2 reference repos"]
+async fn dkim2_recipe_interop() {
+    let _lenient = LenientReversePath::new();
+
+    let res_dir = resource(&[]);
+    let work = tempfile::tempdir().expect("tempdir");
+
+    let image = GenericBuildableImage::new("mail-auth-dkim2-interop", "latest")
+        .with_dockerfile_string(DOCKERFILE)
+        .with_data(DNS_SERVER_PY, "./dns_server.py")
+        .with_data(DKIM2RECIPE_GO, "./dkim2recipe.go")
+        .build_image()
+        .await
+        .expect("failed to build interop image (is Docker running?)");
+
+    let container = image
+        .with_wait_for(WaitFor::message_on_stdout(READY))
+        .with_mount(Mount::bind_mount(
+            res_dir.to_string_lossy().into_owned(),
+            "/res",
+        ))
+        .with_mount(Mount::bind_mount(
+            work.path().to_string_lossy().into_owned(),
+            "/work",
+        ))
+        .start()
+        .await
+        .expect("failed to start interop container");
+
+    let resolver = MessageAuthenticator::new_system_conf().unwrap();
+    let caches = load_caches();
+
+    let mut idx = 0u32;
+    let mut failures: Vec<String> = Vec::new();
+
+    for case in recipe_cases() {
+        let tag = alg_tag(case.alg);
+        let hop2 = recipe_hop2(case.alg);
+
+        // hop 1: mail-auth signs the pristine message (Message-Instance m=1).
+        let signed1 = rust_sign(&case.original, &RECIPE_HOP1);
+        // The message "in flight" keeps hop 1's DKIM2 headers but carries the
+        // modified content that the reviser is about to re-sign.
+        let prefix = &signed1[..signed1.len() - case.original.len()];
+        let mut inflight = Vec::with_capacity(prefix.len() + case.modified.len());
+        inflight.extend_from_slice(prefix);
+        inflight.extend_from_slice(&case.modified);
+
+        // ---- Forward: mail-auth generates the recipe, all three verify. ----
+        let signed2_rust = rust_recipe_sign(&signed1, &inflight, &hop2);
+        for verifier in ALL {
+            idx += 1;
+            let (ok, detail) = verify_msg(
+                &container,
+                &resolver,
+                &caches,
+                work.path(),
+                idx,
+                verifier,
+                &signed2_rust,
+                hop2.mail_from,
+                hop2.rcpt_to,
+            )
+            .await;
+            let label = format!(
+                "recipe/{}/{}: mail-auth->{}",
+                case.name,
+                tag,
+                verifier.name()
+            );
+            if !ok {
+                failures.push(format!("{label}: {detail}"));
+            }
+            println!("{label}: {}", if ok { "pass" } else { "FAIL" });
+        }
+
+        // ---- Reverse: Go generates the recipe, mail-auth (and Go) verify. ----
+        idx += 1;
+        match go_recipe_sign(&container, work.path(), idx, &signed1, &inflight, &hop2).await {
+            Some(signed2_go) => {
+                for verifier in [Im::Rust, Im::Go] {
+                    idx += 1;
+                    let (ok, detail) = verify_msg(
+                        &container,
+                        &resolver,
+                        &caches,
+                        work.path(),
+                        idx,
+                        verifier,
+                        &signed2_go,
+                        hop2.mail_from,
+                        hop2.rcpt_to,
+                    )
+                    .await;
+                    let label = format!("recipe/{}/{}: go->{}", case.name, tag, verifier.name());
+                    if !ok {
+                        failures.push(format!("{label}: {detail}"));
+                    }
+                    println!("{label}: {}", if ok { "pass" } else { "FAIL" });
+                }
+            }
+            None => failures.push(format!(
+                "recipe/{}/{}: go recipe-sign failed",
+                case.name, tag
+            )),
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "DKIM2 recipe interop had {} failure(s):\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
 }

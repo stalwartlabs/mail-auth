@@ -172,7 +172,9 @@ impl Display for MessageInstance {
 mod test {
     use crate::common::crypto::{Algorithm, HashAlgorithm};
     use crate::common::headers::HeaderWriter;
-    use crate::dkim2::{ChainBinding, Flag, MessageHash, MessageInstance, Signature, SignatureValue};
+    use crate::dkim2::{
+        ChainBinding, Flag, MessageHash, MessageInstance, Signature, SignatureValue,
+    };
 
     const MAX_HEADER_LINE_LEN: usize = 76;
 
@@ -195,7 +197,12 @@ mod test {
             String::from_utf8_lossy(folded)
         );
 
-        for (n, line) in folded.strip_suffix(b"\r\n").unwrap().split(|&c| c == b'\n').enumerate() {
+        for (n, line) in folded
+            .strip_suffix(b"\r\n")
+            .unwrap()
+            .split(|&c| c == b'\n')
+            .enumerate()
+        {
             let line = line.strip_suffix(b"\r").unwrap_or(line);
             let content = line.strip_prefix(b"\t").unwrap_or(line);
             assert!(
@@ -235,7 +242,11 @@ mod test {
             }
             let line = line.strip_suffix(b"\r").unwrap_or(line);
             let content = line.strip_prefix(b"\t").unwrap_or(line);
-            let leader = if line.len() != content.len() { "\\t" } else { "  " };
+            let leader = if line.len() != content.len() {
+                "\\t"
+            } else {
+                "  "
+            };
             println!(
                 "  line {n:>2} | {:>3} | {leader}{}",
                 content.len(),
@@ -317,7 +328,10 @@ mod test {
             "a large signature should have been folded: {:?}",
             String::from_utf8_lossy(&folded)
         );
-        dump_folded("DKIM2-Signature (large: rsa2048 + ed25519, 2 recipients)", &folded);
+        dump_folded(
+            "DKIM2-Signature (large: rsa2048 + ed25519, 2 recipients)",
+            &folded,
+        );
         assert_fold_is_transparent(b"DKIM2-Signature: ", &folded, &unfolded);
 
         let value = value_of(&folded, b"DKIM2-Signature: ");
@@ -376,7 +390,10 @@ mod test {
                 &folded,
             );
             assert_fold_is_transparent(b"DKIM2-Signature: ", &folded, &unfolded);
-            assert_eq!(Signature::parse(value_of(&folded, b"DKIM2-Signature: ")).unwrap(), sig);
+            assert_eq!(
+                Signature::parse(value_of(&folded, b"DKIM2-Signature: ")).unwrap(),
+                sig
+            );
         }
     }
 
