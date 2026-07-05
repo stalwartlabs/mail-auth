@@ -143,8 +143,7 @@ pub async fn verify(opts: JsValue) -> Result<JsValue, String> {
                 let from_domain = opts.mail_from.rsplit('@').next().unwrap_or(&opts.mail_from);
                 let output = resolver
                     .verify_dmarc(params(
-                        DmarcParameters::new(&message, dkim, from_domain, spf)
-                            .with_domain_suffix_fn(org_domain),
+                        DmarcParameters::new(&message, dkim, from_domain, spf),
                         &cache,
                     ))
                     .await;
@@ -170,13 +169,6 @@ fn params<'x, P>(inner: P, cache: &'x OfflineCache) -> FullCache<'x, P> {
         .with_ipv4_cache(cache)
         .with_ipv6_cache(cache)
         .with_ptr_cache(cache)
-}
-
-fn org_domain(domain: &str) -> &str {
-    match domain.rmatch_indices('.').nth(1) {
-        Some((idx, _)) => &domain[idx + 1..],
-        None => domain,
-    }
 }
 
 fn dkim_result_label(result: &DkimResult) -> (&'static str, String) {

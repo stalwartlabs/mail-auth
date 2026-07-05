@@ -304,7 +304,6 @@ To fuzz the library with `cargo-fuzz`:
 - [draft-chuang-dkim2-dns - DKIM2 DNS Records](https://datatracker.ietf.org/doc/draft-chuang-dkim2-dns/)
 
 ### DKIM1
-
 - [RFC 6376 - DomainKeys Identified Mail (DKIM) Signatures](https://datatracker.ietf.org/doc/html/rfc6376)
 - [RFC 6541 - DomainKeys Identified Mail (DKIM) Authorized Third-Party Signatures](https://datatracker.ietf.org/doc/html/rfc6541)
 - [RFC 6651 - Extensions to DomainKeys Identified Mail (DKIM) for Failure Reporting](https://datatracker.ietf.org/doc/html/rfc6651)
