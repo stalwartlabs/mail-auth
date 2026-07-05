@@ -133,15 +133,19 @@ impl ReportMetadata {
         )
         .ok();
         self.date_range.to_xml(xml);
-        // RFC 9990 XSD constrains "error" to maxOccurs=1; collapse to a single
-        // element so generated reports stay schema-valid.
-        if !self.error.is_empty() {
-            writeln!(
-                xml,
-                "\t\t<error>{}</error>",
-                escape_xml(&self.error.join("; "))
-            )
-            .ok();
+        match self.error.len() {
+            0 => {}
+            1 => {
+                writeln!(xml, "\t\t<error>{}</error>", escape_xml(&self.error[0])).ok();
+            }
+            _ => {
+                writeln!(
+                    xml,
+                    "\t\t<error>{}</error>",
+                    escape_xml(&self.error.join("; "))
+                )
+                .ok();
+            }
         }
         if let Some(generator) = &self.generator {
             writeln!(xml, "\t\t<generator>{}</generator>", escape_xml(generator)).ok();
