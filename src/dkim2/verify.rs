@@ -166,9 +166,9 @@ impl MessageAuthenticator {
                 }
             }
             ChainBinding::NextDomain(_) => {
-                return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::SignatureTagMissing {
+                return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::SignatureTagUnexpected {
                     i: top_signature.i,
-                    tag: "mf",
+                    tag: "nd",
                 }))
                 .into();
             }
