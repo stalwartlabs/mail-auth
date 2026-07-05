@@ -32,6 +32,8 @@ pub struct ReportMetadata {
     pub report_id: String,
     pub date_range: DateRange,
     pub error: Vec<String>,
+    #[serde(default)]
+    pub generator: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -85,11 +87,27 @@ pub struct PolicyPublished {
     pub aspf: Alignment,
     pub p: Disposition,
     pub sp: Disposition,
+    #[serde(default)]
+    pub np: Disposition,
     pub testing: bool,
+    #[serde(default)]
+    pub discovery_method: Discovery,
     pub fo: Option<String>,
 }
 
 impl Eq for PolicyPublished {}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum Discovery {
+    Psl,
+    Treewalk,
+    #[default]
+    Unspecified,
+}
 
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[cfg_attr(
@@ -109,11 +127,10 @@ pub enum DmarcResult {
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
 )]
 pub enum PolicyOverride {
-    Forwarded,
-    SampledOut,
-    TrustedForwarder,
-    MailingList,
     LocalPolicy,
+    MailingList,
+    PolicyTestMode,
+    TrustedForwarder,
     #[default]
     Other,
 }

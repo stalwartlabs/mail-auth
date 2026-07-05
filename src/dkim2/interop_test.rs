@@ -957,7 +957,11 @@ fn alg_tag(alg: Alg) -> &'static str {
 /// The clash is purely Go/Python producer x PhoenixDKIM verifier and does not
 /// involve mail-auth, so the matrix skips these cells rather than asserting them.
 fn skip_phoenix_vs_gopy(producers: &[Im], verifier: Im) -> bool {
-    verifier == Im::Phoenix && producers.iter().skip(1).any(|p| matches!(p, Im::Py | Im::Go))
+    verifier == Im::Phoenix
+        && producers
+            .iter()
+            .skip(1)
+            .any(|p| matches!(p, Im::Py | Im::Go))
 }
 
 // ---------------------------------------------------------------------------

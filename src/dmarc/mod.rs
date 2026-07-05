@@ -21,9 +21,6 @@ pub struct Dmarc {
     pub np: Policy,
     pub p: Policy,
     pub psd: Psd,
-    pub pct: u8,
-    pub rf: u8,
-    pub ri: u32,
     pub rua: Vec<URI>,
     pub ruf: Vec<URI>,
     pub sp: Policy,
@@ -41,7 +38,7 @@ pub struct URI {
     pub max_size: usize,
 }
 
-#[derive(Debug, Hash, Clone, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq)]
 pub enum Alignment {
     Relaxed,
     Strict,
@@ -69,18 +66,6 @@ pub enum Policy {
     Quarantine,
     Reject,
     Unspecified,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[repr(u8)]
-pub(crate) enum Format {
-    Afrf = 1,
-}
-
-impl From<Format> for u64 {
-    fn from(f: Format) -> Self {
-        f as u64
-    }
 }
 
 impl URI {
@@ -210,10 +195,6 @@ impl DmarcOutput {
 }
 
 impl Dmarc {
-    pub fn pct(&self) -> u8 {
-        self.pct
-    }
-
     pub fn ruf(&self) -> &[URI] {
         &self.ruf
     }

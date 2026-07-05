@@ -1,0 +1,66 @@
+{
+  "version": 1.0,
+  "report_metadata": {
+    "org_name": "Sample Reporter",
+    "email": "report_sender@example-reporter.com",
+    "extra_contact_info": "...",
+    "report_id": "3v98abbp8ya9n3va8yr8oa3ya",
+    "date_range": {
+      "begin": 302832000,
+      "end": 302918399
+    },
+    "error": [],
+    "generator": "Example DMARC Aggregate Reporter v1.2"
+  },
+  "policy_published": {
+    "domain": "example.com",
+    "version_published": null,
+    "adkim": "Unspecified",
+    "aspf": "Unspecified",
+    "p": "Quarantine",
+    "sp": "None",
+    "np": "None",
+    "testing": false,
+    "discovery_method": "Treewalk",
+    "fo": null
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "192.0.2.123",
+        "count": 123,
+        "policy_evaluated": {
+          "disposition": "Pass",
+          "dkim": "Pass",
+          "spf": "Fail",
+          "reason": []
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "example.com",
+        "header_from": "example.com"
+      },
+      "auth_results": {
+        "dkim": [
+          {
+            "domain": "example.com",
+            "selector": "abc123",
+            "result": "Pass",
+            "human_result": null
+          }
+        ],
+        "spf": [
+          {
+            "domain": "example.com",
+            "scope": "Unspecified",
+            "result": "Fail",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}

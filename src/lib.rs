@@ -302,9 +302,9 @@ pub enum DnsError {
     InvalidRecordType,
 }
 
-#[cfg(all(not(feature = "dns-doh"), any(test, feature = "test")))]
+#[cfg(not(feature = "dns-doh"))]
 pub(crate) const DNS_RCODE_NXDOMAIN: ResponseCode = ResponseCode::NXDomain;
-#[cfg(all(feature = "dns-doh", any(test, feature = "test")))]
+#[cfg(feature = "dns-doh")]
 pub(crate) const DNS_RCODE_NXDOMAIN: u16 = 3;
 
 impl Display for DnsError {

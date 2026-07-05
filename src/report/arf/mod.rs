@@ -160,7 +160,7 @@ impl<'x> Feedback<'x> {
     }
 
     pub fn headers(&self) -> Option<&str> {
-        self.message.as_deref()
+        self.headers.as_deref()
     }
 
     pub fn with_headers(mut self, value: impl Into<Cow<'x, str>>) -> Self {

@@ -5,8 +5,8 @@
  */
 
 use crate::report::{
-    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Disposition, DkimResult,
-    DmarcResult, Error, Extension, Identifier, PolicyEvaluated, PolicyOverride,
+    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Discovery, Disposition,
+    DkimResult, DmarcResult, Error, Extension, Identifier, PolicyEvaluated, PolicyOverride,
     PolicyOverrideReason, PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult,
     SPFDomainScope, SpfResult,
 };
@@ -146,34 +146,34 @@ impl Report {
         let mut found_feedback = false;
 
         while let Some(tag) = reader.next_tag(&mut buf)? {
-            match tag.name().as_ref() {
-                b"feedback" if !found_feedback => {
-                    found_feedback = true;
-                }
-                b"version" if found_feedback => {
-                    version = reader.next_value(&mut buf)?.unwrap_or(0.0);
-                }
-                b"report_metadata" if found_feedback => {
-                    report_metadata = ReportMetadata::parse(&mut reader, &mut buf)?.into();
-                }
-                b"policy_published" if found_feedback => {
-                    policy_published = PolicyPublished::parse(&mut reader, &mut buf)?.into();
-                }
-                b"record" if found_feedback => {
-                    record.push(Record::parse(&mut reader, &mut buf)?);
-                }
-                b"extensions" if found_feedback => {
-                    Extension::parse(&mut reader, &mut buf, &mut extensions)?;
-                }
-                b"" => {}
-                other if !found_feedback => {
-                    return Err(format!(
-                        "Unexpected tag {} at position {}.",
-                        String::from_utf8_lossy(other),
-                        reader.buffer_position()
-                    ));
-                }
-                _ => (),
+            let name = tag.name();
+            if found_feedback {
+                hashify::fnc_map!(name.as_ref(),
+                    b"version" => {
+                        version = reader.next_value(&mut buf)?.unwrap_or(0.0);
+                    },
+                    b"report_metadata" => {
+                        report_metadata = ReportMetadata::parse(&mut reader, &mut buf)?.into();
+                    },
+                    b"policy_published" => {
+                        policy_published = PolicyPublished::parse(&mut reader, &mut buf)?.into();
+                    },
+                    b"record" => {
+                        record.push(Record::parse(&mut reader, &mut buf)?);
+                    },
+                    b"extensions" => {
+                        Extension::parse(&mut reader, &mut buf, &mut extensions)?;
+                    },
+                    _ => ()
+                );
+            } else if name.as_ref() == b"feedback" {
+                found_feedback = true;
+            } else if !name.as_ref().is_empty() {
+                return Err(format!(
+                    "Unexpected tag {} at position {}.",
+                    String::from_utf8_lossy(name.as_ref()),
+                    reader.buffer_position()
+                ));
             }
         }
 
@@ -195,32 +195,36 @@ impl ReportMetadata {
         let mut rm = ReportMetadata::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"org_name" => {
                     rm.org_name = reader.next_value::<String>(buf)?.unwrap_or_default();
-                }
+                },
                 b"email" => {
                     rm.email = reader.next_value::<String>(buf)?.unwrap_or_default();
-                }
+                },
                 b"extra_contact_info" => {
                     rm.extra_contact_info = reader.next_value::<String>(buf)?;
-                }
+                },
                 b"report_id" => {
                     rm.report_id = reader.next_value::<String>(buf)?.unwrap_or_default();
-                }
+                },
                 b"date_range" => {
                     rm.date_range = DateRange::parse(reader, buf)?;
-                }
+                },
                 b"error" => {
                     if let Some(err) = reader.next_value::<String>(buf)? {
                         rm.error.push(err);
                     }
-                }
+                },
+                b"generator" => {
+                    rm.generator = reader.next_value::<String>(buf)?;
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(rm)
@@ -235,18 +239,19 @@ impl DateRange {
         let mut dr = DateRange::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"begin" => {
                     dr.begin = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"end" => {
                     dr.end = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(dr)
@@ -261,38 +266,45 @@ impl PolicyPublished {
         let mut p = PolicyPublished::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"domain" => {
                     p.domain = reader.next_value::<String>(buf)?.unwrap_or_default();
-                }
+                },
                 b"version_published" => {
                     p.version_published = reader.next_value(buf)?;
-                }
+                },
                 b"adkim" => {
                     p.adkim = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"aspf" => {
                     p.aspf = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"p" => {
                     p.p = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"sp" => {
                     p.sp = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
+                b"np" => {
+                    p.np = reader.next_value(buf)?.unwrap_or_default();
+                },
+                b"discovery_method" => {
+                    p.discovery_method = reader.next_value(buf)?.unwrap_or_default();
+                },
                 b"testing" => {
                     p.testing = reader
                         .next_value::<String>(buf)?
                         .is_some_and(|s| s.eq_ignore_ascii_case("y"));
-                }
+                },
                 b"fo" => {
                     p.fo = reader.next_value::<String>(buf)?;
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(p)
@@ -307,7 +319,8 @@ impl Extension {
     ) -> Result<(), String> {
         let decoder = reader.decoder();
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"extension" => {
                     let mut e = Extension::default();
                     if let Ok(Some(attr)) = tag.try_get_attribute("name")
@@ -324,12 +337,12 @@ impl Extension {
                     }
                     extensions.push(e);
                     reader.skip_tag(buf)?;
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(())
@@ -344,24 +357,25 @@ impl Record {
         let mut r = Record::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"row" => {
                     r.row = Row::parse(reader, buf)?;
-                }
+                },
                 b"identifiers" => {
                     r.identifiers = Identifier::parse(reader, buf)?;
-                }
+                },
                 b"auth_results" => {
                     r.auth_results = AuthResult::parse(reader, buf)?;
-                }
+                },
                 b"extensions" => {
                     Extension::parse(reader, buf, &mut r.extensions)?;
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(r)
@@ -376,23 +390,24 @@ impl Row {
         let mut r = Row::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"source_ip" => {
                     if let Some(ip) = reader.next_value::<IpAddr>(buf)? {
                         r.source_ip = ip.into();
                     }
-                }
+                },
                 b"count" => {
                     r.count = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"policy_evaluated" => {
                     r.policy_evaluated = PolicyEvaluated::parse(reader, buf)?;
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(r)
@@ -407,24 +422,25 @@ impl PolicyEvaluated {
         let mut pe = PolicyEvaluated::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"disposition" => {
                     pe.disposition = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"dkim" => {
                     pe.dkim = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"spf" => {
                     pe.spf = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"reason" => {
                     pe.reason.push(PolicyOverrideReason::parse(reader, buf)?);
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(pe)
@@ -439,18 +455,19 @@ impl PolicyOverrideReason {
         let mut por = PolicyOverrideReason::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"type" => {
                     por.type_ = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"comment" => {
                     por.comment = reader.next_value(buf)?;
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(por)
@@ -465,21 +482,22 @@ impl Identifier {
         let mut i = Identifier::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"envelope_to" => {
                     i.envelope_to = reader.next_value(buf)?;
-                }
+                },
                 b"envelope_from" => {
                     i.envelope_from = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"header_from" => {
                     i.header_from = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(i)
@@ -494,18 +512,19 @@ impl AuthResult {
         let mut ar = AuthResult::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"dkim" => {
                     ar.dkim.push(DKIMAuthResult::parse(reader, buf)?);
-                }
+                },
                 b"spf" => {
                     ar.spf.push(SPFAuthResult::parse(reader, buf)?);
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(ar)
@@ -520,24 +539,25 @@ impl DKIMAuthResult {
         let mut dar = DKIMAuthResult::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"domain" => {
                     dar.domain = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"selector" => {
                     dar.selector = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"result" => {
                     dar.result = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"human_result" => {
                     dar.human_result = reader.next_value(buf)?;
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(dar)
@@ -552,24 +572,25 @@ impl SPFAuthResult {
         let mut sar = SPFAuthResult::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
-            match tag.name().as_ref() {
+            let name = tag.name();
+            hashify::fnc_map!(name.as_ref(),
                 b"domain" => {
                     sar.domain = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"scope" => {
                     sar.scope = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"result" => {
                     sar.result = reader.next_value(buf)?.unwrap_or_default();
-                }
+                },
                 b"human_result" => {
                     sar.human_result = reader.next_value(buf)?;
-                }
+                },
                 b"" => (),
                 _ => {
                     reader.skip_tag(buf)?;
                 }
-            }
+            );
         }
 
         Ok(sar)
@@ -580,15 +601,25 @@ impl FromStr for PolicyOverride {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.as_bytes() {
-            b"forwarded" => PolicyOverride::Forwarded,
-            b"sampled_out" => PolicyOverride::SampledOut,
+        Ok(hashify::tiny_map!(s.as_bytes(),
             b"trusted_forwarder" => PolicyOverride::TrustedForwarder,
             b"mailing_list" => PolicyOverride::MailingList,
             b"local_policy" => PolicyOverride::LocalPolicy,
-            b"other" => PolicyOverride::Other,
-            _ => PolicyOverride::Other,
-        })
+            b"policy_test_mode" => PolicyOverride::PolicyTestMode,
+        )
+        .unwrap_or(PolicyOverride::Other))
+    }
+}
+
+impl FromStr for Discovery {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(hashify::tiny_map!(s.as_bytes(),
+            b"psl" => Discovery::Psl,
+            b"treewalk" => Discovery::Treewalk,
+        )
+        .unwrap_or(Discovery::Unspecified))
     }
 }
 
@@ -596,11 +627,11 @@ impl FromStr for DmarcResult {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.as_bytes() {
+        Ok(hashify::tiny_map!(s.as_bytes(),
             b"pass" => DmarcResult::Pass,
             b"fail" => DmarcResult::Fail,
-            _ => DmarcResult::Unspecified,
-        })
+        )
+        .unwrap_or(DmarcResult::Unspecified))
     }
 }
 
@@ -608,7 +639,7 @@ impl FromStr for DkimResult {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.as_bytes() {
+        Ok(hashify::tiny_map!(s.as_bytes(),
             b"none" => DkimResult::None,
             b"pass" => DkimResult::Pass,
             b"fail" => DkimResult::Fail,
@@ -616,8 +647,8 @@ impl FromStr for DkimResult {
             b"neutral" => DkimResult::Neutral,
             b"temperror" => DkimResult::TempError,
             b"permerror" => DkimResult::PermError,
-            _ => DkimResult::None,
-        })
+        )
+        .unwrap_or(DkimResult::None))
     }
 }
 
@@ -625,7 +656,7 @@ impl FromStr for SpfResult {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.as_bytes() {
+        Ok(hashify::tiny_map!(s.as_bytes(),
             b"none" => SpfResult::None,
             b"pass" => SpfResult::Pass,
             b"fail" => SpfResult::Fail,
@@ -633,8 +664,8 @@ impl FromStr for SpfResult {
             b"neutral" => SpfResult::Neutral,
             b"temperror" => SpfResult::TempError,
             b"permerror" => SpfResult::PermError,
-            _ => SpfResult::None,
-        })
+        )
+        .unwrap_or(SpfResult::None))
     }
 }
 
@@ -642,11 +673,11 @@ impl FromStr for SPFDomainScope {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.as_bytes() {
+        Ok(hashify::tiny_map!(s.as_bytes(),
             b"helo" => SPFDomainScope::Helo,
             b"mfrom" => SPFDomainScope::MailFrom,
-            _ => SPFDomainScope::Unspecified,
-        })
+        )
+        .unwrap_or(SPFDomainScope::Unspecified))
     }
 }
 
@@ -654,13 +685,13 @@ impl FromStr for ActionDisposition {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.as_bytes() {
+        Ok(hashify::tiny_map!(s.as_bytes(),
             b"none" => ActionDisposition::None,
             b"pass" => ActionDisposition::Pass,
             b"quarantine" => ActionDisposition::Quarantine,
             b"reject" => ActionDisposition::Reject,
-            _ => ActionDisposition::Unspecified,
-        })
+        )
+        .unwrap_or(ActionDisposition::Unspecified))
     }
 }
 
@@ -668,12 +699,12 @@ impl FromStr for Disposition {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.as_bytes() {
+        Ok(hashify::tiny_map!(s.as_bytes(),
             b"none" => Disposition::None,
             b"quarantine" => Disposition::Quarantine,
             b"reject" => Disposition::Reject,
-            _ => Disposition::Unspecified,
-        })
+        )
+        .unwrap_or(Disposition::Unspecified))
     }
 }
 
@@ -805,7 +836,53 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
 mod test {
     use std::{fs, path::PathBuf};
 
-    use crate::report::Report;
+    use crate::report::{Discovery, Disposition, PolicyOverride, Report, SPFDomainScope};
+
+    fn resource(name: &str) -> Vec<u8> {
+        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        path.push("resources");
+        path.push("dmarc-feedback");
+        path.push(name);
+        fs::read(path).unwrap()
+    }
+
+    #[test]
+    fn dmarc_report_rfc9990_sample() {
+        // RFC 9990 Appendix B sample, exercising the dmarc-2.0 namespace and
+        // the new generator/np/discovery_method/testing elements.
+        let report = Report::parse_xml(&resource("004.xml")).unwrap();
+        assert_eq!(report.domain(), "example.com");
+        assert_eq!(report.np(), Disposition::None);
+        assert_eq!(report.discovery_method(), Discovery::Treewalk);
+        assert_eq!(
+            report.generator(),
+            Some("Example DMARC Aggregate Reporter v1.2")
+        );
+        assert!(!report.testing());
+
+        // The new fields survive a serialize/parse round-trip.
+        let reparsed = Report::parse_xml(report.to_xml().as_bytes()).unwrap();
+        assert_eq!(report, reparsed);
+    }
+
+    #[test]
+    fn dmarc_report_rfc7489_backwards_compat() {
+        // Legacy report: no namespace, "pct", "scope=helo" and the now-removed
+        // "sampled_out" override type must still parse.
+        let report = Report::parse_xml(&resource("005.xml")).unwrap();
+        assert_eq!(report.domain(), "example.com");
+        assert_eq!(report.p(), Disposition::Reject);
+        assert_eq!(report.np(), Disposition::Unspecified);
+        assert_eq!(report.discovery_method(), Discovery::Unspecified);
+        assert_eq!(report.generator(), None);
+
+        let record = &report.records()[0];
+        assert_eq!(
+            record.policy_override_reason()[0].policy_override(),
+            PolicyOverride::Other
+        );
+        assert_eq!(record.spf_auth_result()[0].scope(), SPFDomainScope::Helo);
+    }
 
     #[test]
     fn dmarc_report_parse() {

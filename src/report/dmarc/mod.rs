@@ -14,9 +14,9 @@ use crate::{
     dkim2::Dkim2Output,
     dmarc::Dmarc,
     report::{
-        ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
-        PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
-        SpfResult,
+        ActionDisposition, Alignment, DKIMAuthResult, Discovery, Disposition, DkimResult,
+        DmarcResult, PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult,
+        SPFDomainScope, SpfResult,
     },
 };
 #[cfg(feature = "arc")]
@@ -169,6 +169,33 @@ impl Report {
 
     pub fn with_testing(mut self, testing: bool) -> Self {
         self.policy_published.testing = testing;
+        self
+    }
+
+    pub fn np(&self) -> Disposition {
+        self.policy_published.np
+    }
+
+    pub fn with_np(mut self, np: Disposition) -> Self {
+        self.policy_published.np = np;
+        self
+    }
+
+    pub fn discovery_method(&self) -> Discovery {
+        self.policy_published.discovery_method
+    }
+
+    pub fn with_discovery_method(mut self, discovery_method: Discovery) -> Self {
+        self.policy_published.discovery_method = discovery_method;
+        self
+    }
+
+    pub fn generator(&self) -> Option<&str> {
+        self.report_metadata.generator.as_deref()
+    }
+
+    pub fn with_generator(mut self, generator: impl Into<String>) -> Self {
+        self.report_metadata.generator = Some(generator.into());
         self
     }
 
@@ -416,7 +443,9 @@ impl PolicyPublished {
             aspf: (&dmarc.aspf).into(),
             p: (&dmarc.p).into(),
             sp: (&dmarc.sp).into(),
+            np: (&dmarc.np).into(),
             testing: dmarc.t,
+            discovery_method: Discovery::Treewalk,
             fo: match &dmarc.fo {
                 crate::dmarc::Report::All => "0",
                 crate::dmarc::Report::Any => "1",

@@ -7,12 +7,12 @@
 use crate::DnsError;
 use crate::{
     Error, Version,
-    common::parse::{ItemParser, N, T, TagParser, TxtRecordParser, V, Y},
+    common::parse::{N, T, TagParser, TxtRecordParser, V, Y},
 };
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 use std::slice::Iter;
 
-use super::{Alignment, Dmarc, Format, Policy, Psd, Report, URI};
+use super::{Alignment, Dmarc, Policy, Psd, Report, URI};
 
 impl TxtRecordParser for Dmarc {
     fn parse(bytes: &[u8]) -> crate::Result<Self> {
@@ -30,9 +30,6 @@ impl TxtRecordParser for Dmarc {
             fo: Report::All,
             np: Policy::Unspecified,
             p: Policy::Unspecified,
-            pct: 100,
-            rf: Format::Afrf as u8,
-            ri: 86400,
             rua: vec![],
             ruf: vec![],
             sp: Policy::Unspecified,
@@ -57,15 +54,6 @@ impl TxtRecordParser for Dmarc {
                 }
                 P => {
                     dmarc.p = record.policy()?;
-                }
-                PCT => {
-                    dmarc.pct = std::cmp::min(100, record.number().ok_or(Error::ParseError)?) as u8;
-                }
-                RF => {
-                    dmarc.rf = record.flags::<Format>() as u8;
-                }
-                RI => {
-                    dmarc.ri = record.number().ok_or(Error::ParseError)? as u32;
                 }
                 RUA => {
                     dmarc.rua = record.uris()?;
@@ -309,16 +297,6 @@ impl DMARCParser for Iter<'_, u8> {
     }
 }
 
-impl ItemParser for Format {
-    fn parse(bytes: &[u8]) -> Option<Self> {
-        if bytes.eq_ignore_ascii_case(b"afrf") {
-            Format::Afrf.into()
-        } else {
-            None
-        }
-    }
-}
-
 const ADKIM: u64 = (b'a' as u64)
     | ((b'd' as u64) << 8)
     | ((b'k' as u64) << 16)
@@ -329,9 +307,6 @@ const ASPF: u64 =
 const FO: u64 = (b'f' as u64) | ((b'o' as u64) << 8);
 const NP: u64 = (b'n' as u64) | ((b'p' as u64) << 8);
 const P: u64 = b'p' as u64;
-const PCT: u64 = (b'p' as u64) | ((b'c' as u64) << 8) | ((b't' as u64) << 16);
-const RF: u64 = (b'r' as u64) | ((b'f' as u64) << 8);
-const RI: u64 = (b'r' as u64) | ((b'i' as u64) << 8);
 const RUA: u64 = (b'r' as u64) | ((b'u' as u64) << 8) | ((b'a' as u64) << 16);
 const RUF: u64 = (b'r' as u64) | ((b'u' as u64) << 8) | ((b'f' as u64) << 16);
 const SP: u64 = (b's' as u64) | ((b'p' as u64) << 8);
@@ -342,7 +317,7 @@ mod test {
     use crate::{
         Version,
         common::parse::TxtRecordParser,
-        dmarc::{Alignment, Dmarc, Format, Policy, Psd, Report, URI},
+        dmarc::{Alignment, Dmarc, Policy, Psd, Report, URI},
     };
 
     #[test]
@@ -356,9 +331,6 @@ mod test {
                     fo: Report::All,
                     np: Policy::None,
                     p: Policy::None,
-                    pct: 100,
-                    rf: Format::Afrf as u8,
-                    ri: 86400,
                     rua: vec![URI::new("dmarc-feedback@example.com", 0)],
                     ruf: vec![],
                     sp: Policy::None,
@@ -378,9 +350,6 @@ mod test {
                     fo: Report::All,
                     np: Policy::None,
                     p: Policy::None,
-                    pct: 100,
-                    rf: Format::Afrf as u8,
-                    ri: 86400,
                     rua: vec![URI::new("dmarc-feedback@example.com", 0)],
                     ruf: vec![URI::new("auth-reports@example.com", 0)],
                     sp: Policy::None,
@@ -400,9 +369,6 @@ mod test {
                     fo: Report::DkimSpf,
                     np: Policy::Quarantine,
                     p: Policy::Quarantine,
-                    pct: 25,
-                    rf: Format::Afrf as u8,
-                    ri: 86400,
                     ruf: vec![],
                     rua: vec![
                         URI::new("dmarc-feedback@example.com", 0),
@@ -425,9 +391,6 @@ mod test {
                     fo: Report::Any,
                     np: Policy::None,
                     p: Policy::Reject,
-                    pct: 100,
-                    rf: Format::Afrf as u8,
-                    ri: 86400,
                     rua: vec![URI::new("dmarc-feedback@example.com", 0)],
                     ruf: vec![],
                     sp: Policy::Quarantine,
@@ -448,9 +411,6 @@ mod test {
                     fo: Report::Spf,
                     np: Policy::Reject,
                     p: Policy::Reject,
-                    pct: 100,
-                    rf: Format::Afrf as u8,
-                    ri: 3600,
                     rua: vec![
                         URI::new("dmarc-feedback@example.com", 10 * 1024),
                         URI::new("user@example.com", 2 * 1024 * 1024 * 1024),
@@ -473,9 +433,6 @@ mod test {
                     fo: Report::DkimSpf,
                     np: Policy::Quarantine,
                     p: Policy::Quarantine,
-                    pct: 100,
-                    rf: Format::Afrf as u8,
-                    ri: 86400,
                     rua: vec![
                         URI::new("dmarc-feedback@example.com", 0),
                         URI::new("tld-test@thirdparty.example.net", 0),

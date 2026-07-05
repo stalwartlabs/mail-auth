@@ -57,15 +57,12 @@ async fn main() {
 
     // Verify DMARC
     let dmarc_result = authenticator
-        .verify_dmarc(
-            DmarcParameters::new(
-                &authenticated_message,
-                &dkim_result,
-                "example.org",
-                &spf_result,
-            )
-            .with_domain_suffix_fn(|domain| psl::domain_str(domain).unwrap_or(domain)),
-        )
+        .verify_dmarc(DmarcParameters::new(
+            &authenticated_message,
+            &dkim_result,
+            "example.org",
+            &spf_result,
+        ))
         .await;
     assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);
     assert_eq!(dmarc_result.spf_result(), &DmarcResult::Pass);

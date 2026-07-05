@@ -5,8 +5,8 @@
  */
 
 use crate::report::{
-    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Disposition, DkimResult,
-    DmarcResult, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
+    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Discovery, Disposition,
+    DkimResult, DmarcResult, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
     PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult, SPFDomainScope, SpfResult,
 };
 use flate2::{Compression, write::GzEncoder};
@@ -89,8 +89,13 @@ impl Report {
     pub fn to_xml(&self) -> String {
         let mut xml = String::with_capacity(128);
         writeln!(&mut xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>").ok();
-        writeln!(&mut xml, "<feedback>").ok();
+        writeln!(
+            &mut xml,
+            "<feedback xmlns=\"urn:ietf:params:xml:ns:dmarc-2.0\">"
+        )
+        .ok();
         if self.version != 0.0 {
+            // RFC 9990 Section 3.1.1.2: the report format version MUST be 1.0
             writeln!(&mut xml, "\t<version>{}</version>", self.version).ok();
         }
         self.report_metadata.to_xml(&mut xml);
@@ -128,8 +133,18 @@ impl ReportMetadata {
         )
         .ok();
         self.date_range.to_xml(xml);
-        for error in &self.error {
-            writeln!(xml, "\t\t<error>{}</error>", escape_xml(error)).ok();
+        // RFC 9990 XSD constrains "error" to maxOccurs=1; collapse to a single
+        // element so generated reports stay schema-valid.
+        if !self.error.is_empty() {
+            writeln!(
+                xml,
+                "\t\t<error>{}</error>",
+                escape_xml(&self.error.join("; "))
+            )
+            .ok();
+        }
+        if let Some(generator) = &self.generator {
+            writeln!(xml, "\t\t<generator>{}</generator>", escape_xml(generator)).ok();
         }
         writeln!(xml, "\t</report_metadata>").ok();
     }
@@ -139,19 +154,36 @@ impl PolicyPublished {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t<policy_published>").ok();
         writeln!(xml, "\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
-        if let Some(vp) = &self.version_published {
-            writeln!(xml, "\t\t<version_published>{vp}</version_published>").ok();
-        }
-        writeln!(xml, "\t\t<adkim>{}</adkim>", &self.adkim).ok();
-        writeln!(xml, "\t\t<aspf>{}</aspf>", &self.aspf).ok();
         writeln!(xml, "\t\t<p>{}</p>", &self.p).ok();
-        writeln!(xml, "\t\t<sp>{}</sp>", &self.sp).ok();
-        if self.testing {
-            writeln!(xml, "\t\t<testing>y</testing>").ok();
+        if self.sp != Disposition::Unspecified {
+            writeln!(xml, "\t\t<sp>{}</sp>", &self.sp).ok();
+        }
+        if self.np != Disposition::Unspecified {
+            writeln!(xml, "\t\t<np>{}</np>", &self.np).ok();
+        }
+        if self.adkim != Alignment::Unspecified {
+            writeln!(xml, "\t\t<adkim>{}</adkim>", &self.adkim).ok();
+        }
+        if self.aspf != Alignment::Unspecified {
+            writeln!(xml, "\t\t<aspf>{}</aspf>", &self.aspf).ok();
+        }
+        if self.discovery_method != Discovery::Unspecified {
+            writeln!(
+                xml,
+                "\t\t<discovery_method>{}</discovery_method>",
+                &self.discovery_method
+            )
+            .ok();
         }
         if let Some(fo) = &self.fo {
             writeln!(xml, "\t\t<fo>{}</fo>", escape_xml(fo)).ok();
         }
+        writeln!(
+            xml,
+            "\t\t<testing>{}</testing>",
+            if self.testing { "y" } else { "n" }
+        )
+        .ok();
         writeln!(xml, "\t</policy_published>").ok();
     }
 }
@@ -283,7 +315,9 @@ impl SPFAuthResult {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t\t<spf>").ok();
         writeln!(xml, "\t\t\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
-        writeln!(xml, "\t\t\t\t<scope>{}</scope>", self.scope).ok();
+        if self.scope == SPFDomainScope::MailFrom {
+            writeln!(xml, "\t\t\t\t<scope>{}</scope>", self.scope).ok();
+        }
         writeln!(xml, "\t\t\t\t<result>{}</result>", self.result).ok();
         if let Some(result) = &self.human_result {
             writeln!(
@@ -340,12 +374,21 @@ impl Display for DmarcResult {
 impl Display for PolicyOverride {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            PolicyOverride::Forwarded => "forwarded",
-            PolicyOverride::SampledOut => "sampled_out",
             PolicyOverride::TrustedForwarder => "trusted_forwarder",
             PolicyOverride::MailingList => "mailing_list",
             PolicyOverride::LocalPolicy => "local_policy",
+            PolicyOverride::PolicyTestMode => "policy_test_mode",
             PolicyOverride::Other => "other",
+        })
+    }
+}
+
+impl Display for Discovery {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Discovery::Psl => "psl",
+            Discovery::Treewalk => "treewalk",
+            Discovery::Unspecified => "",
         })
     }
 }
@@ -423,15 +466,15 @@ fn escape_xml(text: &str) -> Cow<'_, str> {
 #[cfg(test)]
 mod test {
     use crate::report::{
-        ActionDisposition, Alignment, DKIMAuthResult, Disposition, DkimResult, DmarcResult,
-        PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult, SPFDomainScope,
-        SpfResult,
+        ActionDisposition, Alignment, DKIMAuthResult, Discovery, Disposition, DkimResult,
+        DmarcResult, PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult,
+        SPFDomainScope, SpfResult,
     };
 
     #[test]
     fn dmarc_report_generate() {
         let report = Report::new()
-            .with_version(2.0)
+            .with_version(1.0)
             .with_org_name("Initech Industries Incorporated")
             .with_email("dmarc@initech.net")
             .with_extra_contact_info("XMPP:dmarc@initech.net")
@@ -439,12 +482,14 @@ mod test {
             .with_date_range_begin(12345)
             .with_date_range_end(12346)
             .with_error("Did not include TPS report cover.")
+            .with_generator("Initech DMARC Reporter v1.0")
             .with_domain("example.org")
-            .with_version_published(1.0)
             .with_adkim(Alignment::Relaxed)
             .with_aspf(Alignment::Strict)
             .with_p(Disposition::Quarantine)
             .with_sp(Disposition::Reject)
+            .with_np(Disposition::None)
+            .with_discovery_method(Discovery::Treewalk)
             .with_testing(true)
             .with_record(
                 Record::new()
@@ -454,7 +499,7 @@ mod test {
                     .with_dmarc_dkim_result(DmarcResult::Pass)
                     .with_dmarc_spf_result(DmarcResult::Fail)
                     .with_policy_override_reason(
-                        PolicyOverrideReason::new(PolicyOverride::Forwarded)
+                        PolicyOverrideReason::new(PolicyOverride::TrustedForwarder)
                             .with_comment("it was forwarded"),
                     )
                     .with_policy_override_reason(
@@ -474,7 +519,7 @@ mod test {
                     .with_spf_auth_result(
                         SPFAuthResult::new()
                             .with_domain("test.org")
-                            .with_scope(SPFDomainScope::Helo)
+                            .with_scope(SPFDomainScope::MailFrom)
                             .with_result(SpfResult::SoftFail)
                             .with_human_result("dns timed out"),
                     ),
@@ -491,8 +536,8 @@ mod test {
                             .with_comment("on the white list"),
                     )
                     .with_policy_override_reason(
-                        PolicyOverrideReason::new(PolicyOverride::SampledOut)
-                            .with_comment("it was sampled out"),
+                        PolicyOverrideReason::new(PolicyOverride::PolicyTestMode)
+                            .with_comment("policy in test mode"),
                     )
                     .with_envelope_from("hello2example.org")
                     .with_envelope_to("other2@example.org")

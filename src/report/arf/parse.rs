@@ -102,155 +102,154 @@ impl<'x> Feedback<'x> {
         for (key, value) in fields {
             let txt_value = std::str::from_utf8(value).unwrap_or_default().trim();
 
-            match key.first() {
-                Some(b'A' | b'a') => {
-                    if key.eq_ignore_ascii_case(b"Arrival-Date") {
-                        if let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date() {
-                            f.arrival_date = dt.to_timestamp().into();
-                        }
-                    } else if key.eq_ignore_ascii_case(b"Auth-Failure") {
-                        f.auth_failure = if txt_value.eq_ignore_ascii_case("adsp") {
-                            AuthFailureType::Adsp
-                        } else if txt_value.eq_ignore_ascii_case("bodyhash") {
-                            AuthFailureType::BodyHash
-                        } else if txt_value.eq_ignore_ascii_case("revoked") {
-                            AuthFailureType::Revoked
-                        } else if txt_value.eq_ignore_ascii_case("signature") {
-                            AuthFailureType::Signature
-                        } else if txt_value.eq_ignore_ascii_case("spf") {
-                            AuthFailureType::Spf
-                        } else if txt_value.eq_ignore_ascii_case("dmarc") {
-                            AuthFailureType::Dmarc
-                        } else {
-                            continue;
-                        };
-                    } else if key.eq_ignore_ascii_case(b"Authentication-Results") {
-                        f.authentication_results.push(txt_value.into());
+            hashify::fnc_map_ignore_case!(key,
+                b"Arrival-Date" => {
+                    if let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date() {
+                        f.arrival_date = dt.to_timestamp().into();
                     }
-                }
-                Some(b'D' | b'd') => {
-                    if key.eq_ignore_ascii_case(b"DKIM-ADSP-DNS") {
-                        f.dkim_adsp_dns = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"DKIM-Canonicalized-Body") {
-                        f.dkim_canonicalized_body = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"DKIM-Canonicalized-Header") {
-                        f.dkim_canonicalized_header = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"DKIM-Domain") {
-                        f.dkim_domain = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"DKIM-Identity") {
-                        f.dkim_identity = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"DKIM-Selector") {
-                        f.dkim_selector = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"DKIM-Selector-DNS") {
-                        f.dkim_selector_dns = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"Delivery-Result") {
-                        f.delivery_result = if txt_value.eq_ignore_ascii_case("delivered") {
-                            DeliveryResult::Delivered
-                        } else if txt_value.eq_ignore_ascii_case("spam") {
-                            DeliveryResult::Spam
-                        } else if txt_value.eq_ignore_ascii_case("policy") {
-                            DeliveryResult::Policy
-                        } else if txt_value.eq_ignore_ascii_case("reject") {
-                            DeliveryResult::Reject
-                        } else if txt_value.eq_ignore_ascii_case("other") {
-                            DeliveryResult::Other
-                        } else {
-                            continue;
-                        };
-                    }
-                }
-                Some(b'F' | b'f') if key.eq_ignore_ascii_case(b"Feedback-Type") => {
-                    f.feedback_type = if txt_value.eq_ignore_ascii_case("abuse") {
-                        FeedbackType::Abuse
-                    } else if txt_value.eq_ignore_ascii_case("auth-failure") {
-                        FeedbackType::AuthFailure
-                    } else if txt_value.eq_ignore_ascii_case("fraud") {
-                        FeedbackType::Fraud
-                    } else if txt_value.eq_ignore_ascii_case("not-spam") {
-                        FeedbackType::NotSpam
-                    } else if txt_value.eq_ignore_ascii_case("other") {
-                        FeedbackType::Other
-                    } else if txt_value.eq_ignore_ascii_case("virus") {
-                        FeedbackType::Virus
-                    } else {
-                        continue;
+                },
+                b"Auth-Failure" => {
+                    f.auth_failure = match hashify::tiny_map_ignore_case!(txt_value.as_bytes(),
+                        b"adsp" => AuthFailureType::Adsp,
+                        b"bodyhash" => AuthFailureType::BodyHash,
+                        b"revoked" => AuthFailureType::Revoked,
+                        b"signature" => AuthFailureType::Signature,
+                        b"spf" => AuthFailureType::Spf,
+                        b"dmarc" => AuthFailureType::Dmarc,
+                    ) {
+                        Some(auth_failure) => auth_failure,
+                        None => continue,
+                    };
+                },
+                b"Authentication-Results" => {
+                    f.authentication_results.push(txt_value.into());
+                },
+                b"DKIM-ADSP-DNS" => {
+                    f.dkim_adsp_dns = Some(txt_value.into());
+                },
+                b"DKIM-Canonicalized-Body" => {
+                    f.dkim_canonicalized_body = Some(txt_value.into());
+                },
+                b"DKIM-Canonicalized-Header" => {
+                    f.dkim_canonicalized_header = Some(txt_value.into());
+                },
+                b"DKIM-Domain" => {
+                    f.dkim_domain = Some(txt_value.into());
+                },
+                b"DKIM-Identity" => {
+                    f.dkim_identity = Some(txt_value.into());
+                },
+                b"DKIM-Selector" => {
+                    f.dkim_selector = Some(txt_value.into());
+                },
+                b"DKIM-Selector-DNS" => {
+                    f.dkim_selector_dns = Some(txt_value.into());
+                },
+                b"Delivery-Result" => {
+                    f.delivery_result = match hashify::tiny_map_ignore_case!(txt_value.as_bytes(),
+                        b"delivered" => DeliveryResult::Delivered,
+                        b"spam" => DeliveryResult::Spam,
+                        b"policy" => DeliveryResult::Policy,
+                        b"reject" => DeliveryResult::Reject,
+                        b"other" => DeliveryResult::Other,
+                    ) {
+                        Some(delivery_result) => delivery_result,
+                        None => continue,
+                    };
+                },
+                b"Feedback-Type" => {
+                    f.feedback_type = match hashify::tiny_map_ignore_case!(txt_value.as_bytes(),
+                        b"abuse" => FeedbackType::Abuse,
+                        b"auth-failure" => FeedbackType::AuthFailure,
+                        b"fraud" => FeedbackType::Fraud,
+                        b"not-spam" => FeedbackType::NotSpam,
+                        b"other" => FeedbackType::Other,
+                        b"virus" => FeedbackType::Virus,
+                    ) {
+                        Some(feedback_type) => feedback_type,
+                        None => continue,
                     };
                     has_ft = true;
-                }
-                Some(b'I' | b'i') => {
-                    if key.eq_ignore_ascii_case(b"Identity-Alignment") {
-                        for id in txt_value.split(',') {
-                            let id = id.trim();
-                            if id.eq_ignore_ascii_case("dkim") {
+                },
+                b"Identity-Alignment" => {
+                    for id in txt_value.split(',') {
+                        let id = id.trim();
+                        hashify::fnc_map_ignore_case!(id.as_bytes(),
+                            b"dkim" => {
                                 f.identity_alignment =
                                     if f.identity_alignment == IdentityAlignment::Spf {
                                         IdentityAlignment::DkimSpf
                                     } else {
                                         IdentityAlignment::Dkim
                                     };
-                            } else if id.eq_ignore_ascii_case("spf") {
+                            },
+                            b"spf" => {
                                 f.identity_alignment =
                                     if f.identity_alignment == IdentityAlignment::Dkim {
                                         IdentityAlignment::DkimSpf
                                     } else {
                                         IdentityAlignment::Spf
                                     };
-                            } else if id.eq_ignore_ascii_case("none") {
+                            },
+                            b"none" => {
                                 f.identity_alignment = IdentityAlignment::None;
                                 break;
-                            }
-                        }
-                    } else if key.eq_ignore_ascii_case(b"Incidents") {
-                        f.incidents = txt_value.parse().unwrap_or(1);
+                            },
+                            _ => ()
+                        );
                     }
-                }
-                Some(b'O' | b'o') => {
-                    if key.eq_ignore_ascii_case(b"Original-Envelope-Id") {
-                        f.original_envelope_id = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"Original-Mail-From") {
-                        f.original_mail_from = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"Original-Rcpt-To") {
-                        f.original_rcpt_to = Some(txt_value.into());
-                    }
-                }
-                Some(b'R' | b'r') => {
-                    if key.eq_ignore_ascii_case(b"Reported-Domain") {
-                        f.reported_domain.push(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"Reported-URI") {
-                        f.reported_uri.push(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"Reporting-MTA") {
-                        f.reporting_mta = Some(if let Some(mta) = txt_value.strip_prefix("dns;") {
-                            mta.trim().into()
-                        } else {
-                            txt_value.into()
-                        });
-                    } else if key.eq_ignore_ascii_case(b"Received-Date")
-                        && let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date()
-                    {
+                },
+                b"Incidents" => {
+                    f.incidents = txt_value.parse().unwrap_or(1);
+                },
+                b"Original-Envelope-Id" => {
+                    f.original_envelope_id = Some(txt_value.into());
+                },
+                b"Original-Mail-From" => {
+                    f.original_mail_from = Some(txt_value.into());
+                },
+                b"Original-Rcpt-To" => {
+                    f.original_rcpt_to = Some(txt_value.into());
+                },
+                b"Reported-Domain" => {
+                    f.reported_domain.push(txt_value.into());
+                },
+                b"Reported-URI" => {
+                    f.reported_uri.push(txt_value.into());
+                },
+                b"Reporting-MTA" => {
+                    f.reporting_mta = Some(if let Some(mta) = txt_value.strip_prefix("dns;") {
+                        mta.trim().into()
+                    } else {
+                        txt_value.into()
+                    });
+                },
+                b"Received-Date" => {
+                    if let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date() {
                         f.arrival_date = dt.to_timestamp().into();
                     }
-                }
-                Some(b'S' | b's') => {
-                    if key.eq_ignore_ascii_case(b"SPF-DNS") {
-                        f.spf_dns = Some(txt_value.into());
-                    } else if key.eq_ignore_ascii_case(b"Source-IP") {
-                        f.source_ip = if let Some((ip, _)) = txt_value.split_once(' ') {
-                            ip.parse().ok()
-                        } else {
-                            txt_value.parse().ok()
-                        };
-                    } else if key.eq_ignore_ascii_case(b"Source-Port") {
-                        f.source_port = txt_value.parse().unwrap_or(0);
-                    }
-                }
-                Some(b'U' | b'u') if key.eq_ignore_ascii_case(b"User-Agent") => {
+                },
+                b"SPF-DNS" => {
+                    f.spf_dns = Some(txt_value.into());
+                },
+                b"Source-IP" => {
+                    f.source_ip = if let Some((ip, _)) = txt_value.split_once(' ') {
+                        ip.parse().ok()
+                    } else {
+                        txt_value.parse().ok()
+                    };
+                },
+                b"Source-Port" => {
+                    f.source_port = txt_value.parse().unwrap_or(0);
+                },
+                b"User-Agent" => {
                     f.user_agent = Some(txt_value.into());
-                }
-                Some(b'V' | b'v') if key.eq_ignore_ascii_case(b"Version") => {
+                },
+                b"Version" => {
                     f.version = txt_value.parse().unwrap_or(0);
-                }
-                _ => (),
-            }
+                },
+                _ => ()
+            );
         }
 
         if has_ft { Some(f) } else { None }

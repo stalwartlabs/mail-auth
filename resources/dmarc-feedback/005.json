@@ -1,0 +1,64 @@
+{
+  "version": 1.0,
+  "report_metadata": {
+    "org_name": "Legacy Reporter",
+    "email": "dmarc@legacy.example",
+    "extra_contact_info": null,
+    "report_id": "legacy-1",
+    "date_range": {
+      "begin": 100,
+      "end": 200
+    },
+    "error": [],
+    "generator": null
+  },
+  "policy_published": {
+    "domain": "example.com",
+    "version_published": null,
+    "adkim": "Relaxed",
+    "aspf": "Relaxed",
+    "p": "Reject",
+    "sp": "Reject",
+    "np": "Unspecified",
+    "testing": false,
+    "discovery_method": "Unspecified",
+    "fo": null
+  },
+  "record": [
+    {
+      "row": {
+        "source_ip": "192.0.2.1",
+        "count": 1,
+        "policy_evaluated": {
+          "disposition": "Quarantine",
+          "dkim": "Fail",
+          "spf": "Pass",
+          "reason": [
+            {
+              "type_": "Other",
+              "comment": "legacy sampling"
+            }
+          ]
+        }
+      },
+      "identifiers": {
+        "envelope_to": null,
+        "envelope_from": "",
+        "header_from": "example.com"
+      },
+      "auth_results": {
+        "dkim": [],
+        "spf": [
+          {
+            "domain": "example.com",
+            "scope": "Helo",
+            "result": "Pass",
+            "human_result": null
+          }
+        ]
+      },
+      "extensions": []
+    }
+  ],
+  "extensions": []
+}

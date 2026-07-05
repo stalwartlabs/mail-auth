@@ -216,15 +216,12 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
 
     // Verify DMARC
     let dmarc_result = authenticator
-        .verify_dmarc(
-            DmarcParameters::new(
-                &authenticated_message,
-                &dkim_result,
-                "example.org",
-                &spf_result,
-            )
-            .with_domain_suffix_fn(|domain| psl::domain_str(domain).unwrap_or(domain)),
-        )
+        .verify_dmarc(DmarcParameters::new(
+            &authenticated_message,
+            &dkim_result,
+            "example.org",
+            &spf_result,
+        ))
         .await;
     assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);
     assert_eq!(dmarc_result.spf_result(), &DmarcResult::Pass);
@@ -324,7 +321,9 @@ To fuzz the library with `cargo-fuzz`:
 - [RFC 6652 - Sender Policy Framework (SPF) Authentication Failure Reporting Using the Abuse Reporting Format](https://datatracker.ietf.org/doc/html/rfc6652)
 
 ### DMARC
-- [RFC 7489 - Domain-based Message Authentication, Reporting, and Conformance (DMARC)](https://datatracker.ietf.org/doc/html/rfc7489)
+- [RFC 9989 - Domain-based Message Authentication, Reporting, and Conformance (DMARC)](https://datatracker.ietf.org/doc/html/rfc9989)
+- [RFC 9990 - DMARC Aggregate Reporting](https://datatracker.ietf.org/doc/html/rfc9990)
+- [RFC 9991 - DMARC Failure Reporting](https://datatracker.ietf.org/doc/html/rfc9991)
 - [RFC 8617 - The Authenticated Received Chain (ARC) Protocol](https://datatracker.ietf.org/doc/html/rfc8617) (being reclassified as [Historic](https://datatracker.ietf.org/doc/draft-ietf-dmarc-arc-to-historic/))
 - [RFC 8601 - Message Header Field for Indicating Message Authentication Status](https://datatracker.ietf.org/doc/html/rfc8601)
 - [RFC 8616 - Email Authentication for Internationalized Mail](https://datatracker.ietf.org/doc/html/rfc8616)

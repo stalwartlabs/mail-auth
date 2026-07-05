@@ -35,7 +35,7 @@ fn main() {
                 .with_dmarc_dkim_result(DmarcResult::Pass)
                 .with_dmarc_spf_result(DmarcResult::Fail)
                 .with_policy_override_reason(
-                    PolicyOverrideReason::new(PolicyOverride::Forwarded)
+                    PolicyOverrideReason::new(PolicyOverride::TrustedForwarder)
                         .with_comment("it was forwarded"),
                 )
                 .with_policy_override_reason(
@@ -55,7 +55,7 @@ fn main() {
                 .with_spf_auth_result(
                     SPFAuthResult::new()
                         .with_domain("test.org")
-                        .with_scope(SPFDomainScope::Helo)
+                        .with_scope(SPFDomainScope::MailFrom)
                         .with_result(SpfResult::SoftFail)
                         .with_human_result("dns timed out"),
                 ),
@@ -72,8 +72,8 @@ fn main() {
                         .with_comment("on the white list"),
                 )
                 .with_policy_override_reason(
-                    PolicyOverrideReason::new(PolicyOverride::SampledOut)
-                        .with_comment("it was sampled out"),
+                    PolicyOverrideReason::new(PolicyOverride::PolicyTestMode)
+                        .with_comment("policy in test mode"),
                 )
                 .with_envelope_from("hello2example.org")
                 .with_envelope_to("other2@example.org")
