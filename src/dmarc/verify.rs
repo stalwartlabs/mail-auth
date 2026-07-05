@@ -142,12 +142,19 @@ impl MessageAuthenticator {
             record: None,
         };
 
+        // Cache Organizational Domains resolved during alignment
+        let mut org_memo: Vec<(&str, &str)> = vec![(rfc5322_from_domain, author_org)];
+
         if spf_output.result == SpfResult::Pass {
             // Check SPF alignment (Section 4.10.2)
             let aligned = rfc5321_mail_from_domain == rfc5322_from_domain
                 || (aspf == Alignment::Relaxed
                     && self
-                        .organizational_domain_of(rfc5321_mail_from_domain, cache_txt)
+                        .organizational_domain_of(
+                            rfc5321_mail_from_domain,
+                            cache_txt,
+                            &mut org_memo,
+                        )
                         .await
                         == author_org);
             output.spf_result = if aligned {
@@ -179,7 +186,10 @@ impl MessageAuthenticator {
             has_dkim = true;
             if d == rfc5322_from_domain
                 || (adkim == Alignment::Relaxed
-                    && self.organizational_domain_of(d, cache_txt).await == author_org)
+                    && self
+                        .organizational_domain_of(d, cache_txt, &mut org_memo)
+                        .await
+                        == author_org)
             {
                 aligned = true;
                 break;
@@ -239,8 +249,7 @@ impl MessageAuthenticator {
 
     /// Performs a DNS Tree Walk (RFC 9989 Section 4.10) starting at `domain`
     /// and returns every valid DMARC Policy Record found from the starting
-    /// point (longest name) up to the top-level domain (shortest name). The
-    /// returned names borrow from `domain`.
+    /// point (longest name) up to the top-level domain (shortest name).
     async fn dmarc_tree_walk<'x>(
         &self,
         domain: &'x str,
@@ -302,17 +311,22 @@ impl MessageAuthenticator {
         }
     }
 
-    /// Determines the Organizational Domain of `domain` via a DNS Tree Walk
-    /// (RFC 9989 Section 4.10.2). The result borrows from `domain`.
+    /// Determines the Organizational Domain of `domain` via a DNS Tree Walk (RFC 9989 Section 4.10.2).
     async fn organizational_domain_of<'x>(
         &self,
         domain: &'x str,
         txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
+        memo: &mut Vec<(&'x str, &'x str)>,
     ) -> &'x str {
-        match self.dmarc_tree_walk(domain, txt_cache).await {
+        if let Some(&(_, org)) = memo.iter().find(|(d, _)| *d == domain) {
+            return org;
+        }
+        let org = match self.dmarc_tree_walk(domain, txt_cache).await {
             Ok(walk) => organizational_domain(&walk, domain).unwrap_or(domain),
             Err(_) => domain,
-        }
+        };
+        memo.push((domain, org));
+        org
     }
 }
 
