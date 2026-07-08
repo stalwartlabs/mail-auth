@@ -234,6 +234,30 @@ impl Flag {
 mod test {
     use super::*;
     use crate::AuthenticatedMessage;
+    use mail_parser::MessageParser;
+
+    #[test]
+    fn from_parsed_classifies_dkim2_headers() {
+        let raw = concat!(
+            "DKIM2-Signature: i=1; m=1; t=1740000000; d=test4.dkim2.com; mf=PHNlbmRlckB0ZXN0NC5ka2ltMi5jb20+; rt=PHJlY2lwaWVudEBleGFtcGxlLmNvbT4=; s=ed25519:ed25519-sha256:651OFNp+DdgjeVHm1EaEmnpcP6L9PWJczuJ5Oo9dzWPf0xnVgDLcVu4IMmNgW8stVVocIt7MBd8aL0Gc/lCsAA==;\r\n",
+            "Message-Instance: m=1; h=sha256:WT8nqIyG8W1R78H1QT4oZdo1SKdQrY9JHQ4fMC+IXHU=:frcCV1k9oG9oKj3dpUqdJg1PxRT2RSN/XKdLCPjaYaY=;\r\n",
+            "From: sender@test4.dkim2.com\r\n",
+            "To: recipient@example.com\r\n",
+            "\r\n",
+            "body\r\n",
+        )
+        .as_bytes();
+
+        let from_parsed = AuthenticatedMessage::from_parsed(
+            &MessageParser::new().parse(raw).unwrap(),
+            raw,
+            true,
+        );
+        assert_eq!(from_parsed.dkim2_signatures.len(), 1);
+        assert_eq!(from_parsed.dkim2_instances.len(), 1);
+
+        assert_eq!(from_parsed, AuthenticatedMessage::parse(raw).unwrap());
+    }
 
     #[test]
     fn signature_parse_malformed_does_not_panic() {

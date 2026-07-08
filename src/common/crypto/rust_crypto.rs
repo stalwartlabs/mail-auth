@@ -108,7 +108,12 @@ impl Ed25519Key {
     /// Generates a new Ed25519 key pair encoded in PKCS#8 DER format.
     pub fn generate_pkcs8() -> Result<Vec<u8>> {
         use ed25519_dalek::pkcs8::EncodePrivateKey;
-        Ok(ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng)
+        use rand::RngCore;
+
+        let mut seed = [0u8; ed25519_dalek::SECRET_KEY_LENGTH];
+        rand::rngs::OsRng.fill_bytes(&mut seed);
+
+        Ok(ed25519_dalek::SigningKey::from_bytes(&seed)
             .to_pkcs8_der()
             .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?
             .as_bytes()
@@ -116,6 +121,8 @@ impl Ed25519Key {
     }
 
     pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self> {
+        use ed25519_dalek::pkcs8::DecodePrivateKey;
+
         Ok(Self {
             inner: ed25519_dalek::SigningKey::from_pkcs8_der(pkcs8_der)
                 .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,

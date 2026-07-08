@@ -56,10 +56,10 @@ impl<'x> AuthenticatedMessage<'x> {
                 HeaderName::ArcMessageSignature => {
                     message.parse_ams(name, value, strict);
                 }
-                HeaderName::Other(other) if other.eq_ignore_ascii_case("DKIM2-Signature") => {
+                HeaderName::Dkim2Signature => {
                     message.parse_dkim2_signature(name, value);
                 }
-                HeaderName::Other(other) if other.eq_ignore_ascii_case("Message-Instance") => {
+                HeaderName::MessageInstance => {
                     message.parse_dkim2_instance(name, value);
                 }
                 _ => (),

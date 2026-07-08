@@ -36,7 +36,7 @@ hashify =  { version = "0.2" }
 aws-lc-rs = { version = "1", optional = true }
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.8", optional = true }
-ed25519-dalek = { version = "2", optional = true, features = ["pkcs8", "rand_core"] }
+ed25519-dalek = { version = "3", optional = true, features = ["pkcs8", "alloc"] }
 sha1 = { version = "0.11", optional = true }
 sha2 = { version = "0.11", optional = true }
 rustls-pki-types = "1.15"
