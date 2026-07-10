@@ -248,11 +248,8 @@ mod test {
         )
         .as_bytes();
 
-        let from_parsed = AuthenticatedMessage::from_parsed(
-            &MessageParser::new().parse(raw).unwrap(),
-            raw,
-            true,
-        );
+        let from_parsed =
+            AuthenticatedMessage::from_parsed(&MessageParser::new().parse(raw).unwrap(), raw, true);
         assert_eq!(from_parsed.dkim2_signatures.len(), 1);
         assert_eq!(from_parsed.dkim2_instances.len(), 1);
 

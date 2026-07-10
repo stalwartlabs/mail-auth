@@ -185,7 +185,7 @@ impl<'x> Iterator for HeaderIterator<'x> {
                         } else if self
                             .iter
                             .peek()
-                            .is_none_or(|(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
+                            .is_none_or(|(_, next_byte)| !b" \t".contains(next_byte))
                         {
                             // Invalid header, return anyway.
                             let header_name = self
@@ -202,7 +202,7 @@ impl<'x> Iterator for HeaderIterator<'x> {
                 && self
                     .iter
                     .peek()
-                    .is_none_or(|(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
+                    .is_none_or(|(_, next_byte)| !b" \t".contains(next_byte))
             {
                 let header_name = self
                     .message
@@ -272,7 +272,7 @@ impl<'x> Iterator for HeaderParser<'x> {
                         } else if self
                             .iter
                             .peek()
-                            .is_none_or(|(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
+                            .is_none_or(|(_, next_byte)| !b" \t".contains(next_byte))
                         {
                             // Invalid header, return anyway.
                             let header_name = self
@@ -314,7 +314,7 @@ impl<'x> Iterator for HeaderParser<'x> {
                 && self
                     .iter
                     .peek()
-                    .is_none_or(|(_, next_byte)| ![b' ', b'\t'].contains(next_byte))
+                    .is_none_or(|(_, next_byte)| !b" \t".contains(next_byte))
             {
                 let header_name = self
                     .message
