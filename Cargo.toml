@@ -30,7 +30,7 @@ rkyv = ["dep:rkyv", "mail-parser/rkyv"]
 
 [dependencies]
 flate2 = "1.1"
-mail-parser = { version = "0.11", features = ["full_encoding"] }
+mail-parser = { version = "0.11.5", features = ["full_encoding"] }
 quick-xml = { version = "0.41", optional = true }
 hashify =  { version = "0.2" }
 aws-lc-rs = { version = "1", optional = true }
