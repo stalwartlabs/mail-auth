@@ -158,24 +158,24 @@ impl PolicyPublished {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t<policy_published>").ok();
         writeln!(xml, "\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
-        writeln!(xml, "\t\t<p>{}</p>", &self.p).ok();
+        writeln!(xml, "\t\t<p>{}</p>", self.p).ok();
         if self.sp != Disposition::Unspecified {
-            writeln!(xml, "\t\t<sp>{}</sp>", &self.sp).ok();
+            writeln!(xml, "\t\t<sp>{}</sp>", self.sp).ok();
         }
         if self.np != Disposition::Unspecified {
-            writeln!(xml, "\t\t<np>{}</np>", &self.np).ok();
+            writeln!(xml, "\t\t<np>{}</np>", self.np).ok();
         }
         if self.adkim != Alignment::Unspecified {
-            writeln!(xml, "\t\t<adkim>{}</adkim>", &self.adkim).ok();
+            writeln!(xml, "\t\t<adkim>{}</adkim>", self.adkim).ok();
         }
         if self.aspf != Alignment::Unspecified {
-            writeln!(xml, "\t\t<aspf>{}</aspf>", &self.aspf).ok();
+            writeln!(xml, "\t\t<aspf>{}</aspf>", self.aspf).ok();
         }
         if self.discovery_method != Discovery::Unspecified {
             writeln!(
                 xml,
                 "\t\t<discovery_method>{}</discovery_method>",
-                &self.discovery_method
+                self.discovery_method
             )
             .ok();
         }
@@ -436,7 +436,7 @@ impl Display for SpfResult {
 
 fn escape_xml(text: &str) -> Cow<'_, str> {
     for ch in text.as_bytes() {
-        if [b'"', b'\'', b'<', b'>', b'&'].contains(ch) {
+        if b"\"'<>&".contains(ch) {
             let mut escaped = String::with_capacity(text.len());
             for ch in text.chars() {
                 match ch {

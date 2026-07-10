@@ -241,7 +241,7 @@ impl Canonicalization {
 
                     for &ch in value {
                         if !ch.is_ascii_whitespace() {
-                            if [b' ', b'\t'].contains(&last_ch) && bw > 0 {
+                            if b" \t".contains(&last_ch) && bw > 0 {
                                 hasher.write_len(b" ", &mut bw);
                             }
                             hasher.write_len(&[ch], &mut bw);

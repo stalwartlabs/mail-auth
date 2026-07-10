@@ -209,7 +209,7 @@ fn add_part(result: &mut Vec<u8>, part: &[u8], pos: usize, escape: bool) {
         result.extend_from_slice(part);
     } else {
         for ch in part {
-            if ch.is_ascii_alphanumeric() || [b'-', b'.', b'_', b'~'].contains(ch) {
+            if ch.is_ascii_alphanumeric() || b"-._~".contains(ch) {
                 result.push(*ch);
             } else {
                 result.extend_from_slice(format!("%{ch:02x}").as_bytes());
