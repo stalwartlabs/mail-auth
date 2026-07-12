@@ -1,3 +1,7 @@
+mail-auth 0.11.2
+================================
+- Bump `mail-parser` to 0.11.5.
+
 mail-auth 0.11.1
 ================================
 - [RFC 9989 - Domain-based Message Authentication, Reporting, and Conformance (DMARC)](https://datatracker.ietf.org/doc/html/rfc9989) support.
