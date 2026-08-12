@@ -210,11 +210,13 @@ pub enum Dkim2Error {
     SignatureTagUnexpected { i: u32, tag: &'static str },
     SequenceGap,
     SequenceOverflow,
+    ChainTooLong,
     SignatureExpired(u32),
     MailFromMismatch(u32),
     RcptToMismatch(u32),
     MailFromDomainMismatch(u32),
     NextDomainMismatch(u32),
+    CustodyBreak(u32),
     PublicKeyFetch(u32),
     PublicKeyMissing(u32),
     PublicKeyMultiple(u32),
@@ -256,6 +258,7 @@ impl std::fmt::Display for Dkim2Error {
             Dkim2Error::SequenceOverflow => {
                 write!(f, "DKIM2 sequence numbering would overflow")
             }
+            Dkim2Error::ChainTooLong => write!(f, "Too many DKIM2 header fields"),
             Dkim2Error::SignatureExpired(i) => write!(f, "DKIM2-Signature i={i} signature expired"),
             Dkim2Error::MailFromMismatch(i) => {
                 write!(f, "DKIM2-Signature i={i} MAIL FROM did not match")
@@ -268,6 +271,12 @@ impl std::fmt::Display for Dkim2Error {
             }
             Dkim2Error::NextDomainMismatch(i) => {
                 write!(f, "DKIM2-Signature i={i} nd= does not match")
+            }
+            Dkim2Error::CustodyBreak(i) => {
+                write!(
+                    f,
+                    "DKIM2-Signature i={i} d= and previous RCPT TO do not match"
+                )
             }
             Dkim2Error::PublicKeyFetch(i) => {
                 write!(f, "DKIM2-Signature i={i} public key could not be fetched")

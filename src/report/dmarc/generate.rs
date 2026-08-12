@@ -474,6 +474,7 @@ mod test {
         DmarcResult, PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult,
         SPFDomainScope, SpfResult,
     };
+    const MAX_REPORT_SIZE: usize = 25 * 1024 * 1024;
 
     #[test]
     fn dmarc_report_generate() {
@@ -569,7 +570,7 @@ mod test {
                 ["dmarc-reports@example.org"].iter().copied(),
             )
             .unwrap();
-        let parsed_report = Report::parse_rfc5322(message.as_bytes()).unwrap();
+        let parsed_report = Report::parse_rfc5322(message.as_bytes(), MAX_REPORT_SIZE).unwrap();
 
         assert_eq!(report, parsed_report);
     }

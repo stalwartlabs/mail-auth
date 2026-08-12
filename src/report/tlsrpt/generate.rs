@@ -106,9 +106,9 @@ impl TlsReport {
 
 #[cfg(test)]
 mod test {
-    use mail_parser::DateTime;
-
     use crate::report::tlsrpt::{DateRange, TlsReport};
+    use mail_parser::DateTime;
+    const MAX_REPORT_SIZE: usize = 25 * 1024 * 1024;
 
     #[test]
     fn tlsrpt_generate() {
@@ -134,7 +134,7 @@ mod test {
 
         //println!("{message}");
 
-        let parsed_report = TlsReport::parse_rfc5322(message.as_bytes()).unwrap();
+        let parsed_report = TlsReport::parse_rfc5322(message.as_bytes(), MAX_REPORT_SIZE).unwrap();
 
         assert_eq!(report, parsed_report);
     }

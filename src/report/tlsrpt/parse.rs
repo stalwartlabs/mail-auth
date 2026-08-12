@@ -5,10 +5,10 @@
  */
 
 use super::TlsReport;
-use crate::report::Error;
+use crate::report::{Error, read_capped};
 use flate2::read::GzDecoder;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
-use std::io::{Cursor, Read};
+use std::io::Cursor;
 use zip::ZipArchive;
 
 impl TlsReport {
@@ -16,7 +16,7 @@ impl TlsReport {
         serde_json::from_slice(report).map_err(|err| Error::ReportParseError(err.to_string()))
     }
 
-    pub fn parse_rfc5322(report: &[u8]) -> Result<Self, Error> {
+    pub fn parse_rfc5322(report: &[u8], max_size: usize) -> Result<Self, Error> {
         let message = MessageParser::new()
             .parse(report)
             .ok_or(Error::MailParseError)?;
@@ -59,10 +59,7 @@ impl TlsReport {
                     match rt {
                         ReportType::Gzip => {
                             let report: &[u8] = report.as_ref();
-                            let mut file = GzDecoder::new(report);
-                            let mut buf = Vec::new();
-                            file.read_to_end(&mut buf)
-                                .map_err(|err| Error::UncompressError(err.to_string()))?;
+                            let buf = read_capped(GzDecoder::new(report), 0, max_size)?;
 
                             match Self::parse_json(&buf) {
                                 Ok(report) => return Ok(report),
@@ -77,11 +74,8 @@ impl TlsReport {
                             for i in 0..archive.len() {
                                 match archive.by_index(i) {
                                     Ok(mut file) => {
-                                        let mut buf =
-                                            Vec::with_capacity(file.compressed_size() as usize);
-                                        file.read_to_end(&mut buf).map_err(|err| {
-                                            Error::UncompressError(err.to_string())
-                                        })?;
+                                        let size_hint = file.size();
+                                        let buf = read_capped(&mut file, size_hint, max_size)?;
                                         match Self::parse_json(&buf) {
                                             Ok(report) => return Ok(report),
                                             Err(err) => {
@@ -113,9 +107,19 @@ impl TlsReport {
 
 #[cfg(test)]
 mod tests {
+    use crate::report::{
+        Error,
+        test_util::{gzip, message_with_attachment, zip},
+        tlsrpt::TlsReport,
+    };
     use std::{fs, path::PathBuf};
 
-    use crate::report::tlsrpt::TlsReport;
+    const MAX_REPORT_SIZE: usize = 25 * 1024 * 1024;
+    const REPORT: &str = concat!(
+        r#"{"organization-name":"Example","report-id":"1","date-range":"#,
+        r#"{"start-datetime":"2023-01-01T00:00:00Z","end-datetime":"2023-01-02T00:00:00Z"},"#,
+        r#""policies":[]}"#
+    );
 
     #[test]
     fn tlsrpt_parse() {
@@ -141,12 +145,75 @@ mod tests {
             if file.extension().is_none_or(|e| e != "eml") {
                 continue;
             }
-            let rpt = TlsReport::parse_rfc5322(&fs::read(&file).unwrap())
+            let rpt = TlsReport::parse_rfc5322(&fs::read(&file).unwrap(), MAX_REPORT_SIZE)
                 .unwrap_or_else(|err| panic!("Failed to parse {}: {:?}", file.display(), err));
             file.set_extension("json");
             let rpt_check = TlsReport::parse_json(&fs::read(&file).unwrap())
                 .unwrap_or_else(|err| panic!("Failed to parse {}: {:?}", file.display(), err));
             assert_eq!(rpt, rpt_check);
         }
+    }
+
+    #[test]
+    fn tlsrpt_parse_zip_forged_size() {
+        let archive = zip("report.json", REPORT.as_bytes(), None, Some(u32::MAX));
+        let message = message_with_attachment("application/tlsrpt+zip", "report.zip", &archive);
+
+        assert_eq!(
+            TlsReport::parse_rfc5322(&message, MAX_REPORT_SIZE),
+            Err(Error::ReportTooLarge)
+        );
+    }
+
+    #[test]
+    fn tlsrpt_parse_zip_forged_compressed_size() {
+        let archive = zip("report.json", REPORT.as_bytes(), Some(u32::MAX), None);
+        let message = message_with_attachment("application/tlsrpt+zip", "report.zip", &archive);
+
+        assert!(TlsReport::parse_rfc5322(&message, MAX_REPORT_SIZE).is_err());
+    }
+
+    #[test]
+    fn tlsrpt_parse_zip_within_limit() {
+        let archive = zip("report.json", REPORT.as_bytes(), None, None);
+        let message = message_with_attachment("application/tlsrpt+zip", "report.zip", &archive);
+
+        assert_eq!(
+            TlsReport::parse_rfc5322(&message, MAX_REPORT_SIZE),
+            Ok(TlsReport::parse_json(REPORT.as_bytes()).unwrap())
+        );
+        assert_eq!(
+            TlsReport::parse_rfc5322(&message, REPORT.len() - 1),
+            Err(Error::ReportTooLarge)
+        );
+    }
+
+    #[test]
+    fn tlsrpt_parse_gzip_bomb() {
+        let bomb = gzip(&vec![b' '; 1024 * 1024]);
+        let message = message_with_attachment("application/tlsrpt+gzip", "report.json.gz", &bomb);
+
+        assert_eq!(
+            TlsReport::parse_rfc5322(&message, 64 * 1024),
+            Err(Error::ReportTooLarge)
+        );
+    }
+
+    #[test]
+    fn tlsrpt_parse_gzip_within_limit() {
+        let message = message_with_attachment(
+            "application/tlsrpt+gzip",
+            "report.json.gz",
+            &gzip(REPORT.as_bytes()),
+        );
+
+        assert_eq!(
+            TlsReport::parse_rfc5322(&message, MAX_REPORT_SIZE),
+            Ok(TlsReport::parse_json(REPORT.as_bytes()).unwrap())
+        );
+        assert_eq!(
+            TlsReport::parse_rfc5322(&message, REPORT.len() - 1),
+            Err(Error::ReportTooLarge)
+        );
     }
 }

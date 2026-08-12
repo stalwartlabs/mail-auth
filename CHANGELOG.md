@@ -1,3 +1,10 @@
+mail-auth 0.12.0
+================================
+- `Report::parse_rfc5322` and `TlsReport::parse_rfc5322` now take a `max_size` argument, which bounds the size of a decompressed report.
+- Report parsing: Reject `.gz` and `.zip` attachments that decompress beyond `max_size`, and stop sizing the output buffer from the attacker-controlled ZIP size fields.
+- DKIM2: Cap the signature chain at 50 `DKIM2-Signature` / `Message-Instance` header fields, reported as `Dkim2Error::ChainTooLong`.
+- DKIM2: Accept an imaginary hop (`nd=`) that follows a real hop, provided its `d=` matches a recipient of the previous hop ([draft-ietf-dkim-dkim2-spec-04](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-04) §9.3).
+
 mail-auth 0.11.2
 ================================
 - Bump `mail-parser` to 0.11.5.

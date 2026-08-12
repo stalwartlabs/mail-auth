@@ -8,7 +8,7 @@ use crate::report::{
     ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Discovery, Disposition,
     DkimResult, DmarcResult, Error, Extension, Identifier, PolicyEvaluated, PolicyOverride,
     PolicyOverrideReason, PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult,
-    SPFDomainScope, SpfResult,
+    SPFDomainScope, SpfResult, read_capped,
 };
 use flate2::read::GzDecoder;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
@@ -16,12 +16,12 @@ use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
 use std::borrow::Cow;
-use std::io::{BufRead, Cursor, Read};
+use std::io::{BufRead, Cursor};
 use std::net::IpAddr;
 use std::str::FromStr;
 
 impl Report {
-    pub fn parse_rfc5322(report: &[u8]) -> Result<Self, Error> {
+    pub fn parse_rfc5322(report: &[u8], max_size: usize) -> Result<Self, Error> {
         let message = MessageParser::new()
             .parse(report)
             .ok_or(Error::MailParseError)?;
@@ -81,10 +81,7 @@ impl Report {
                     match rt {
                         ReportType::Gzip => {
                             let report: &[u8] = report.as_ref();
-                            let mut file = GzDecoder::new(report);
-                            let mut buf = Vec::new();
-                            file.read_to_end(&mut buf)
-                                .map_err(|err| Error::UncompressError(err.to_string()))?;
+                            let buf = read_capped(GzDecoder::new(report), 0, max_size)?;
 
                             match Report::parse_xml(&buf) {
                                 Ok(feedback) => return Ok(feedback),
@@ -99,11 +96,8 @@ impl Report {
                             for i in 0..archive.len() {
                                 match archive.by_index(i) {
                                     Ok(mut file) => {
-                                        let mut buf =
-                                            Vec::with_capacity(file.compressed_size() as usize);
-                                        file.read_to_end(&mut buf).map_err(|err| {
-                                            Error::UncompressError(err.to_string())
-                                        })?;
+                                        let size_hint = file.size();
+                                        let buf = read_capped(&mut file, size_hint, max_size)?;
                                         match Report::parse_xml(&buf) {
                                             Ok(feedback) => return Ok(feedback),
                                             Err(err) => {
@@ -834,9 +828,12 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
 
 #[cfg(test)]
 mod test {
+    use crate::report::{
+        Discovery, Disposition, Error, PolicyOverride, Report, SPFDomainScope,
+        test_util::{gzip, message_with_attachment, zip},
+    };
     use std::{fs, path::PathBuf};
-
-    use crate::report::{Discovery, Disposition, PolicyOverride, Report, SPFDomainScope};
+    const MAX_REPORT_SIZE: usize = 25 * 1024 * 1024;
 
     fn resource(name: &str) -> Vec<u8> {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -845,6 +842,14 @@ mod test {
         path.push(name);
         fs::read(path).unwrap()
     }
+
+    const REPORT: &str = concat!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><feedback><report_metadata>"#,
+        r#"<org_name>Example</org_name><email>dmarc@example.org</email>"#,
+        r#"<report_id>1</report_id><date_range><begin>1</begin><end>2</end></date_range>"#,
+        r#"</report_metadata><policy_published><domain>example.org</domain>"#,
+        r#"</policy_published></feedback>"#
+    );
 
     #[test]
     fn dmarc_report_rfc9990_sample() {
@@ -927,7 +932,8 @@ mod test {
             }
             println!("Parsing DMARC feedback {}", file_name.to_str().unwrap());
 
-            let feedback = Report::parse_rfc5322(&fs::read(&file_name).unwrap()).unwrap();
+            let feedback =
+                Report::parse_rfc5322(&fs::read(&file_name).unwrap(), MAX_REPORT_SIZE).unwrap();
 
             file_name.set_extension("json");
 
@@ -942,5 +948,68 @@ mod test {
             )
             .unwrap();*/
         }
+    }
+
+    #[test]
+    fn dmarc_report_zip_forged_size() {
+        let archive = zip("report.xml", REPORT.as_bytes(), None, Some(u32::MAX));
+        let message = message_with_attachment("application/zip", "report.zip", &archive);
+
+        assert_eq!(
+            Report::parse_rfc5322(&message, MAX_REPORT_SIZE),
+            Err(Error::ReportTooLarge)
+        );
+    }
+
+    #[test]
+    fn dmarc_report_zip_forged_compressed_size() {
+        let archive = zip("report.xml", REPORT.as_bytes(), Some(u32::MAX), None);
+        let message = message_with_attachment("application/zip", "report.zip", &archive);
+
+        assert!(Report::parse_rfc5322(&message, MAX_REPORT_SIZE).is_err());
+    }
+
+    #[test]
+    fn dmarc_report_zip_within_limit() {
+        let archive = zip("report.xml", REPORT.as_bytes(), None, None);
+        let message = message_with_attachment("application/zip", "report.zip", &archive);
+
+        assert_eq!(
+            Report::parse_rfc5322(&message, MAX_REPORT_SIZE),
+            Ok(Report::parse_xml(REPORT.as_bytes()).unwrap())
+        );
+        assert_eq!(
+            Report::parse_rfc5322(&message, REPORT.len() - 1),
+            Err(Error::ReportTooLarge)
+        );
+    }
+
+    #[test]
+    fn dmarc_report_gzip_bomb() {
+        let bomb = gzip(&vec![b' '; 1024 * 1024]);
+        let message = message_with_attachment("application/gzip", "report.xml.gz", &bomb);
+
+        assert_eq!(
+            Report::parse_rfc5322(&message, 64 * 1024),
+            Err(Error::ReportTooLarge)
+        );
+    }
+
+    #[test]
+    fn dmarc_report_gzip_within_limit() {
+        let message = message_with_attachment(
+            "application/gzip",
+            "report.xml.gz",
+            &gzip(REPORT.as_bytes()),
+        );
+
+        assert_eq!(
+            Report::parse_rfc5322(&message, MAX_REPORT_SIZE),
+            Ok(Report::parse_xml(REPORT.as_bytes()).unwrap())
+        );
+        assert_eq!(
+            Report::parse_rfc5322(&message, REPORT.len() - 1),
+            Err(Error::ReportTooLarge)
+        );
     }
 }

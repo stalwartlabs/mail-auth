@@ -22,6 +22,7 @@ use crate::{
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 const MAX_AGE: u64 = 14 * 86400;
+const MAX_CHAIN_LENGTH: usize = 50;
 
 impl MessageAuthenticator {
     /// Verifies the DKIM2 signature chain of an RFC5322 message.
@@ -71,6 +72,10 @@ impl MessageAuthenticator {
 
         if message.dkim2_signatures.is_empty() {
             return Dkim2Result::None.into();
+        } else if message.dkim2_signatures.len() > MAX_CHAIN_LENGTH
+            || message.dkim2_instances.len() > MAX_CHAIN_LENGTH
+        {
+            return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::ChainTooLong)).into();
         }
 
         let signatures = message.dkim2_signatures.as_slice();
@@ -187,21 +192,22 @@ impl MessageAuthenticator {
                     }
                 }
                 ChainBinding::Envelope { rcpt_to, .. } => {
-                    let custody_ok =
-                        if let ChainBinding::Envelope { mail_from, .. } = &current.chain {
-                            let (_, current_domain) = local_and_domain(mail_from);
-                            rcpt_to.iter().any(|rcpt| {
-                                let (_, rcpt_domain) = local_and_domain(rcpt);
-                                relaxed_domain_match(current_domain, rcpt_domain)
-                            })
-                        } else {
-                            false
-                        };
+                    let current_domain = match &current.chain {
+                        ChainBinding::Envelope { mail_from, .. } => local_and_domain(mail_from).1,
+                        ChainBinding::NextDomain(_) => current.d.as_str(),
+                    };
+                    let custody_ok = rcpt_to.iter().any(|rcpt| {
+                        let (_, rcpt_domain) = local_and_domain(rcpt);
+                        relaxed_domain_match(current_domain, rcpt_domain)
+                    });
                     if !custody_ok {
-                        return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::MailFromMismatch(
-                            current.i,
-                        )))
-                        .into();
+                        let error = match &current.chain {
+                            ChainBinding::Envelope { .. } => {
+                                Dkim2Error::MailFromMismatch(current.i)
+                            }
+                            ChainBinding::NextDomain(_) => Dkim2Error::CustodyBreak(current.i),
+                        };
+                        return Dkim2Result::PermError(Error::Dkim2(error)).into();
                     }
                 }
             }
@@ -650,7 +656,7 @@ pub(crate) mod test_reverse_path {
 
 #[cfg(test)]
 mod test {
-    use super::{Envelope, flag_violation};
+    use super::{Envelope, MAX_CHAIN_LENGTH, flag_violation};
     use crate::dkim2::{ChainBinding, Dkim2Signed};
     use crate::{
         AuthenticatedMessage, Dkim2Result, Error, MessageAuthenticator,
@@ -913,6 +919,139 @@ mod test {
     }
 
     #[tokio::test]
+    async fn sign_then_verify_imaginary_hop() {
+        use crate::{
+            common::crypto::Ed25519Key,
+            dkim2::{Dkim2Signer, Envelope, Hop},
+        };
+        use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
+
+        let load = |domain: &str| {
+            let pem = std::fs::read(resource(&[
+                "keys",
+                &format!("ed25519._domainkey.{domain}.pem"),
+            ]))
+            .unwrap();
+            let PrivateKeyDer::Pkcs8(der) = PrivateKeyDer::from_pem_slice(&pem).unwrap() else {
+                panic!("expected PKCS8 key");
+            };
+            Ed25519Key::from_pkcs8_maybe_unchecked_der(der.secret_pkcs8_der()).unwrap()
+        };
+        let signer = |domain: &'static str| {
+            Dkim2Signer::from_key(load(domain))
+                .domain(domain)
+                .selector("ed25519")
+        };
+
+        // test1 delivers to test2, which internally hands the message over to
+        // test3 without an SMTP transaction, which then delivers to example.com
+        let original = std::fs::read(resource(&["emails", "simple.eml"])).unwrap();
+        let sign1 = signer("test1.dkim2.com")
+            .sign(
+                &original,
+                Hop::real("sender@test1.dkim2.com", ["list@test2.dkim2.com"]),
+            )
+            .unwrap();
+        let message1 = prepend(&sign1, &original);
+
+        let sign2 = signer("test2.dkim2.com")
+            .sign(&message1, Hop::imaginary("test3.dkim2.com"))
+            .unwrap();
+        let message2 = prepend(&sign2, &message1);
+        assert!(matches!(sign2.signature.chain, ChainBinding::NextDomain(_)));
+
+        let sign3 = signer("test3.dkim2.com")
+            .sign(
+                &message2,
+                Hop::real("relay@test3.dkim2.com", ["recipient@example.com"]),
+            )
+            .unwrap();
+        let message3 = prepend(&sign3, &message2);
+
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = load_caches();
+        let message = AuthenticatedMessage::parse(&message3).unwrap();
+        let params = caches.parameters(&message);
+        let envelope = Envelope::new("relay@test3.dkim2.com", ["recipient@example.com"]);
+        let output = resolver
+            .verify_dkim2_(&message, envelope, params.cache_txt, NOW, true)
+            .await;
+        assert_eq!(
+            output.result(),
+            &Dkim2Result::Pass,
+            "{:?}",
+            output.failure_reason()
+        );
+        assert_eq!(output.chain().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn verify_rejects_imaginary_hop_outside_custody() {
+        use crate::{
+            common::crypto::Ed25519Key,
+            dkim2::{Dkim2Signer, Envelope, Hop},
+        };
+        use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
+
+        let load = |domain: &str| {
+            let pem = std::fs::read(resource(&[
+                "keys",
+                &format!("ed25519._domainkey.{domain}.pem"),
+            ]))
+            .unwrap();
+            let PrivateKeyDer::Pkcs8(der) = PrivateKeyDer::from_pem_slice(&pem).unwrap() else {
+                panic!("expected PKCS8 key");
+            };
+            Ed25519Key::from_pkcs8_maybe_unchecked_der(der.secret_pkcs8_der()).unwrap()
+        };
+        let signer = |domain: &'static str| {
+            Dkim2Signer::from_key(load(domain))
+                .domain(domain)
+                .selector("ed25519")
+        };
+
+        // test4 was never a recipient of the previous hop, so its nd= signature
+        // is not a continuation of the chain of custody
+        let original = std::fs::read(resource(&["emails", "simple.eml"])).unwrap();
+        let sign1 = signer("test1.dkim2.com")
+            .sign(
+                &original,
+                Hop::real("sender@test1.dkim2.com", ["list@test2.dkim2.com"]),
+            )
+            .unwrap();
+        let message1 = prepend(&sign1, &original);
+
+        let sign2 = signer("test4.dkim2.com")
+            .sign(&message1, Hop::imaginary("test3.dkim2.com"))
+            .unwrap();
+        let message2 = prepend(&sign2, &message1);
+
+        let sign3 = signer("test3.dkim2.com")
+            .sign(
+                &message2,
+                Hop::real("relay@test3.dkim2.com", ["recipient@example.com"]),
+            )
+            .unwrap();
+        let message3 = prepend(&sign3, &message2);
+
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = load_caches();
+        let message = AuthenticatedMessage::parse(&message3).unwrap();
+        let params = caches.parameters(&message);
+        let envelope = Envelope::new("relay@test3.dkim2.com", ["recipient@example.com"]);
+        let result = resolver
+            .verify_dkim2_(&message, envelope, params.cache_txt, NOW, true)
+            .await;
+
+        assert_eq!(
+            result.result(),
+            &Dkim2Result::PermError(Error::Dkim2(Dkim2Error::CustodyBreak(2))),
+            "{:?}",
+            result.failure_reason()
+        );
+    }
+
+    #[tokio::test]
     async fn sign_multi_algorithm_then_verify() {
         use crate::{
             common::crypto::{Algorithm, Ed25519Key, RsaKey, Sha256},
@@ -985,6 +1124,50 @@ mod test {
             matches!(result, Dkim2Result::PermError(_)),
             "got {result:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn verify_rejects_long_chains() {
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = load_caches();
+
+        for (count, expect_too_long) in [
+            (MAX_CHAIN_LENGTH, false),
+            (MAX_CHAIN_LENGTH + 1, true),
+            (MAX_CHAIN_LENGTH * 4, true),
+        ] {
+            let mut raw = Vec::new();
+            for i in 1..=count {
+                raw.extend_from_slice(
+                    format!(
+                        "DKIM2-Signature: i={i}; m={i}; t={NOW}; d=ex{i}.com; nd=ex{}.com; \
+                         s=sel:rsa-sha256:QQ==;\r\n",
+                        i + 1
+                    )
+                    .as_bytes(),
+                );
+            }
+            raw.extend_from_slice(b"From: sender@test1.dkim2.com\r\n\r\nHello\r\n");
+
+            let message = AuthenticatedMessage::parse(&raw).unwrap();
+            assert_eq!(message.dkim2_signatures.len(), count);
+
+            let params = caches.parameters(&message);
+            let envelope = Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]);
+            let result = resolver
+                .verify_dkim2_(&message, envelope, params.cache_txt, NOW, true)
+                .await;
+
+            assert_eq!(
+                matches!(
+                    result.result(),
+                    Dkim2Result::PermError(Error::Dkim2(Dkim2Error::ChainTooLong))
+                ),
+                expect_too_long,
+                "count={count} got {:?}",
+                result.result()
+            );
+        }
     }
 
     #[tokio::test]
