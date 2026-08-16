@@ -9,9 +9,10 @@ use crate::DnsError;
 use crate::{
     AuthenticatedMessage, Dkim2Result, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
     MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult, Txt,
-    common::cache::NoCache, dkim2::Dkim2Output,
+    common::cache::NoCache, common::to_a_label, dkim2::Dkim2Output,
 };
 use std::{
+    borrow::Cow,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
 };
@@ -42,13 +43,15 @@ impl MessageAuthenticator {
         let message = params.params.message;
         let dkim_output = params.params.dkim_output;
         let dkim2_output = params.params.dkim2_output;
-        let rfc5321_mail_from_domain = params.params.rfc5321_mail_from_domain;
+        let rfc5321_mail_from_domain = to_a_label(params.params.rfc5321_mail_from_domain);
+        let rfc5321_mail_from_domain = rfc5321_mail_from_domain.as_ref();
         let spf_output = params.params.spf_output;
         let cache_txt = params.cache_txt;
         let cache_ipv4 = params.cache_ipv4;
-        let mut rfc5322_from_domain = "";
+        let mut rfc5322_from_domain = Cow::Borrowed("");
         for from in &message.from {
             if let Some((_, domain)) = from.rsplit_once('@') {
+                let domain = to_a_label(domain);
                 if rfc5322_from_domain.is_empty() {
                     rfc5322_from_domain = domain;
                 } else if rfc5322_from_domain != domain {
@@ -61,6 +64,7 @@ impl MessageAuthenticator {
         if rfc5322_from_domain.is_empty() {
             return DmarcOutput::default();
         }
+        let rfc5322_from_domain = rfc5322_from_domain.as_ref();
 
         // Perform a DNS Tree Walk to discover the DMARC Policy Record for the
         // Author Domain (RFC 9989 Section 4.10.1)
@@ -142,6 +146,24 @@ impl MessageAuthenticator {
             record: None,
         };
 
+        let dkim_domains = dkim_output
+            .iter()
+            .filter(|o| o.result == DkimResult::Pass)
+            .filter_map(|o| o.signature.as_ref())
+            .map(|s| s.d.as_str())
+            .chain(
+                dkim2_output
+                    .filter(|o| o.result == Dkim2Result::Pass)
+                    .and_then(|o| {
+                        o.chain
+                            .iter()
+                            .find(|link| link.signature.i == 1 && link.result == Dkim2Result::Pass)
+                            .map(|link| link.signature.d.as_str())
+                    }),
+            )
+            .map(to_a_label)
+            .collect::<Vec<_>>();
+
         // Cache Organizational Domains resolved during alignment
         let mut org_memo: Vec<(&str, &str)> = vec![(rfc5322_from_domain, author_org)];
 
@@ -165,25 +187,9 @@ impl MessageAuthenticator {
         }
 
         // Check DKIM alignment (Section 4.10.2)
-        let mut has_dkim = false;
+        let has_dkim = !dkim_domains.is_empty();
         let mut aligned = false;
-        for d in dkim_output
-            .iter()
-            .filter(|o| o.result == DkimResult::Pass)
-            .filter_map(|o| o.signature.as_ref())
-            .map(|s| s.d.as_str())
-            .chain(
-                dkim2_output
-                    .filter(|o| o.result == Dkim2Result::Pass)
-                    .and_then(|o| {
-                        o.chain
-                            .iter()
-                            .find(|link| link.signature.i == 1 && link.result == Dkim2Result::Pass)
-                            .map(|link| link.signature.d.as_str())
-                    }),
-            )
-        {
-            has_dkim = true;
+        for d in dkim_domains.iter().map(Cow::as_ref) {
             if d == rfc5322_from_domain
                 || (adkim == Alignment::Relaxed
                     && self
@@ -214,13 +220,18 @@ impl MessageAuthenticator {
         addresses: &'x [T],
         txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
     ) -> Option<Vec<&'x T>> {
+        let domain = to_a_label(domain);
+        let domain = domain.as_ref();
         let mut result = Vec::with_capacity(addresses.len());
         for address in addresses {
             let address_ref = address.as_ref();
-            let address_domain = address_ref
-                .rsplit_once('@')
-                .map(|(_, d)| d)
-                .unwrap_or_default();
+            let address_domain = to_a_label(
+                address_ref
+                    .rsplit_once('@')
+                    .map(|(_, d)| d)
+                    .unwrap_or_default(),
+            );
+            let address_domain = address_domain.as_ref();
             // No external authorization is required when the destination is the
             // policy domain itself or a subdomain of it.
             let is_internal = address_domain == domain
@@ -469,6 +480,32 @@ mod test {
                 SpfResult::Pass,
                 DmarcResult::Fail(Error::NotAligned),
                 DmarcResult::Fail(Error::NotAligned),
+                Policy::Reject,
+            ),
+            // Strict - Pass on a U-label From against A-label identifiers
+            (
+                "_dmarc.xn--eebajf.xn--9dbq2a.",
+                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@xn--eebajf.xn--9dbq2a",
+                "From: hello@\u{5de}\u{5d9}\u{5d9}\u{5dc}.\u{5e7}\u{5d5}\u{5dd}\r\n\r\n",
+                "xn--eebajf.xn--9dbq2a",
+                "xn--eebajf.xn--9dbq2a",
+                DkimResult::Pass,
+                SpfResult::Pass,
+                DmarcResult::Pass,
+                DmarcResult::Pass,
+                Policy::Reject,
+            ),
+            // Strict - Pass on an A-label From against U-label identifiers
+            (
+                "_dmarc.xn--eebajf.xn--9dbq2a.",
+                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@xn--eebajf.xn--9dbq2a",
+                "From: hello@xn--eebajf.xn--9dbq2a\r\n\r\n",
+                "\u{5de}\u{5d9}\u{5d9}\u{5dc}.\u{5e7}\u{5d5}\u{5dd}",
+                "\u{5de}\u{5d9}\u{5d9}\u{5dc}.\u{5e7}\u{5d5}\u{5dd}",
+                DkimResult::Pass,
+                SpfResult::Pass,
+                DmarcResult::Pass,
+                DmarcResult::Pass,
                 Policy::Reject,
             ),
             // Failed mechanisms produce no aligned result
@@ -811,5 +848,41 @@ mod test {
                 &URI::new("dmarc@external.org", 0),
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn dmarc_verify_report_address_idn() {
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = DummyCaches::new();
+        let uris = vec![
+            URI::new(
+                "dmarc@\u{5de}\u{5d9}\u{5d9}\u{5dc}.\u{5e7}\u{5d5}\u{5dd}",
+                0,
+            ),
+            URI::new("dmarc@sub.xn--eebajf.xn--9dbq2a", 0),
+        ];
+
+        // A U-label reporting address is internal to its A-label policy domain
+        assert_eq!(
+            resolver
+                .verify_dmarc_report_address("xn--eebajf.xn--9dbq2a", &uris, Some(&caches.txt))
+                .await
+                .unwrap(),
+            uris.iter().collect::<Vec<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn dmarc_alignment_is_case_insensitive() {
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = DummyCaches::new();
+        caches.txt_add(
+            "_dmarc.example.org.",
+            Dmarc::parse(b"v=DMARC1; p=reject; aspf=s; rua=mailto:d@example.org").unwrap(),
+            Instant::now() + Duration::new(3200, 0),
+        );
+
+        let result = verify_aligned(&resolver, &caches, "hello@example.org", "EXAMPLE.ORG").await;
+        assert_eq!(result.spf_result(), &DmarcResult::Pass);
     }
 }

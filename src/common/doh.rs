@@ -272,7 +272,7 @@ impl MessageAuthenticator {
                 (DNS_TYPE_AAAA, RData::AAAA(addr)) => DohRecord::Aaaa(addr.0),
                 (DNS_TYPE_MX, RData::MX(mx)) => DohRecord::Mx(
                     mx.preference,
-                    mx.exchange.to_lowercase().to_string().into_boxed_str(),
+                    mx.exchange.to_lowercase().to_ascii().into_boxed_str(),
                 ),
                 (DNS_TYPE_TXT, RData::TXT(txt)) => {
                     let mut data = Vec::new();
@@ -282,7 +282,7 @@ impl MessageAuthenticator {
                     DohRecord::Txt(data)
                 }
                 (DNS_TYPE_PTR, RData::PTR(ptr)) if !ptr.is_empty() => {
-                    DohRecord::Ptr(ptr.to_lowercase().to_string().into_boxed_str())
+                    DohRecord::Ptr(ptr.to_lowercase().to_ascii().into_boxed_str())
                 }
                 _ => continue,
             };

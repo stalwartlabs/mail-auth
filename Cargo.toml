@@ -1,7 +1,7 @@
 [package]
 name = "mail-auth"
 description = "DKIM, ARC, SPF and DMARC library for Rust"
-version = "0.12.0"
+version = "0.12.1"
 edition = "2024"
 authors = [ "Stalwart Labs LLC <hello@stalw.art>"]
 license = "Apache-2.0 OR MIT"
@@ -33,6 +33,7 @@ flate2 = "1.1"
 mail-parser = { version = "0.11.5", features = ["full_encoding"] }
 quick-xml = { version = "0.41", optional = true }
 hashify =  { version = "0.2" }
+idna = "1.1"
 aws-lc-rs = { version = "1", optional = true }
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.8", optional = true }
@@ -63,7 +64,7 @@ getrandom_v04 = { package = "getrandom", version = "0.4", features = ["wasm_js"]
 
 [dev-dependencies]
 tokio = { version = "1.51", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
-testcontainers = "0.27"
+testcontainers = "0.28"
 tempfile = "3"
 
 [[example]]

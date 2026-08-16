@@ -1,3 +1,9 @@
+mail-auth 0.12.1
+================================
+- MX and PTR records are now returned as A-labels.
+- DMARC: Identifiers are converted to their A-label form before alignment, and alignment is no longer case sensitive.
+- DMARC: External reporting addresses are compared to the policy domain in their A-label form.
+
 mail-auth 0.12.0
 ================================
 - `Report::parse_rfc5322` and `TlsReport::parse_rfc5322` now take a `max_size` argument, which bounds the size of a decompressed report.

@@ -205,7 +205,7 @@ impl MessageAuthenticator {
                     };
                     Some((
                         mx.preference,
-                        mx.exchange.to_lowercase().to_string().into_boxed_str(),
+                        mx.exchange.to_lowercase().to_ascii().into_boxed_str(),
                     ))
                 })
                 .collect();
@@ -431,7 +431,7 @@ impl MessageAuthenticator {
                         return None;
                     };
                     if !ptr.is_empty() {
-                        Some(ptr.to_lowercase().to_string().into_boxed_str())
+                        Some(ptr.to_lowercase().to_ascii().into_boxed_str())
                     } else {
                         None
                     }
