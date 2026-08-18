@@ -6,7 +6,7 @@
 
 use super::{ChainBinding, MessageInstance, Signature, SignatureValue};
 use crate::common::headers::{HeaderFolder, HeaderWriter, Writer};
-use mail_builder::encoders::base64::base64_encode_mime;
+use mail_builder::encoders::Base64Encoder;
 use std::{
     fmt::{Display, Formatter},
     io::Write,
@@ -28,7 +28,8 @@ impl<'x, W: Writer> Write for Base64Writer<'x, W> {
 }
 
 fn write_base64(writer: &mut impl Writer, bytes: &[u8]) {
-    let _ = base64_encode_mime(bytes, Base64Writer { inner: writer }, true);
+    let mut base64_writer = Base64Writer { inner: writer };
+    let _ = Base64Encoder::new().encode_to_writer(bytes, &mut base64_writer);
 }
 
 impl SignatureValue {

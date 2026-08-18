@@ -13,7 +13,7 @@ use crate::{
     dkim2::Dkim2Output,
 };
 use crate::{DnsError, common::crypto::CryptoError};
-use mail_builder::encoders::base64::base64_encode;
+use mail_builder::encoders::Base64Encoder;
 use std::{
     borrow::Cow,
     fmt::{Display, Write},
@@ -60,8 +60,12 @@ impl<'x> AuthenticationResults<'x> {
             if signature.b.len() >= 6 {
                 self.auth_results.push_str(" header.b=");
                 self.auth_results.push_str(
-                    &String::from_utf8(base64_encode(&signature.b[..6]).unwrap_or_default())
-                        .unwrap_or_default(),
+                    &String::from_utf8(
+                        Base64Encoder::new()
+                            .encode(&signature.b[..6])
+                            .unwrap_or_default(),
+                    )
+                    .unwrap_or_default(),
                 );
             }
         }

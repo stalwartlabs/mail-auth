@@ -13,7 +13,7 @@ use crate::{
         headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream, Writable, Writer},
     },
 };
-use mail_builder::encoders::base64::base64_encode;
+use mail_builder::encoders::Base64Encoder;
 
 impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a message.
@@ -59,7 +59,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         // Create Signature
         let mut signature = self.template.clone();
         let body_hash = self.key.hash(canonical_body);
-        signature.bh = base64_encode(body_hash.as_ref())?;
+        signature.bh = Base64Encoder::new().encode(body_hash.as_ref())?;
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
@@ -78,7 +78,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         })?;
 
         // Encode
-        signature.b = base64_encode(&b)?;
+        signature.b = Base64Encoder::new().encode(&b)?;
 
         Ok(signature)
     }

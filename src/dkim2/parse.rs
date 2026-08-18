@@ -304,7 +304,9 @@ mod test {
     #[test]
     fn message_instance_parse_huge_recipe_does_not_panic_on_parse() {
         let json = br#"{"b":[{"c":[1,4294967295]}]}"#;
-        let b64 = mail_builder::encoders::base64::base64_encode(json).unwrap();
+        let b64 = mail_builder::encoders::Base64Encoder::new()
+            .encode(json)
+            .unwrap();
         let mut hdr = b"m=2; h=sha256:QQ==:Qg==; r=".to_vec();
         hdr.extend_from_slice(&b64);
         let mi = MessageInstance::parse(&hdr).unwrap();

@@ -6,7 +6,7 @@
 
 use crate::common::crypto::CryptoError;
 use crate::{Error, common::crypto::Ed25519Key};
-use mail_builder::encoders::base64::base64_encode;
+use mail_builder::encoders::Base64Encoder;
 use rsa::{
     RsaPrivateKey, RsaPublicKey,
     pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey},
@@ -64,7 +64,12 @@ impl DkimKeyPair {
     }
 
     pub fn encoded_public_key(&self) -> String {
-        String::from_utf8(base64_encode(&self.public_key).unwrap_or_default()).unwrap_or_default()
+        String::from_utf8(
+            Base64Encoder::new()
+                .encode(&self.public_key)
+                .unwrap_or_default(),
+        )
+        .unwrap_or_default()
     }
 }
 

@@ -345,8 +345,6 @@ impl Writable for CanonicalHeaders<'_> {
 
 #[cfg(test)]
 mod test {
-    use mail_builder::encoders::base64::base64_encode;
-
     use super::{BodyHasher, CanonicalBody, CanonicalHeaders};
     use crate::{
         common::{
@@ -355,6 +353,7 @@ mod test {
         },
         dkim::Canonicalization,
     };
+    use mail_builder::encoders::Base64Encoder;
 
     #[test]
     #[allow(clippy::needless_collect)]
@@ -460,7 +459,12 @@ mod test {
                 .write(&mut hasher);
 
                 assert_eq!(
-                    String::from_utf8(base64_encode(hasher.complete().as_ref()).unwrap()).unwrap(),
+                    String::from_utf8(
+                        Base64Encoder::new()
+                            .encode(hasher.complete().as_ref())
+                            .unwrap()
+                    )
+                    .unwrap(),
                     hash,
                 );
             }

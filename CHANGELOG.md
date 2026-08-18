@@ -1,3 +1,7 @@
+mail-auth 0.12.2
+================================
+- Bump `mail-builder` dependency to 0.5.
+
 mail-auth 0.12.1
 ================================
 - MX and PTR records are now returned as A-labels.

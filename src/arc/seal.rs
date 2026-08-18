@@ -14,7 +14,7 @@ use crate::{
     },
     dkim::{Canonicalization, Done, canonicalize::CanonicalHeaders},
 };
-use mail_builder::encoders::base64::base64_encode;
+use mail_builder::encoders::Base64Encoder;
 
 impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
     pub fn seal<'x>(
@@ -66,7 +66,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             .find(|(c, h, l, _)| c == &set.signature.cb && h == &ha && l == &set.signature.l)
         {
             // Use cached hash
-            set.signature.bh = base64_encode(bh)?;
+            set.signature.bh = Base64Encoder::new().encode(bh)?;
         } else {
             let hash = self.key.hash(
                 set.signature.cb.canonical_body(
@@ -77,7 +77,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
                     u64::MAX,
                 ),
             );
-            set.signature.bh = base64_encode(hash.as_ref())?;
+            set.signature.bh = Base64Encoder::new().encode(hash.as_ref())?;
         }
 
         // Create Signature
@@ -99,14 +99,14 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             set: &set,
             headers: canonical_headers,
         })?;
-        set.signature.b = base64_encode(&b)?;
+        set.signature.b = Base64Encoder::new().encode(&b)?;
 
         // Seal
         let b = self.key.sign(SignableChain {
             arc_output,
             set: &set,
         })?;
-        set.seal.b = base64_encode(&b)?;
+        set.seal.b = Base64Encoder::new().encode(&b)?;
 
         Ok(set)
     }

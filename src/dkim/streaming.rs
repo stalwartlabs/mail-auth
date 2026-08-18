@@ -6,12 +6,8 @@
 
 //! Streaming DKIM signing API for reduced memory usage with large emails.
 
-use crate::SystemTime;
-
-use mail_builder::encoders::base64::base64_encode;
-
 use super::{DkimSigner, Done, Signature, canonicalize::BodyHasher, sign::SignableMessage};
-
+use crate::SystemTime;
 use crate::{
     Error,
     common::{
@@ -19,6 +15,7 @@ use crate::{
         headers::HeaderIterator,
     },
 };
+use mail_builder::encoders::Base64Encoder;
 
 /// A streaming DKIM signer that allows signing messages in chunks.
 ///
@@ -244,7 +241,7 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
 
         // Create Signature
         let mut signature = self.template.clone();
-        signature.bh = base64_encode(body_hash.as_ref())?;
+        signature.bh = Base64Encoder::new().encode(body_hash.as_ref())?;
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
@@ -263,7 +260,7 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
         })?;
 
         // Encode
-        signature.b = base64_encode(&b)?;
+        signature.b = Base64Encoder::new().encode(&b)?;
 
         Ok(signature)
     }
