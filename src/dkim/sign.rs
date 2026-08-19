@@ -175,6 +175,62 @@ pub mod test {
         );
     }
 
+    #[test]
+    fn sign_uses_body_canonicalization_for_bh() {
+        // A body whose relaxed and simple canonicalizations differ.
+        let message = concat!(
+            "From: a@example.com\r\n",
+            "To: b@example.com\r\n",
+            "Subject: t\r\n",
+            "Date: Mon, 01 Jan 2024 00:00:00 +0000\r\n",
+            "Message-ID: <t@example.com>\r\n",
+            "\r\n",
+            "Line   with   spaces\r\n",
+            "Trailing tabs\t\t\r\n",
+            "\r\n",
+            "\r\n",
+        );
+
+        let sign = |ch, cb| {
+            let pk = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+                PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+            ))
+            .unwrap();
+            DkimSigner::from_key(pk)
+                .domain("example.com")
+                .selector("test")
+                .headers(["From", "To", "Subject", "Date", "Message-ID"])
+                .header_canonicalization(ch)
+                .body_canonicalization(cb)
+                .sign(message.as_bytes())
+                .unwrap()
+                .bh
+        };
+
+        let bh_rr = sign(Canonicalization::Relaxed, Canonicalization::Relaxed);
+        let bh_rs = sign(Canonicalization::Relaxed, Canonicalization::Simple);
+        let bh_sr = sign(Canonicalization::Simple, Canonicalization::Relaxed);
+        let bh_ss = sign(Canonicalization::Simple, Canonicalization::Simple);
+
+        // bh must track BODY canonicalization, not header canonicalization.
+        assert_eq!(
+            bh_rr, bh_sr,
+            "bh must be equal when body canon is equal (both relaxed)"
+        );
+        assert_eq!(
+            bh_rs, bh_ss,
+            "bh must be equal when body canon is equal (both simple)"
+        );
+        assert_ne!(
+            bh_rr, bh_rs,
+            "bh must differ when body canon differs (relaxed vs simple)"
+        );
+        assert_ne!(
+            bh_sr, bh_ss,
+            "bh must differ when body canon differs (relaxed vs simple)"
+        );
+    }
+
     #[tokio::test]
     async fn dkim_sign_verify() {
         use crate::common::cache::test::DummyCaches;
