@@ -38,11 +38,15 @@ impl MessageAuthenticator {
         IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
         PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
     {
-        self.verify_dkim_(
-            params.into(),
+        let params = params.into();
+        let signature_time_check = params.params.check_signature_from_epoch.unwrap_or(
             SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs()),
+        );
+        self.verify_dkim_(
+            params,
+            signature_time_check
         )
         .await
     }

@@ -170,6 +170,10 @@ pub struct AuthenticatedMessage<'x> {
     #[cfg(feature = "arc")]
     pub has_arc_errors: bool,
     pub has_dkim2_errors: bool,
+    /// Seconds since Epoch
+    /// If this value is `Some`, it will be used for signature verification 
+    /// instead of current system time
+    pub check_signature_from_epoch: Option<u64>
 }
 
 impl<'x> AsRef<AuthenticatedMessage<'x>> for AuthenticatedMessage<'x> {
