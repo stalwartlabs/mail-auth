@@ -28,6 +28,19 @@ impl<'x> AuthenticationResults<'x> {
         }
     }
 
+    pub fn from_header_value(value: &'x str) -> Self {
+        match value.split_once(';') {
+            Some((hostname, results)) => AuthenticationResults {
+                hostname: hostname.trim(),
+                auth_results: format!(";{results}"),
+            },
+            None => AuthenticationResults {
+                hostname: value.trim(),
+                auth_results: String::new(),
+            },
+        }
+    }
+
     pub fn with_dkim_results(mut self, dkim: &[DkimOutput], header_from: &str) -> Self {
         for dkim in dkim {
             self.set_dkim_result(dkim, header_from);
@@ -500,6 +513,20 @@ mod test {
         IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, common::crypto::CryptoError,
         dkim::Signature, dmarc::Policy,
     };
+
+    #[test]
+    fn from_header_value_round_trips() {
+        for value in [
+            "mx.example.org",
+            "mx.example.org;\r\n\tspf=pass smtp.mailfrom=alice@example.org",
+            "mx.example.org;\r\n\tspf=fail smtp.mailfrom=a@b.com;\r\n\tdkim=pass header.d=b.com;\r\n\tarc=none",
+        ] {
+            assert_eq!(
+                AuthenticationResults::from_header_value(value).to_string(),
+                value
+            );
+        }
+    }
 
     #[test]
     fn authentication_results() {
