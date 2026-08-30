@@ -104,17 +104,13 @@ impl<'x> AuthenticationResults<'x> {
     pub fn with_spf_ehlo_result(
         mut self,
         spf: &SpfOutput,
-        ip_addr: IpAddr,
+        _ip_addr: IpAddr,
         ehlo_domain: &str,
     ) -> Self {
         let ehlo_domain = sanitize_pvalue(ehlo_domain);
         self.auth_results.push_str(";\r\n\tspf=");
-        spf.result.as_spf_result(
-            &mut self.auth_results,
-            self.hostname,
-            &format!("postmaster@{ehlo_domain}"),
-            ip_addr,
-        );
+        self.auth_results
+            .push_str(&spf.result.to_string().to_lowercase());
         write!(self.auth_results, " smtp.helo={ehlo_domain}").ok();
         self
     }
@@ -122,23 +118,13 @@ impl<'x> AuthenticationResults<'x> {
     pub fn with_spf_mailfrom_result(
         mut self,
         spf: &SpfOutput,
-        ip_addr: IpAddr,
+        _ip_addr: IpAddr,
         from: &str,
-        ehlo_domain: &str,
+        _ehlo_domain: &str,
     ) -> Self {
-        let ehlo_domain = sanitize_pvalue(ehlo_domain);
-        let mail_from = if !from.is_empty() {
-            sanitize_pvalue(from)
-        } else {
-            Cow::Owned(format!("postmaster@{ehlo_domain}"))
-        };
         self.auth_results.push_str(";\r\n\tspf=");
-        spf.result.as_spf_result(
-            &mut self.auth_results,
-            self.hostname,
-            mail_from.as_ref(),
-            ip_addr,
-        );
+        self.auth_results
+            .push_str(&spf.result.to_string().to_lowercase());
         self.auth_results.push_str(" smtp.mailfrom=");
         if !from.is_empty() {
             push_quoted_pvalue(&mut self.auth_results, from);
@@ -574,10 +560,7 @@ mod test {
             mail_from,
         ) in [
             (
-                concat!(
-                    "spf=pass (localhost: domain of jdoe@example.org designates 192.168.1.1 ",
-                    "as permitted sender) smtp.mailfrom=jdoe@example.org"
-                ),
+                "spf=pass smtp.mailfrom=jdoe@example.org",
                 concat!(
                     "pass (localhost: domain of jdoe@example.org designates 192.168.1.1 as ",
                     "permitted sender)\r\n\treceiver=localhost; client-ip=192.168.1.1; ",
@@ -590,10 +573,7 @@ mod test {
                 "jdoe@example.org",
             ),
             (
-                concat!(
-                    "spf=fail (mx.domain.org: domain of sender@otherdomain.org does not ",
-                    "designate a:b:c::f as permitted sender) smtp.mailfrom=sender@otherdomain.org"
-                ),
+                "spf=fail smtp.mailfrom=sender@otherdomain.org",
                 concat!(
                     "fail (mx.domain.org: domain of sender@otherdomain.org does not designate ",
                     "a:b:c::f as permitted sender)\r\n\treceiver=mx.domain.org; ",
@@ -607,10 +587,7 @@ mod test {
                 "sender@otherdomain.org",
             ),
             (
-                concat!(
-                    "spf=neutral (mx.domain.org: domain of postmaster@example.org reports neutral ",
-                    "for a:b:c::f) smtp.mailfrom=<>"
-                ),
+                "spf=neutral smtp.mailfrom=<>",
                 concat!(
                     "neutral (mx.domain.org: domain of postmaster@example.org reports neutral for ",
                     "a:b:c::f)\r\n\treceiver=mx.domain.org; client-ip=a:b:c::f; ",
