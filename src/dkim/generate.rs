@@ -21,7 +21,7 @@ impl DkimKeyPair {
     /// Generates a new RSA key pair encoded in PKCS#1 DER format with the given number of bits
     pub fn generate_rsa(bits: usize) -> crate::Result<Self> {
         //TODO: Use `ring` once it supports RSA key generation
-        let priv_key = RsaPrivateKey::new(&mut rand::thread_rng(), bits)
+        let priv_key = RsaPrivateKey::new(&mut rsa::rand_core::OsRng, bits)
             .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
         let pub_key = RsaPublicKey::from(&priv_key);
 

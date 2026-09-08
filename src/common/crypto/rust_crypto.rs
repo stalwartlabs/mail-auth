@@ -108,10 +108,10 @@ impl Ed25519Key {
     /// Generates a new Ed25519 key pair encoded in PKCS#8 DER format.
     pub fn generate_pkcs8() -> Result<Vec<u8>> {
         use ed25519_dalek::pkcs8::EncodePrivateKey;
-        use rand::RngCore;
+        use rand::Rng;
 
         let mut seed = [0u8; ed25519_dalek::SECRET_KEY_LENGTH];
-        rand::rngs::OsRng.fill_bytes(&mut seed);
+        rand::rng().fill_bytes(&mut seed);
 
         Ok(ed25519_dalek::SigningKey::from_bytes(&seed)
             .to_pkcs8_der()

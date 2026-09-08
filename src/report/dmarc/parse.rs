@@ -142,7 +142,7 @@ impl Report {
         while let Some(tag) = reader.next_tag(&mut buf)? {
             let name = tag.name();
             if found_feedback {
-                hashify::fnc_map!(name.as_ref(),
+                hashify::fnc_map!(name.as_ref().as_bytes(),
                     b"version" => {
                         version = reader.next_value(&mut buf)?.unwrap_or(0.0);
                     },
@@ -160,12 +160,12 @@ impl Report {
                     },
                     _ => ()
                 );
-            } else if name.as_ref() == b"feedback" {
+            } else if name.as_ref() == "feedback" {
                 found_feedback = true;
             } else if !name.as_ref().is_empty() {
                 return Err(format!(
                     "Unexpected tag {} at position {}.",
-                    String::from_utf8_lossy(name.as_ref()),
+                    name.as_ref(),
                     reader.buffer_position()
                 ));
             }
@@ -190,7 +190,7 @@ impl ReportMetadata {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"org_name" => {
                     rm.org_name = reader.next_value::<String>(buf)?.unwrap_or_default();
                 },
@@ -234,7 +234,7 @@ impl DateRange {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"begin" => {
                     dr.begin = reader.next_value(buf)?.unwrap_or_default();
                 },
@@ -261,7 +261,7 @@ impl PolicyPublished {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"domain" => {
                     p.domain = reader.next_value::<String>(buf)?.unwrap_or_default();
                 },
@@ -311,21 +311,18 @@ impl Extension {
         buf: &mut Vec<u8>,
         extensions: &mut Vec<Extension>,
     ) -> Result<(), String> {
-        let decoder = reader.decoder();
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"extension" => {
                     let mut e = Extension::default();
                     if let Ok(Some(attr)) = tag.try_get_attribute("name")
-                        && let Ok(attr) =
-                            attr.decoded_and_normalized_value(XmlVersion::Implicit1_0, decoder)
+                        && let Ok(attr) = attr.normalized_value(XmlVersion::Implicit1_0)
                     {
                         e.name = attr.to_string();
                     }
                     if let Ok(Some(attr)) = tag.try_get_attribute("definition")
-                        && let Ok(attr) =
-                            attr.decoded_and_normalized_value(XmlVersion::Implicit1_0, decoder)
+                        && let Ok(attr) = attr.normalized_value(XmlVersion::Implicit1_0)
                     {
                         e.definition = attr.to_string();
                     }
@@ -352,7 +349,7 @@ impl Record {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"row" => {
                     r.row = Row::parse(reader, buf)?;
                 },
@@ -385,7 +382,7 @@ impl Row {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"source_ip" => {
                     if let Some(ip) = reader.next_value::<IpAddr>(buf)? {
                         r.source_ip = ip.into();
@@ -417,7 +414,7 @@ impl PolicyEvaluated {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"disposition" => {
                     pe.disposition = reader.next_value(buf)?.unwrap_or_default();
                 },
@@ -450,7 +447,7 @@ impl PolicyOverrideReason {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"type" => {
                     por.type_ = reader.next_value(buf)?.unwrap_or_default();
                 },
@@ -477,7 +474,7 @@ impl Identifier {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"envelope_to" => {
                     i.envelope_to = reader.next_value(buf)?;
                 },
@@ -507,7 +504,7 @@ impl AuthResult {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"dkim" => {
                     ar.dkim.push(DKIMAuthResult::parse(reader, buf)?);
                 },
@@ -534,7 +531,7 @@ impl DKIMAuthResult {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"domain" => {
                     dar.domain = reader.next_value(buf)?.unwrap_or_default();
                 },
@@ -567,7 +564,7 @@ impl SPFAuthResult {
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
-            hashify::fnc_map!(name.as_ref(),
+            hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"domain" => {
                     sar.domain = reader.next_value(buf)?.unwrap_or_default();
                 },
@@ -740,13 +737,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
         loop {
             match self.read_event_into(buf) {
                 Ok(Event::Text(e)) => {
-                    let v = e.xml_content(XmlVersion::Implicit1_0).map_err(|e| {
-                        format!(
-                            "Failed to decode text value at position {}: {}",
-                            self.buffer_position(),
-                            e
-                        )
-                    })?;
+                    let v = e.xml_content(XmlVersion::Implicit1_0);
                     if let Some(value) = &mut value {
                         value.push_str(&v);
                     } else {
@@ -754,7 +745,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
                     }
                 }
                 Ok(Event::GeneralRef(e)) => {
-                    let v = hashify::tiny_map!(&*e,
+                    let v = hashify::tiny_map!(e.as_bytes(),
                         b"lt" => "<",
                         b"gt" => ">",
                         b"amp" => "&",
@@ -768,7 +759,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
                             .flatten()
                             .map(|v| Cow::Owned(v.to_string()))
                     })
-                    .unwrap_or_else(|| e.xml_content(XmlVersion::Implicit1_0).unwrap_or_default());
+                    .unwrap_or_else(|| e.xml_content(XmlVersion::Implicit1_0));
 
                     if let Some(value) = &mut value {
                         value.push_str(&v);
@@ -782,7 +773,7 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
                 Ok(Event::Start(e)) => {
                     return Err(format!(
                         "Expected value, found unexpected tag {} at position {}.",
-                        String::from_utf8_lossy(e.name().as_ref()),
+                        e.name().as_ref(),
                         self.buffer_position()
                     ));
                 }
