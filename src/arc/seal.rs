@@ -12,9 +12,11 @@ use crate::{
         crypto::{HashAlgorithm, Sha256, SigningKey},
         headers::{Writable, Writer},
     },
-    dkim::{Canonicalization, Done, canonicalize::CanonicalHeaders},
+    dkim::{
+        Canonicalization, Done,
+        canonicalize::{CanonicalHeaders, FoundHeaders},
+    },
 };
-use mail_builder::encoders::Base64Encoder;
 
 impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
     pub fn seal<'x>(
@@ -60,25 +62,26 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             set.signature.l = message.raw_message.len() as u64 - message.body_offset as u64;
         }
         let ha = HashAlgorithm::from(set.signature.a);
-        if let Some((_, _, _, bh)) = message
+        set.signature.bh = match message
             .body_hashes
             .iter()
             .find(|(c, h, l, _)| c == &set.signature.cb && h == &ha && l == &set.signature.l)
         {
-            // Use cached hash
-            set.signature.bh = Base64Encoder::new().encode(bh)?;
-        } else {
-            let hash = self.key.hash(
-                set.signature.cb.canonical_body(
-                    message
-                        .raw_message
-                        .get(message.body_offset as usize..)
-                        .unwrap_or_default(),
-                    u64::MAX,
-                ),
-            );
-            set.signature.bh = Base64Encoder::new().encode(hash.as_ref())?;
-        }
+            Some((_, _, _, bh)) => bh.clone(),
+            None => self
+                .key
+                .hash(
+                    set.signature.cb.canonical_body(
+                        message
+                            .raw_message
+                            .get(message.body_offset as usize..)
+                            .unwrap_or_default(),
+                        u64::MAX,
+                    ),
+                )
+                .as_ref()
+                .to_vec(),
+        };
 
         // Create Signature
         let now = SystemTime::now()
@@ -95,18 +98,16 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
         set.signature.h = signed_headers;
 
         // Sign
-        let b = self.key.sign(SignableSet {
+        set.signature.b = self.key.sign(SignableSet {
             set: &set,
             headers: canonical_headers,
         })?;
-        set.signature.b = Base64Encoder::new().encode(&b)?;
 
         // Seal
-        let b = self.key.sign(SignableChain {
+        set.seal.b = self.key.sign(SignableChain {
             arc_output,
             set: &set,
         })?;
-        set.seal.b = Base64Encoder::new().encode(&b)?;
 
         Ok(set)
     }
@@ -157,7 +158,7 @@ impl Signature {
         message: &'x AuthenticatedMessage<'x>,
     ) -> crate::Result<(CanonicalHeaders<'x>, Vec<String>)> {
         let mut headers = Vec::with_capacity(self.h.len());
-        let mut found_headers = vec![false; self.h.len()];
+        let mut found_headers = FoundHeaders::default();
         let mut signed_headers = Vec::with_capacity(self.h.len());
 
         for (name, value) in &message.headers {
@@ -167,7 +168,7 @@ impl Signature {
                 .position(|header| name.eq_ignore_ascii_case(header.as_bytes()))
             {
                 headers.push((*name, *value));
-                found_headers[pos] = true;
+                found_headers.insert(pos);
                 signed_headers.push(std::str::from_utf8(name).unwrap().into());
             }
         }
@@ -176,8 +177,8 @@ impl Signature {
 
         // Add any missing headers
         signed_headers.reverse();
-        for (header, found) in self.h.iter().zip(found_headers) {
-            if !found {
+        for (pos, header) in self.h.iter().enumerate() {
+            if !found_headers.contains(pos) {
                 signed_headers.push(header.to_string());
             }
         }

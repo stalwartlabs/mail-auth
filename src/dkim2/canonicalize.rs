@@ -9,7 +9,10 @@ use crate::{
         crypto::{HashContext, HashImpl, HashOutput, Sha1, Sha256},
         headers::Writer,
     },
-    dkim::Canonicalization,
+    dkim::{
+        Canonicalization,
+        canonicalize::{SpacedTokens, write_relaxed_name},
+    },
 };
 use std::cmp::Ordering;
 
@@ -19,10 +22,9 @@ impl crate::common::crypto::HashAlgorithm {
         &self,
         headers: impl IntoIterator<Item = (&'x [u8], &'x [u8])>,
     ) -> HashOutput {
-        let mut signed: Vec<(&[u8], &[u8])> = headers
-            .into_iter()
-            .filter(|(name, _)| !is_non_signed_header(name))
-            .collect();
+        let headers = headers.into_iter();
+        let mut signed: Vec<(&[u8], &[u8])> = Vec::with_capacity(headers.size_hint().0);
+        signed.extend(headers.filter(|(name, _)| !is_non_signed_header(name)));
         signed.reverse();
         signed.sort_by(|(a, _), (b, _)| cmp_ignore_ascii_case(a, b));
 
@@ -52,12 +54,7 @@ pub(crate) struct CanonicalizedHeaderWriter<'x, W: Writer> {
 
 impl<'x, W: Writer> CanonicalizedHeaderWriter<'x, W> {
     pub fn new(inner: &'x mut W, field: &[u8]) -> Self {
-        for &ch in field {
-            if !ch.is_ascii_whitespace() {
-                inner.write(&[ch.to_ascii_lowercase()]);
-            }
-        }
-        inner.write(b":");
+        write_relaxed_name(field, inner);
 
         Self { inner }
     }
@@ -69,18 +66,23 @@ impl<'x, W: Writer> CanonicalizedHeaderWriter<'x, W> {
 
 impl<'x, W: Writer> Writer for CanonicalizedHeaderWriter<'x, W> {
     fn write(&mut self, buf: &[u8]) {
-        for &ch in buf {
-            if !ch.is_ascii_whitespace() {
-                self.inner.write(&[ch]);
-            }
+        for token in SpacedTokens::new(buf) {
+            self.inner.write(token.token);
         }
     }
 }
 
 pub(crate) fn cmp_ignore_ascii_case(a: &[u8], b: &[u8]) -> Ordering {
-    a.iter()
-        .map(u8::to_ascii_lowercase)
-        .cmp(b.iter().map(u8::to_ascii_lowercase))
+    for (x, y) in a.iter().zip(b.iter()) {
+        if x != y {
+            let (x, y) = (x.to_ascii_lowercase(), y.to_ascii_lowercase());
+            if x != y {
+                return x.cmp(&y);
+            }
+        }
+    }
+
+    a.len().cmp(&b.len())
 }
 
 pub(super) fn is_non_signed_header(name: &[u8]) -> bool {

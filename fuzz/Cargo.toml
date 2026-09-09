@@ -13,6 +13,7 @@ libfuzzer-sys = "0.4"
 
 [dependencies.mail-auth]
 path = ".."
+features = ["arc"]
 
 # Prevent this from interfering with workspaces
 [workspace]
@@ -21,5 +22,11 @@ members = ["."]
 [[bin]]
 name = "mail_auth"
 path = "fuzz_targets/mail_auth.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "canonicalize"
+path = "fuzz_targets/canonicalize.rs"
 test = false
 doc = false

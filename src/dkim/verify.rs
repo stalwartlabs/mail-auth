@@ -298,65 +298,65 @@ impl<'x> AuthenticatedMessage<'x> {
         dkim_hdr_name: &'x [u8],
         dkim_hdr_value: &'x [u8],
     ) -> impl Iterator<Item = (&'x [u8], &'x [u8])> {
-        let mut last_header_pos: Vec<(&[u8], usize)> = Vec::new();
+        let mut last_header_pos: Vec<(&[u8], usize)> = Vec::with_capacity(headers.len());
         headers
             .iter()
             .filter_map(move |h| {
-                let header_pos = if let Some((_, header_pos)) = last_header_pos
-                    .iter_mut()
-                    .find(|(lh, _)| lh.eq_ignore_ascii_case(h.as_bytes()))
+                let name = h.as_bytes();
+                let slot = match last_header_pos
+                    .iter()
+                    .position(|(lh, _)| lh.eq_ignore_ascii_case(name))
                 {
-                    header_pos
-                } else {
-                    last_header_pos.push((h.as_bytes(), 0));
-                    &mut last_header_pos.last_mut().unwrap().1
+                    Some(slot) => slot,
+                    None => {
+                        last_header_pos.push((name, 0));
+                        last_header_pos.len() - 1
+                    }
                 };
-                if let Some((last_pos, result)) = self
+                let header_pos = last_header_pos.get(slot).map_or(0, |(_, pos)| *pos);
+                let (next_pos, result) = match self
                     .headers
                     .iter()
                     .rev()
                     .enumerate()
-                    .skip(*header_pos)
-                    .find(|(_, (mh, _))| h.as_bytes().eq_ignore_ascii_case(mh))
+                    .skip(header_pos)
+                    .find(|(_, (mh, _))| name.eq_ignore_ascii_case(mh))
                 {
-                    *header_pos = last_pos + 1;
-                    Some(*result)
-                } else {
-                    *header_pos = self.headers.len();
-                    None
+                    Some((last_pos, result)) => (last_pos + 1, Some(*result)),
+                    None => (self.headers.len(), None),
+                };
+                if let Some((_, pos)) = last_header_pos.get_mut(slot) {
+                    *pos = next_pos;
                 }
+                result
             })
             .chain([(dkim_hdr_name, dkim_hdr_value)])
     }
 }
 
 impl Signature {
-    #[allow(clippy::while_let_on_iterator)]
     pub(crate) fn validate_auid(&self, record: &DomainKey) -> bool {
-        // Enforce t=s flag
-        if !self.i.is_empty() && record.has_flag(Flag::MatchDomain) {
-            let mut auid = self.i.chars();
-            let mut domain = self.d.chars();
-            while let Some(ch) = auid.next() {
-                if ch == '@' {
-                    break;
-                }
-            }
-            while let Some(ch) = auid.next() {
-                if let Some(dch) = domain.next() {
-                    if ch != dch {
-                        return false;
-                    }
-                } else {
-                    break;
-                }
-            }
-            if domain.next().is_some() {
-                return false;
-            }
+        if self.i.is_empty() {
+            return true;
         }
 
-        true
+        let auid_domain = self
+            .i
+            .split_once('@')
+            .map_or("", |(_, auid_domain)| auid_domain)
+            .as_bytes();
+        let domain = self.d.as_bytes();
+
+        match auid_domain
+            .len()
+            .checked_sub(domain.len())
+            .and_then(|split| auid_domain.split_at_checked(split))
+        {
+            Some((parent, suffix)) if suffix.eq_ignore_ascii_case(domain) => {
+                parent.is_empty() || (!record.has_flag(Flag::MatchDomain) && parent.ends_with(b"."))
+            }
+            _ => false,
+        }
     }
 }
 
@@ -364,42 +364,134 @@ pub(crate) trait Verifier: Sized {
     fn strip_signature(&self) -> Vec<u8>;
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TagState {
+    Semicolon,
+    Tag,
+    Value,
+    Signature,
+}
+
+fn strip_tag_segment(
+    segment: &[u8],
+    terminated: bool,
+    state: TagState,
+    unsigned_dkim: &mut Vec<u8>,
+) -> TagState {
+    if state != TagState::Semicolon {
+        unsigned_dkim.extend_from_slice(segment);
+        return if terminated {
+            TagState::Semicolon
+        } else {
+            state
+        };
+    }
+
+    let tag = segment
+        .iter()
+        .position(|ch| !ch.is_ascii_whitespace())
+        .unwrap_or(segment.len());
+
+    if !matches!(segment.get(tag), Some(b'b' | b'B')) {
+        unsigned_dkim.extend_from_slice(segment);
+        return if terminated || tag == segment.len() {
+            TagState::Semicolon
+        } else {
+            TagState::Value
+        };
+    }
+
+    let after_tag = &segment[tag + 1..];
+    let equals = after_tag
+        .iter()
+        .position(|ch| !ch.is_ascii_whitespace())
+        .unwrap_or(after_tag.len());
+
+    if after_tag.get(equals) != Some(&b'=') {
+        unsigned_dkim.extend_from_slice(segment);
+        return if terminated {
+            TagState::Semicolon
+        } else if equals == after_tag.len() {
+            TagState::Tag
+        } else {
+            TagState::Value
+        };
+    }
+
+    unsigned_dkim.extend_from_slice(&segment[..tag + equals + 2]);
+    if terminated {
+        unsigned_dkim.push(b';');
+        TagState::Value
+    } else {
+        TagState::Signature
+    }
+}
+
+fn strip_tag_list(mut rest: &[u8], unsigned_dkim: &mut Vec<u8>) -> TagState {
+    let mut state = TagState::Semicolon;
+    loop {
+        match memchr::memchr(b';', rest) {
+            Some(position) => {
+                let (segment, tail) = rest.split_at(position + 1);
+                state = strip_tag_segment(segment, true, state, unsigned_dkim);
+                rest = tail;
+            }
+            None => return strip_tag_segment(rest, false, state, unsigned_dkim),
+        }
+    }
+}
+
+fn strip_trailing_byte(ch: u8, discard: bool, state: &mut TagState, unsigned_dkim: &mut Vec<u8>) {
+    if *state == TagState::Signature {
+        if ch == b';' {
+            unsigned_dkim.push(b';');
+            *state = TagState::Semicolon;
+        }
+        return;
+    }
+
+    match ch {
+        b'=' if *state == TagState::Tag => {
+            unsigned_dkim.push(ch);
+            *state = TagState::Signature;
+        }
+        b'b' | b'B' if *state == TagState::Semicolon => {
+            unsigned_dkim.push(ch);
+            *state = TagState::Tag;
+        }
+        b';' => {
+            unsigned_dkim.push(ch);
+            *state = TagState::Semicolon;
+        }
+        _ if discard => (),
+        _ => {
+            unsigned_dkim.push(ch);
+            if !ch.is_ascii_whitespace() {
+                *state = TagState::Value;
+            }
+        }
+    }
+}
+
 impl Verifier for &[u8] {
     fn strip_signature(&self) -> Vec<u8> {
         let mut unsigned_dkim = Vec::with_capacity(self.len());
-        let mut iter = self.iter().enumerate();
-        let mut last_ch = b';';
-        while let Some((pos, &ch)) = iter.next() {
-            match ch {
-                b'=' if last_ch == b'b' => {
-                    unsigned_dkim.push(ch);
-                    #[allow(clippy::while_let_on_iterator)]
-                    while let Some((_, &ch)) = iter.next() {
-                        if ch == b';' {
-                            unsigned_dkim.push(b';');
-                            break;
-                        }
-                    }
-                    last_ch = 0;
-                }
-                b'b' | b'B' if last_ch == b';' => {
-                    last_ch = b'b';
-                    unsigned_dkim.push(ch);
-                }
-                b';' => {
-                    last_ch = b';';
-                    unsigned_dkim.push(ch);
-                }
-                b'\r' if pos == self.len() - 2 => (),
-                b'\n' if pos == self.len() - 1 => (),
-                _ => {
-                    unsigned_dkim.push(ch);
-                    if !ch.is_ascii_whitespace() {
-                        last_ch = 0;
-                    }
-                }
+        let (head, tail) = match self.len() {
+            0 => return unsigned_dkim,
+            1 => self.split_at(0),
+            len => self.split_at(len - 2),
+        };
+
+        let mut state = strip_tag_list(head, &mut unsigned_dkim);
+        match tail {
+            [cr, lf] => {
+                strip_trailing_byte(*cr, *cr == b'\r', &mut state, &mut unsigned_dkim);
+                strip_trailing_byte(*lf, *lf == b'\n', &mut state, &mut unsigned_dkim);
             }
+            [lf] => strip_trailing_byte(*lf, *lf == b'\n', &mut state, &mut unsigned_dkim),
+            _ => (),
         }
+
         unsigned_dkim
     }
 }
@@ -434,8 +526,49 @@ pub mod test {
     use crate::{
         AuthenticatedMessage, DkimResult, MessageAuthenticator,
         common::{cache::test::DummyCaches, parse::TxtRecordParser, verify::DomainKey},
-        dkim::verify::Verifier,
+        dkim::{Signature, verify::Verifier},
     };
+
+    #[test]
+    fn validate_auid() {
+        let strict = DomainKey::parse(
+            b"v=DKIM1; k=ed25519; t=s; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=",
+        )
+        .unwrap();
+        let relaxed =
+            DomainKey::parse(b"v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=")
+                .unwrap();
+
+        for (auid, strict_expected, relaxed_expected) in [
+            ("", true, true),
+            ("@example.com", true, true),
+            ("john@example.com", true, true),
+            ("@EXAMPLE.com", true, true),
+            ("@sub.example.com", false, true),
+            ("john@deep.sub.example.com", false, true),
+            ("@example.com.evil", false, false),
+            ("@xexample.com", false, false),
+            ("@other.org", false, false),
+            ("john", false, false),
+            ("@", false, false),
+        ] {
+            let signature = Signature {
+                i: auid.to_string(),
+                d: "example.com".to_string(),
+                ..Default::default()
+            };
+            assert_eq!(
+                signature.validate_auid(&strict),
+                strict_expected,
+                "t=s {auid:?}"
+            );
+            assert_eq!(
+                signature.validate_auid(&relaxed),
+                relaxed_expected,
+                "{auid:?}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn dkim_verify() {

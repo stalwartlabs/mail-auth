@@ -217,7 +217,11 @@ pub mod test {
             value: impl Into<Txt>,
             valid_until: std::time::Instant,
         ) -> Self {
-            self.txt.insert(name.to_fqdn(), value.into(), valid_until);
+            self.txt.insert(
+                name.to_fqdn().into_owned().into_boxed_str(),
+                value.into(),
+                valid_until,
+            );
             self
         }
 
@@ -227,7 +231,11 @@ pub mod test {
             value: impl Into<Txt>,
             valid_until: std::time::Instant,
         ) {
-            self.txt.insert(name.to_fqdn(), value.into(), valid_until);
+            self.txt.insert(
+                name.to_fqdn().into_owned().into_boxed_str(),
+                value.into(),
+                valid_until,
+            );
         }
 
         pub fn ipv4_add(
@@ -237,7 +245,7 @@ pub mod test {
             valid_until: std::time::Instant,
         ) {
             self.ipv4.insert(
-                name.to_fqdn(),
+                name.to_fqdn().into_owned().into_boxed_str(),
                 RecordSet {
                     rrset: Arc::from(value.into_boxed_slice()),
                     dnssec_status: DnssecStatus::Indeterminate,
@@ -253,7 +261,7 @@ pub mod test {
             valid_until: std::time::Instant,
         ) {
             self.ipv6.insert(
-                name.to_fqdn(),
+                name.to_fqdn().into_owned().into_boxed_str(),
                 RecordSet {
                     rrset: Arc::from(value.into_boxed_slice()),
                     dnssec_status: DnssecStatus::Indeterminate,
@@ -275,7 +283,7 @@ pub mod test {
 
         pub fn mx_add(&self, name: impl ToFqdn, value: Vec<MX>, valid_until: std::time::Instant) {
             self.mx.insert(
-                name.to_fqdn(),
+                name.to_fqdn().into_owned().into_boxed_str(),
                 RecordSet {
                     rrset: Arc::from(value.into_boxed_slice()),
                     dnssec_status: DnssecStatus::Indeterminate,

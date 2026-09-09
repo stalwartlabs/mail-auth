@@ -12,7 +12,9 @@ use mail_auth::{
     common::parse::TxtRecordParser,
     common::verify::DomainKey,
     dkim::{self, Atps, DomainKeyReport},
+    dkim2::{self, Recipe},
     dmarc::Dmarc,
+    mta_sts::{MtaSts, TlsRpt},
     report::{Feedback, Report},
     spf::{Macro, Spf},
     AuthenticatedMessage,
@@ -40,6 +42,15 @@ fuzz_target!(|data: &[u8]| {
 
     AuthenticatedMessage::parse(data);
     AuthenticatedMessage::parse(&data_rfc822);
+    AuthenticatedMessage::parse_with_opts(&data_rfc822, Some(data), true);
+
+    dkim2::Signature::parse(data).ok();
+    dkim2::Signature::parse(&data_txt).ok();
+
+    dkim2::MessageInstance::parse(data).ok();
+    dkim2::MessageInstance::parse(&data_txt).ok();
+
+    Recipe::from_json(data).ok();
 
     DomainKey::parse(data).ok();
     DomainKey::parse(&data_txt).ok();
@@ -55,6 +66,12 @@ fuzz_target!(|data: &[u8]| {
 
     Spf::parse(data).ok();
     Spf::parse(&data_txt).ok();
+
+    MtaSts::parse(data).ok();
+    MtaSts::parse(&data_txt).ok();
+
+    TlsRpt::parse(data).ok();
+    TlsRpt::parse(&data_txt).ok();
 
     Macro::parse(data).ok();
     Macro::parse(&data_txt).ok();

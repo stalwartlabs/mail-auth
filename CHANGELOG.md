@@ -1,3 +1,7 @@
+mail-auth 0.13.0
+================================
+- Performance enhancements
+
 mail-auth 0.12.2
 ================================
 - Bump `mail-builder` dependency to 0.5.

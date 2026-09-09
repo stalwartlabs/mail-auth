@@ -205,12 +205,17 @@ impl Recipe {
     }
 }
 
-fn body_lines(body: &[u8]) -> Vec<&[u8]> {
-    let mut lines = Vec::with_capacity(16);
+pub(crate) fn body_lines(body: &[u8]) -> Vec<&[u8]> {
+    let mut lines = Vec::with_capacity(memchr::memchr_iter(b'\n', body).count() + 1);
+    let mut start = 0;
 
-    for line in body.split(|ch| *ch == b'\n') {
+    for pos in memchr::memchr_iter(b'\n', body) {
+        let line = body.get(start..pos).unwrap_or_default();
         lines.push(line.strip_suffix(b"\r").unwrap_or(line));
+        start = pos + 1;
     }
+    let line = body.get(start..).unwrap_or_default();
+    lines.push(line.strip_suffix(b"\r").unwrap_or(line));
 
     if lines.last().is_some_and(|l| l.is_empty()) {
         lines.pop();
@@ -219,7 +224,7 @@ fn body_lines(body: &[u8]) -> Vec<&[u8]> {
     lines
 }
 
-fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step]) -> Vec<&'x [u8]> {
+pub(crate) fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step]) -> Vec<&'x [u8]> {
     let mut emitted: Vec<&'x [u8]> = Vec::new();
 
     for step in steps {
@@ -248,7 +253,7 @@ fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step]) -> Vec<&'x
     emitted
 }
 
-fn apply_body_recipe(lines: &[&[u8]], steps: &[Step], out: &mut Vec<u8>) {
+pub(crate) fn apply_body_recipe(lines: &[&[u8]], steps: &[Step], out: &mut Vec<u8>) {
     let mark = out.len();
 
     for step in steps {
@@ -312,26 +317,39 @@ fn diff_steps(original: &[&[u8]], modified: &[&[u8]]) -> Vec<Step> {
     steps
 }
 
-fn unfold_lossy(value: &[u8]) -> String {
+pub(crate) fn unfold_lossy(value: &[u8]) -> String {
+    if memchr::memchr2(b'\r', b'\n', value).is_none() {
+        return lossy_string(value.to_vec());
+    }
+
     let mut result = Vec::with_capacity(value.len());
     let mut last_is_crlf = false;
+    let mut rest = value;
 
-    for &ch in value {
-        match ch {
-            b'\r' | b'\n' => {
+    loop {
+        let split_at = memchr::memchr2(b'\r', b'\n', rest).unwrap_or(rest.len());
+        let (run, tail) = rest.split_at(split_at);
+        if let Some((&first, others)) = run.split_first() {
+            if last_is_crlf && !first.is_ascii_whitespace() && !result.is_empty() {
+                result.push(b' ');
+            }
+            result.push(first);
+            result.extend_from_slice(others);
+        }
+        match tail.split_first() {
+            Some((_, next)) => {
                 last_is_crlf = true;
+                rest = next;
             }
-            _ => {
-                if last_is_crlf && !ch.is_ascii_whitespace() && !result.is_empty() {
-                    result.push(b' ');
-                }
-                result.push(ch);
-                last_is_crlf = false;
-            }
+            None => break,
         }
     }
 
-    String::from_utf8(result)
+    lossy_string(result)
+}
+
+fn lossy_string(bytes: Vec<u8>) -> String {
+    String::from_utf8(bytes)
         .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
 }
 

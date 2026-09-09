@@ -6,7 +6,11 @@
 
 use super::{Macro, Variable, Variables};
 use crate::SystemTime;
+use crate::common::resolver::{decimal_u8, hex_nibble};
 use std::{borrow::Cow, net::IpAddr};
+
+const DEFAULT_DELIMITERS: u64 = 1u64 << (b'.' - b'+');
+const LAST_DELIMITER: u8 = b'_' - b'+';
 
 impl Macro {
     pub fn eval<'z, 'x: 'z>(
@@ -28,7 +32,15 @@ impl Macro {
                 Cow::Owned(bytes) => String::from_utf8(bytes).unwrap_or_default().into(),
             },
             Macro::List(list) => {
-                let mut result = Vec::with_capacity(32);
+                let mut result = Vec::with_capacity(
+                    list.iter()
+                        .map(|item| match item {
+                            Macro::Literal(literal) => literal.len(),
+                            _ => 24,
+                        })
+                        .sum::<usize>()
+                        + 1,
+                );
                 for item in list {
                     match item {
                         Macro::Literal(literal) => {
@@ -41,22 +53,22 @@ impl Macro {
                             escape,
                             delimiters,
                         } => {
-                            result.extend_from_slice(
-                                vars.get(
-                                    *letter,
-                                    *num_parts,
-                                    *reverse,
-                                    *escape,
-                                    false,
-                                    *delimiters,
-                                )
-                                .as_ref(),
+                            vars.append(
+                                &mut result,
+                                *letter,
+                                Transform {
+                                    num_parts: *num_parts,
+                                    reverse: *reverse,
+                                    escape: *escape,
+                                    fqdn: false,
+                                    delimiters: *delimiters,
+                                },
                             );
                         }
                         Macro::List(_) | Macro::None => unreachable!(),
                     }
                 }
-                if fqdn && !result.is_empty() && result.last().unwrap() != &b'.' {
+                if fqdn && matches!(result.last(), Some(last) if *last != b'.') {
                     result.push(b'.');
                 }
                 String::from_utf8(result).unwrap_or_default().into()
@@ -76,40 +88,41 @@ impl Macro {
 
 impl<'x> Variables<'x> {
     pub fn new() -> Self {
-        let mut vars = Variables::default();
-        vars.vars[Variable::CurrentTime as usize] = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0)
-            .to_string()
-            .into_bytes()
-            .into();
-        vars
+        Variables {
+            current_time_on_demand: true,
+            ..Default::default()
+        }
     }
 
     pub fn set_ip(&mut self, value: &IpAddr) {
-        let (v, i, c) = match value {
-            IpAddr::V4(ip) => (
-                "in-addr".as_bytes(),
-                ip.to_string().into_bytes(),
-                ip.to_string(),
-            ),
+        let (v, i, c): (&'static [u8], Vec<u8>, Vec<u8>) = match value {
+            IpAddr::V4(ip) => {
+                let mut dotted = Vec::with_capacity(15);
+                let mut buf = [0u8; 3];
+                for octet in ip.octets() {
+                    if !dotted.is_empty() {
+                        dotted.push(b'.');
+                    }
+                    dotted.extend_from_slice(decimal_u8(octet, &mut buf));
+                }
+                (b"in-addr", dotted.clone(), dotted)
+            }
             IpAddr::V6(ip) => {
                 let mut segments = Vec::with_capacity(63);
                 for segment in ip.segments() {
-                    for &p in format!("{segment:04x}").as_bytes() {
+                    for shift in [12u32, 8, 4, 0] {
                         if !segments.is_empty() {
                             segments.push(b'.');
                         }
-                        segments.push(p);
+                        segments.push(hex_nibble((segment >> shift) as u8));
                     }
                 }
-                ("ip6".as_bytes(), segments, ip.to_string())
+                (b"ip6", segments, ip.to_string().into_bytes())
             }
         };
         self.vars[Variable::IpVersion as usize] = v.into();
         self.vars[Variable::Ip as usize] = i.into();
-        self.vars[Variable::SmtpIp as usize] = c.into_bytes().into();
+        self.vars[Variable::SmtpIp as usize] = c.into();
     }
 
     pub fn set_sender(&mut self, value: impl Into<Cow<'x, [u8]>>) {
@@ -158,46 +171,131 @@ impl<'x> Variables<'x> {
         fqdn: bool,
         delimiters: u64,
     ) -> Cow<'_, [u8]> {
-        let var: &[u8] = self.vars[name as usize].as_ref();
-        if var.is_empty()
-            || (num_parts == 0 && !reverse && !escape && delimiters == 1u64 << (b'.' - b'+'))
-        {
-            return var.into();
-        }
-        let mut parts = Vec::new();
-        let mut parts_len = 0;
-        let mut start_pos = 0;
-
-        for (pos, ch) in var.iter().enumerate() {
-            if (b'+'..=b'_').contains(ch) && (delimiters & (1u64 << (*ch - b'+'))) != 0 {
-                parts_len += pos - start_pos + 1;
-                parts.push(&var[start_pos..pos]);
-                start_pos = pos + 1;
-            }
-        }
-        parts.push(&var[start_pos..var.len()]);
-
-        let num_parts = if num_parts == 0 {
-            parts.len()
-        } else {
-            std::cmp::min(parts.len(), num_parts as usize)
+        let transform = Transform {
+            num_parts,
+            reverse,
+            escape,
+            fqdn,
+            delimiters,
         };
+        let var: &[u8] = self.vars[name as usize].as_ref();
+        if var.is_empty() && self.current_time_on_demand && matches!(name, Variable::CurrentTime) {
+            let now = current_time();
+            if transform.is_verbatim() {
+                return Cow::Owned(now);
+            }
+            let mut result = Vec::with_capacity(transform.capacity_for(&now));
+            append_transformed(&mut result, &now, transform);
+            return Cow::Owned(result);
+        }
+        if var.is_empty() || transform.is_verbatim() {
+            return Cow::Borrowed(var);
+        }
 
-        let mut result = Vec::with_capacity(parts_len + var.len() - start_pos);
-        if !reverse {
-            for (pos, part) in parts.iter().skip(parts.len() - num_parts).enumerate() {
-                add_part(&mut result, part, pos, escape);
-            }
-        } else {
-            for (pos, part) in parts.iter().rev().skip(parts.len() - num_parts).enumerate() {
-                add_part(&mut result, part, pos, escape);
-            }
-        }
-        if fqdn && result.last().unwrap_or(&0) != &b'.' {
-            result.push(b'.');
-        }
-        result.into()
+        let mut result = Vec::with_capacity(transform.capacity_for(var));
+        append_transformed(&mut result, var, transform);
+        Cow::Owned(result)
     }
+
+    fn append(&self, result: &mut Vec<u8>, name: Variable, transform: Transform) {
+        let var: &[u8] = self.vars[name as usize].as_ref();
+        if var.is_empty() && self.current_time_on_demand && matches!(name, Variable::CurrentTime) {
+            append_variable(result, &current_time(), transform);
+        } else {
+            append_variable(result, var, transform);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Transform {
+    num_parts: u32,
+    reverse: bool,
+    escape: bool,
+    fqdn: bool,
+    delimiters: u64,
+}
+
+impl Transform {
+    #[inline(always)]
+    fn is_verbatim(&self) -> bool {
+        self.num_parts == 0
+            && !self.reverse
+            && !self.escape
+            && self.delimiters == DEFAULT_DELIMITERS
+    }
+
+    #[inline(always)]
+    fn capacity_for(&self, var: &[u8]) -> usize {
+        if self.escape {
+            var.len() * 3 + 1
+        } else {
+            var.len() + 1
+        }
+    }
+
+    #[inline(always)]
+    fn is_delimiter(&self, ch: u8) -> bool {
+        let offset = ch.wrapping_sub(b'+');
+        offset <= LAST_DELIMITER && (self.delimiters & (1u64 << offset)) != 0
+    }
+}
+
+fn append_variable(result: &mut Vec<u8>, var: &[u8], transform: Transform) {
+    if var.is_empty() || transform.is_verbatim() {
+        result.extend_from_slice(var);
+    } else {
+        append_transformed(result, var, transform);
+    }
+}
+
+fn append_transformed(result: &mut Vec<u8>, var: &[u8], transform: Transform) {
+    let skipped = if transform.num_parts == 0 {
+        0
+    } else {
+        let total = 1 + var.iter().filter(|ch| transform.is_delimiter(**ch)).count();
+        total - std::cmp::min(total, transform.num_parts as usize)
+    };
+
+    let start = result.len();
+    if !transform.reverse {
+        for (pos, part) in var
+            .split(|ch| transform.is_delimiter(*ch))
+            .skip(skipped)
+            .enumerate()
+        {
+            add_part(result, part, pos, transform.escape);
+        }
+    } else {
+        for (pos, part) in var
+            .rsplit(|ch| transform.is_delimiter(*ch))
+            .skip(skipped)
+            .enumerate()
+        {
+            add_part(result, part, pos, transform.escape);
+        }
+    }
+    if transform.fqdn && !matches!(result.get(start..), Some([.., b'.'])) {
+        result.push(b'.');
+    }
+}
+
+fn current_time() -> Vec<u8> {
+    let mut seconds = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let mut buf = [0u8; 20];
+    let mut len = 0;
+    for slot in buf.iter_mut().rev() {
+        *slot = b'0' + (seconds % 10) as u8;
+        len += 1;
+        seconds /= 10;
+        if seconds == 0 {
+            break;
+        }
+    }
+    buf[buf.len() - len..].to_vec()
 }
 
 #[inline(always)]
@@ -208,11 +306,11 @@ fn add_part(result: &mut Vec<u8>, part: &[u8], pos: usize, escape: bool) {
     if !escape {
         result.extend_from_slice(part);
     } else {
-        for ch in part {
-            if ch.is_ascii_alphanumeric() || b"-._~".contains(ch) {
-                result.push(*ch);
+        for &ch in part {
+            if ch.is_ascii_alphanumeric() || matches!(ch, b'-' | b'.' | b'_' | b'~') {
+                result.push(ch);
             } else {
-                result.extend_from_slice(format!("%{ch:02x}").as_bytes());
+                result.extend_from_slice(&[b'%', hex_nibble(ch >> 4), hex_nibble(ch)]);
             }
         }
     }

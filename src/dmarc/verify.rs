@@ -17,6 +17,9 @@ use std::{
     sync::Arc,
 };
 
+const DMARC_PREFIX: &str = "_dmarc.";
+const REPORT_PREFIX: &str = "._report._dmarc.";
+
 pub struct DmarcParameters<'x> {
     pub message: &'x AuthenticatedMessage<'x>,
     pub dkim_output: &'x [DkimOutput<'x>],
@@ -223,6 +226,7 @@ impl MessageAuthenticator {
         let domain = to_a_label(domain);
         let domain = domain.as_ref();
         let mut result = Vec::with_capacity(addresses.len());
+        let mut key = String::new();
         for address in addresses {
             let address_ref = address.as_ref();
             let address_domain = to_a_label(
@@ -238,19 +242,20 @@ impl MessageAuthenticator {
                 || address_domain
                     .strip_suffix(domain)
                     .is_some_and(|prefix| prefix.ends_with('.'));
-            if is_internal
-                || match self
-                    .txt_lookup::<Dmarc>(
-                        format!("{domain}._report._dmarc.{address_domain}."),
-                        txt_cache,
-                    )
-                    .await
-                {
+            let is_authorized = is_internal || {
+                key.clear();
+                key.reserve(domain.len() + REPORT_PREFIX.len() + address_domain.len() + 1);
+                key.push_str(domain);
+                key.push_str(REPORT_PREFIX);
+                key.push_str(address_domain);
+                key.push('.');
+                match self.txt_lookup::<Dmarc>(&key, txt_cache).await {
                     Ok(_) => true,
                     Err(Error::Dns(DnsError::Resolver(_))) => return None,
                     _ => false,
                 }
-            {
+            };
+            if is_authorized {
                 result.push(address);
             }
         }
@@ -276,12 +281,14 @@ impl MessageAuthenticator {
         // to 7 labels when the name has 8 or more (the eight-query cap) and then
         // one label at a time down to the top-level domain.
         let mut count = total;
+        let mut key = String::with_capacity(domain.len() + DMARC_PREFIX.len() + 1);
         loop {
             let name = drop_leftmost_labels(domain, total - count);
-            match self
-                .txt_lookup::<Dmarc>(format!("_dmarc.{name}."), txt_cache)
-                .await
-            {
+            key.clear();
+            key.push_str(DMARC_PREFIX);
+            key.push_str(name);
+            key.push('.');
+            match self.txt_lookup::<Dmarc>(&key, txt_cache).await {
                 Ok(dmarc) => {
                     // A record carrying "psd=y" or "psd=n" stops the walk
                     let stop = matches!(dmarc.psd, Psd::Yes | Psd::No);

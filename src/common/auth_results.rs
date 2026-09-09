@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::headers::{HeaderWriter, Writer};
+use super::headers::{HeaderWriter, IntegerBuffer, Writer, base64_encode_slice};
 #[cfg(feature = "arc")]
 use crate::{ArcOutput, arc::ArcError};
 use crate::{
@@ -12,19 +12,18 @@ use crate::{
     IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, dkim::DkimError,
     dkim2::Dkim2Output,
 };
-use crate::{DnsError, common::crypto::CryptoError};
-use mail_builder::encoders::Base64Encoder;
+use crate::{DnsError, common::crypto::CryptoError, dmarc::Policy};
 use std::{
     borrow::Cow,
     fmt::{Display, Write},
-    net::IpAddr,
+    net::{IpAddr, Ipv4Addr},
 };
 
 impl<'x> AuthenticationResults<'x> {
     pub fn new(hostname: &'x str) -> Self {
         AuthenticationResults {
             hostname,
-            auth_results: String::with_capacity(64),
+            auth_results: String::with_capacity(256),
         }
     }
 
@@ -57,15 +56,12 @@ impl<'x> AuthenticationResults<'x> {
             }
             self.auth_results.push_str(" header.s=");
             push_pvalue(&mut self.auth_results, &signature.s);
-            if signature.b.len() >= 6 {
+            if let Some(prefix) = signature.b.get(..6) {
                 self.auth_results.push_str(" header.b=");
+                let mut encoded = [0u8; 8];
+                let len = base64_encode_slice(prefix, &mut encoded);
                 self.auth_results.push_str(
-                    &String::from_utf8(
-                        Base64Encoder::new()
-                            .encode(&signature.b[..6])
-                            .unwrap_or_default(),
-                    )
-                    .unwrap_or_default(),
+                    std::str::from_utf8(encoded.get(..len).unwrap_or_default()).unwrap_or_default(),
                 );
             }
         }
@@ -97,7 +93,8 @@ impl<'x> AuthenticationResults<'x> {
         if let Some(link) = link {
             self.auth_results.push_str(" header.d=");
             push_pvalue(&mut self.auth_results, &link.signature.d);
-            write!(self.auth_results, " header.i={}", link.signature.i).ok();
+            self.auth_results.push_str(" header.i=");
+            push_integer(&mut self.auth_results, link.signature.i as u64);
         }
     }
 
@@ -112,10 +109,11 @@ impl<'x> AuthenticationResults<'x> {
         spf.result.as_spf_result(
             &mut self.auth_results,
             self.hostname,
-            &format!("postmaster@{ehlo_domain}"),
+            [POSTMASTER_AT, ehlo_domain.as_ref()],
             ip_addr,
         );
-        write!(self.auth_results, " smtp.helo={ehlo_domain}").ok();
+        self.auth_results.push_str(" smtp.helo=");
+        self.auth_results.push_str(ehlo_domain.as_ref());
         self
     }
 
@@ -127,18 +125,15 @@ impl<'x> AuthenticationResults<'x> {
         ehlo_domain: &str,
     ) -> Self {
         let ehlo_domain = sanitize_pvalue(ehlo_domain);
+        let sanitized_from = sanitize_pvalue(from);
         let mail_from = if !from.is_empty() {
-            sanitize_pvalue(from)
+            [sanitized_from.as_ref(), ""]
         } else {
-            Cow::Owned(format!("postmaster@{ehlo_domain}"))
+            [POSTMASTER_AT, ehlo_domain.as_ref()]
         };
         self.auth_results.push_str(";\r\n\tspf=");
-        spf.result.as_spf_result(
-            &mut self.auth_results,
-            self.hostname,
-            mail_from.as_ref(),
-            ip_addr,
-        );
+        spf.result
+            .as_spf_result(&mut self.auth_results, self.hostname, mail_from, ip_addr);
         self.auth_results.push_str(" smtp.mailfrom=");
         if !from.is_empty() {
             push_quoted_pvalue(&mut self.auth_results, from);
@@ -152,8 +147,8 @@ impl<'x> AuthenticationResults<'x> {
     pub fn with_arc_result(mut self, arc: &ArcOutput, remote_ip: IpAddr) -> Self {
         self.auth_results.push_str(";\r\n\tarc=");
         arc.result.as_auth_result(&mut self.auth_results);
-        let _ = write!(self.auth_results, " smtp.remote-ip=");
-        let _ = format_ip_as_pvalue(&mut self.auth_results, remote_ip);
+        self.auth_results.push_str(" smtp.remote-ip=");
+        push_ip_as_pvalue(&mut self.auth_results, remote_ip);
         self
     }
 
@@ -168,21 +163,21 @@ impl<'x> AuthenticationResults<'x> {
         } else {
             DmarcResult::None.as_auth_result(&mut self.auth_results);
         }
-        write!(
-            self.auth_results,
-            " header.from={} policy.dmarc={}",
-            sanitize_pvalue(&dmarc.domain),
-            dmarc.policy
-        )
-        .ok();
+        self.auth_results.push_str(" header.from=");
+        push_pvalue(&mut self.auth_results, &dmarc.domain);
+        self.auth_results.push_str(match dmarc.policy {
+            Policy::Quarantine => " policy.dmarc=quarantine",
+            Policy::Reject => " policy.dmarc=reject",
+            Policy::None | Policy::Unspecified => " policy.dmarc=none",
+        });
         self
     }
 
     pub fn with_iprev_result(mut self, iprev: &IprevOutput, remote_ip: IpAddr) -> Self {
         self.auth_results.push_str(";\r\n\tiprev=");
         iprev.result.as_auth_result(&mut self.auth_results);
-        let _ = write!(self.auth_results, " policy.iprev=");
-        let _ = format_ip_as_pvalue(&mut self.auth_results, remote_ip);
+        self.auth_results.push_str(" policy.iprev=");
+        push_ip_as_pvalue(&mut self.auth_results, remote_ip);
         self
     }
 }
@@ -223,63 +218,111 @@ impl ReceivedSpf {
         mail_from: &str,
         hostname: &str,
     ) -> Self {
-        let mut received_spf = String::with_capacity(64);
+        let mut received_spf = String::with_capacity(256);
         let helo = sanitize_pvalue(helo);
+        let sanitized_from = sanitize_pvalue(mail_from);
         let envelope_from = if !mail_from.is_empty() {
-            Cow::Borrowed(mail_from)
+            [mail_from, ""]
         } else {
-            Cow::Owned(format!("postmaster@{helo}"))
+            [POSTMASTER_AT, helo.as_ref()]
         };
-        let mail_from = sanitize_pvalue(&envelope_from);
+        let pieces = if !mail_from.is_empty() {
+            [sanitized_from.as_ref(), ""]
+        } else {
+            [POSTMASTER_AT, helo.as_ref()]
+        };
 
         spf.result
-            .as_spf_result(&mut received_spf, hostname, mail_from.as_ref(), ip_addr);
+            .as_spf_result(&mut received_spf, hostname, pieces, ip_addr);
 
-        write!(
-            received_spf,
-            "\r\n\treceiver={hostname}; client-ip={ip_addr}; envelope-from=\""
-        )
-        .ok();
-        push_qcontent(&mut received_spf, &envelope_from);
-        write!(received_spf, "\"; helo={helo};").ok();
+        received_spf.push_str("\r\n\treceiver=");
+        received_spf.push_str(hostname);
+        received_spf.push_str("; client-ip=");
+        push_ip(&mut received_spf, ip_addr);
+        received_spf.push_str("; envelope-from=\"");
+        for piece in envelope_from {
+            push_qcontent(&mut received_spf, piece);
+        }
+        received_spf.push_str("\"; helo=");
+        received_spf.push_str(helo.as_ref());
+        received_spf.push(';');
 
         ReceivedSpf { received_spf }
     }
 }
 
+const POSTMASTER_AT: &str = "postmaster@";
+const MAX_IP_TEXT_LEN: usize = 46;
+
 impl SpfResult {
-    fn as_spf_result(&self, header: &mut String, hostname: &str, mail_from: &str, ip_addr: IpAddr) {
-        match &self {
-            SpfResult::Pass => write!(
-                header,
-                "pass ({hostname}: domain of {mail_from} designates {ip_addr} as permitted sender)",
+    fn as_spf_result(
+        &self,
+        header: &mut String,
+        hostname: &str,
+        mail_from: [&str; 2],
+        ip_addr: IpAddr,
+    ) {
+        let (result, reason, designation, close) = match self {
+            SpfResult::Pass => (
+                "pass (",
+                ": domain of ",
+                Some(" designates "),
+                " as permitted sender)",
             ),
-            SpfResult::Fail => write!(
-                header,
-                "fail ({hostname}: domain of {mail_from} does not designate {ip_addr} as permitted sender)",
+            SpfResult::Fail => (
+                "fail (",
+                ": domain of ",
+                Some(" does not designate "),
+                " as permitted sender)",
             ),
-            SpfResult::SoftFail => write!(
-                header,
-                "softfail ({hostname}: domain of {mail_from} reports soft fail for {ip_addr})",
+            SpfResult::SoftFail => (
+                "softfail (",
+                ": domain of ",
+                Some(" reports soft fail for "),
+                ")",
             ),
-            SpfResult::Neutral => write!(
-                header,
-                "neutral ({hostname}: domain of {mail_from} reports neutral for {ip_addr})",
+            SpfResult::Neutral => (
+                "neutral (",
+                ": domain of ",
+                Some(" reports neutral for "),
+                ")",
             ),
-            SpfResult::TempError => write!(
-                header,
-                "temperror ({hostname}: temporary dns error validating {mail_from})",
+            SpfResult::TempError => (
+                "temperror (",
+                ": temporary dns error validating ",
+                None,
+                ")",
             ),
-            SpfResult::PermError => write!(
-                header,
-                "permerror ({hostname}: unable to verify SPF record for {mail_from})",
+            SpfResult::PermError => (
+                "permerror (",
+                ": unable to verify SPF record for ",
+                None,
+                ")",
             ),
-            SpfResult::None => write!(
-                header,
-                "none ({hostname}: no SPF records found for {mail_from})",
-            ),
+            SpfResult::None => ("none (", ": no SPF records found for ", None, ")"),
+        };
+
+        let mail_from_len = mail_from[0].len() + mail_from[1].len();
+        header.reserve(
+            result.len()
+                + hostname.len()
+                + reason.len()
+                + mail_from_len
+                + close.len()
+                + designation.map_or(0, |text| text.len() + MAX_IP_TEXT_LEN),
+        );
+
+        header.push_str(result);
+        header.push_str(hostname);
+        header.push_str(reason);
+        for piece in mail_from {
+            header.push_str(piece);
         }
-        .ok();
+        if let Some(designation) = designation {
+            header.push_str(designation);
+            push_ip(header, ip_addr);
+        }
+        header.push_str(close);
     }
 }
 
@@ -440,11 +483,57 @@ impl AsAuthResult for Error {
 /// since they contain `:` characters.
 ///
 /// [`pvalue`]: https://datatracker.ietf.org/doc/html/rfc8601#section-2.2
-fn format_ip_as_pvalue(w: &mut impl Write, ip: IpAddr) -> std::fmt::Result {
+fn push_ip_as_pvalue(header: &mut String, ip: IpAddr) {
     match ip {
-        IpAddr::V4(addr) => write!(w, "{addr}"),
-        IpAddr::V6(addr) => write!(w, "\"{addr}\""),
+        IpAddr::V4(addr) => push_ipv4(header, addr),
+        IpAddr::V6(addr) => {
+            header.push('"');
+            write!(header, "{addr}").ok();
+            header.push('"');
+        }
     }
+}
+
+fn push_ip(header: &mut String, ip: IpAddr) {
+    match ip {
+        IpAddr::V4(addr) => push_ipv4(header, addr),
+        IpAddr::V6(addr) => {
+            write!(header, "{addr}").ok();
+        }
+    }
+}
+
+fn push_ipv4(header: &mut String, addr: Ipv4Addr) {
+    const MAX_IPV4_TEXT_LEN: usize = 15;
+
+    let mut text = [0u8; MAX_IPV4_TEXT_LEN];
+    let mut len = 0;
+    let mut push = |byte: u8| {
+        if let Some(slot) = text.get_mut(len) {
+            *slot = byte;
+            len += 1;
+        }
+    };
+
+    for (pos, octet) in addr.octets().into_iter().enumerate() {
+        if pos > 0 {
+            push(b'.');
+        }
+        if octet >= 100 {
+            push(b'0' + octet / 100);
+        }
+        if octet >= 10 {
+            push(b'0' + (octet / 10) % 10);
+        }
+        push(b'0' + octet % 10);
+    }
+
+    header.push_str(std::str::from_utf8(text.get(..len).unwrap_or_default()).unwrap_or_default());
+}
+
+fn push_integer(header: &mut String, value: u64) {
+    let mut integer = IntegerBuffer::new();
+    header.push_str(integer.text(value));
 }
 
 #[inline]
@@ -452,9 +541,19 @@ fn is_pvalue_safe(ch: char) -> bool {
     !matches!(ch, '\0'..=' ' | '\u{7f}'..='\u{9f}' | '(' | ')' | ';' | '=' | '"' | '\\')
 }
 
+#[inline(always)]
+fn is_pvalue_safe_ascii(ch: u8) -> bool {
+    !matches!(ch, 0..=b' ' | 0x7f..=u8::MAX | b'(' | b')' | b';' | b'=' | b'"' | b'\\')
+}
+
+#[inline]
+fn is_pvalue_clean(value: &str) -> bool {
+    value.bytes().all(is_pvalue_safe_ascii) || value.chars().all(is_pvalue_safe)
+}
+
 #[inline]
 fn sanitize_pvalue(value: &str) -> Cow<'_, str> {
-    if value.chars().all(is_pvalue_safe) {
+    if is_pvalue_clean(value) {
         Cow::Borrowed(value)
     } else {
         Cow::Owned(value.chars().filter(|&ch| is_pvalue_safe(ch)).collect())
@@ -463,12 +562,16 @@ fn sanitize_pvalue(value: &str) -> Cow<'_, str> {
 
 #[inline]
 fn push_pvalue(header: &mut String, value: &str) {
-    header.extend(value.chars().filter(|&ch| is_pvalue_safe(ch)));
+    if is_pvalue_clean(value) {
+        header.push_str(value);
+    } else {
+        header.extend(value.chars().filter(|&ch| is_pvalue_safe(ch)));
+    }
 }
 
 #[inline]
 fn push_quoted_pvalue(header: &mut String, value: &str) {
-    if !value.is_empty() && value.chars().all(is_pvalue_safe) {
+    if !value.is_empty() && is_pvalue_clean(value) {
         header.push_str(value);
     } else {
         header.push('"');
@@ -479,16 +582,23 @@ fn push_quoted_pvalue(header: &mut String, value: &str) {
 
 #[inline]
 fn push_qcontent(header: &mut String, value: &str) {
-    for ch in value.chars() {
+    let mut start = 0;
+    for (pos, ch) in value.char_indices() {
         match ch {
             '"' | '\\' => {
+                header.push_str(value.get(start..pos).unwrap_or_default());
                 header.push('\\');
                 header.push(ch);
+                start = pos + 1;
             }
-            '\0'..='\u{1f}' | '\u{7f}'..='\u{9f}' => {}
-            ch => header.push(ch),
+            '\0'..='\u{1f}' | '\u{7f}'..='\u{9f}' => {
+                header.push_str(value.get(start..pos).unwrap_or_default());
+                start = pos + ch.len_utf8();
+            }
+            _ => {}
         }
     }
+    header.push_str(value.get(start..).unwrap_or_default());
 }
 
 #[cfg(test)]

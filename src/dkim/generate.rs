@@ -140,7 +140,7 @@ mod test {
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
-                .agent_user_identifier("\"John Doe\" <jdoe@example.com>")
+                .agent_user_identifier("\"John Doe\"@example.com")
                 .sign(message.as_bytes())
                 .unwrap(),
             message,

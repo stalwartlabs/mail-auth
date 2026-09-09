@@ -30,10 +30,11 @@ rkyv = ["dep:rkyv", "mail-parser/rkyv"]
 
 [dependencies]
 flate2 = "1.1"
-mail-parser = { version = "0.11.5", features = ["full_encoding"] }
+mail-parser = { version = "0.11.9", features = ["full_encoding", "base64_slice"] }
 quick-xml = { version = "0.42", optional = true }
 hashify =  { version = "0.2" }
 idna = "1.1"
+memchr = "2.7"
 aws-lc-rs = { version = "1", optional = true }
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.8", optional = true, features = ["getrandom"] }

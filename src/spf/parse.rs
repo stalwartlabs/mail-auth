@@ -12,6 +12,7 @@ use crate::DnsError;
 use crate::{
     Error, Version,
     common::parse::{TagParser, TxtRecordParser, V},
+    scan::{find_ascii_whitespace, find_le_space_or2},
 };
 use std::{
     net::{Ipv4Addr, Ipv6Addr},
@@ -68,14 +69,14 @@ impl TxtRecordParser for Spf {
                         if term == A {
                             Mechanism::A {
                                 macro_string,
-                                ip4_mask: u32::MAX << (32 - ip4_cidr_length),
-                                ip6_mask: u128::MAX << (128 - ip6_cidr_length),
+                                ip4_mask: ip4_mask(ip4_cidr_length),
+                                ip6_mask: ip6_mask(ip6_cidr_length),
                             }
                         } else {
                             Mechanism::Mx {
                                 macro_string,
-                                ip4_mask: u32::MAX << (32 - ip4_cidr_length),
-                                ip6_mask: u128::MAX << (128 - ip6_cidr_length),
+                                ip4_mask: ip4_mask(ip4_cidr_length),
+                                ip6_mask: ip6_mask(ip6_cidr_length),
                             }
                         },
                     ));
@@ -120,7 +121,7 @@ impl TxtRecordParser for Spf {
                         qualifier,
                         Mechanism::Ip4 {
                             addr,
-                            mask: u32::MAX << (32 - cidr_length),
+                            mask: ip4_mask(cidr_length),
                         },
                     ));
                 }
@@ -139,7 +140,7 @@ impl TxtRecordParser for Spf {
                         qualifier,
                         Mechanism::Ip6 {
                             addr,
-                            mask: u128::MAX << (128 - cidr_length),
+                            mask: ip6_mask(cidr_length),
                         },
                     ));
                 }
@@ -210,6 +211,46 @@ impl TxtRecordParser for Spf {
     }
 }
 
+#[inline(always)]
+fn ip4_mask(cidr_length: u8) -> u32 {
+    if cidr_length == 0 {
+        0
+    } else {
+        u32::MAX << (32 - cidr_length)
+    }
+}
+
+#[inline(always)]
+fn ip6_mask(cidr_length: u8) -> u128 {
+    if cidr_length == 0 {
+        0
+    } else {
+        u128::MAX << (128 - cidr_length)
+    }
+}
+
+const TERM_POISON: u8 = 0;
+const TERM_SPACE: u8 = 1;
+const TERM_STOP: u8 = 2;
+
+const TERM_CLASS: [u8; 256] = {
+    let mut table = [TERM_POISON; 256];
+    let mut ch = 0usize;
+    while ch < 256 {
+        table[ch] = match ch as u8 {
+            b'a'..=b'z' => ch as u8,
+            b'A'..=b'Z' => (ch as u8) - b'A' + b'a',
+            b'4' => b'4',
+            b'6' => b'6',
+            b':' | b'=' | b'/' => TERM_STOP,
+            b'\t' | b'\n' | b'\x0C' | b'\r' | b' ' => TERM_SPACE,
+            _ => TERM_POISON,
+        };
+        ch += 1;
+    }
+    table
+};
+
 const A: u64 = b'a' as u64;
 const ALL: u64 = ((b'l' as u64) << 16) | ((b'l' as u64) << 8) | (b'a' as u64);
 const EXISTS: u64 = ((b's' as u64) << 40)
@@ -255,50 +296,53 @@ pub(crate) trait SPFParser: Sized {
 
 impl SPFParser for Iter<'_, u8> {
     fn next_term(&mut self) -> Option<(u64, Qualifier, u8)> {
+        let input = self.as_slice();
+        let mut pos = 0;
         let mut qualifier = Qualifier::Pass;
-        let mut stop_char = b' ';
-        let mut d = 0;
-        let mut shift = 0;
 
-        for &ch in self {
+        while let Some(&ch) = input.get(pos) {
             match ch {
-                b'a'..=b'z' | b'4' | b'6' if shift < 64 => {
-                    d |= (ch as u64) << shift;
-                    shift += 8;
+                b'+' => qualifier = Qualifier::Pass,
+                b'-' => qualifier = Qualifier::Fail,
+                b'~' => qualifier = Qualifier::SoftFail,
+                b'?' => qualifier = Qualifier::Neutral,
+                b'\t' | b'\n' | b'\x0C' | b'\r' | b' ' => (),
+                _ => break,
+            }
+            pos += 1;
+        }
+
+        let mut d = 0u64;
+        let mut shift = 0;
+        let mut stop_char = b' ';
+
+        while let Some(&ch) = input.get(pos) {
+            pos += 1;
+            match TERM_CLASS[ch as usize] {
+                TERM_POISON => {
+                    d = u64::MAX;
+                    shift = 64;
                 }
-                b'A'..=b'Z' if shift < 64 => {
-                    d |= ((ch - b'A' + b'a') as u64) << shift;
-                    shift += 8;
+                TERM_SPACE => {
+                    stop_char = b' ';
+                    break;
                 }
-                b'+' if shift == 0 => {
-                    qualifier = Qualifier::Pass;
-                }
-                b'-' if shift == 0 => {
-                    qualifier = Qualifier::Fail;
-                }
-                b'~' if shift == 0 => {
-                    qualifier = Qualifier::SoftFail;
-                }
-                b'?' if shift == 0 => {
-                    qualifier = Qualifier::Neutral;
-                }
-                b':' | b'=' | b'/' => {
+                TERM_STOP => {
                     stop_char = ch;
                     break;
                 }
+                lower if shift < 64 => {
+                    d |= (lower as u64) << shift;
+                    shift += 8;
+                }
                 _ => {
-                    if ch.is_ascii_whitespace() {
-                        if shift != 0 {
-                            stop_char = b' ';
-                            break;
-                        }
-                    } else {
-                        d = u64::MAX;
-                        shift = 64;
-                    }
+                    d = u64::MAX;
+                    shift = 64;
                 }
             }
         }
+
+        *self = input.get(pos..).unwrap_or_default().iter();
 
         if d != 0 {
             (d, qualifier, stop_char).into()
@@ -307,8 +351,385 @@ impl SPFParser for Iter<'_, u8> {
         }
     }
 
-    #[allow(clippy::while_let_on_iterator)]
     fn macro_string(&mut self, is_exp: bool) -> crate::Result<(Macro, u8)> {
+        let input = self.as_slice();
+        let mut pos = 0;
+
+        loop {
+            let rest = input.get(pos..).unwrap_or_default();
+            let hit = pos
+                + if is_exp {
+                    memchr::memchr(b'%', rest).unwrap_or(rest.len())
+                } else {
+                    find_le_space_or2(rest, b'%', b'/')
+                };
+
+            match input.get(hit) {
+                None => {
+                    *self = [].iter();
+                    return literal_macro(input, b' ');
+                }
+                Some(&b'%') => break,
+                Some(&ch) if !is_exp && (ch == b'/' || ch.is_ascii_whitespace()) => {
+                    *self = input.get(hit + 1..).unwrap_or_default().iter();
+                    return literal_macro(
+                        input.get(..hit).unwrap_or_default(),
+                        if ch == b'/' { b'/' } else { b' ' },
+                    );
+                }
+                Some(_) => pos = hit + 1,
+            }
+        }
+
+        self.macro_string_slow(is_exp)
+    }
+
+    fn ip4(&mut self) -> crate::Result<(Ipv4Addr, u8)> {
+        let input = self.as_slice();
+        let mut pos = 0;
+        let mut stop_char = b' ';
+        let mut ip = [0u8; 4];
+        let mut octet = 0u8;
+        let mut group = 0usize;
+
+        while let Some(&ch) = input.get(pos) {
+            pos += 1;
+            match ch {
+                b'0'..=b'9' => {
+                    octet = octet.saturating_mul(10).saturating_add(ch - b'0');
+                }
+                b'.' if group < 3 => {
+                    ip[group] = octet;
+                    octet = 0;
+                    group += 1;
+                }
+                _ => {
+                    stop_char = if ch.is_ascii_whitespace() { b' ' } else { ch };
+                    break;
+                }
+            }
+        }
+
+        *self = input.get(pos..).unwrap_or_default().iter();
+
+        if group == 3 {
+            let [a, b, c, _] = ip;
+            Ok((Ipv4Addr::new(a, b, c, octet), stop_char))
+        } else {
+            Err(Error::ParseError)
+        }
+    }
+
+    fn ip6(&mut self) -> crate::Result<(Ipv6Addr, u8)> {
+        let input = self.as_slice();
+        let (result, pos) = parse_ip6(input);
+        *self = input.get(pos..).unwrap_or_default().iter();
+        result
+    }
+
+    fn cidr_length(&mut self) -> crate::Result<u8> {
+        let input = self.as_slice();
+        let mut pos = 0;
+        let mut cidr_length = 0u8;
+
+        while let Some(&ch) = input.get(pos) {
+            pos += 1;
+            match ch {
+                b'0'..=b'9' => {
+                    cidr_length = cidr_length.saturating_mul(10).saturating_add(ch - b'0');
+                }
+                _ => {
+                    if !ch.is_ascii_whitespace() {
+                        *self = input.get(pos..).unwrap_or_default().iter();
+                        return Err(Error::ParseError);
+                    }
+                    break;
+                }
+            }
+        }
+
+        *self = input.get(pos..).unwrap_or_default().iter();
+        Ok(cidr_length)
+    }
+
+    fn dual_cidr_length(&mut self) -> crate::Result<(u8, u8)> {
+        let input = self.as_slice();
+        let mut pos = 0;
+        let mut ip4_length = u8::MAX;
+        let mut ip6_length = u8::MAX;
+        let mut in_ip6 = false;
+
+        while let Some(&ch) = input.get(pos) {
+            pos += 1;
+            match ch {
+                b'0'..=b'9' => {
+                    let digit = ch - b'0';
+                    let length = if in_ip6 {
+                        &mut ip6_length
+                    } else {
+                        &mut ip4_length
+                    };
+                    *length = if *length != u8::MAX {
+                        length.saturating_mul(10).saturating_add(digit)
+                    } else {
+                        digit
+                    };
+                }
+                b'/' => {
+                    if !in_ip6 {
+                        in_ip6 = true;
+                    } else if ip6_length != u8::MAX {
+                        *self = input.get(pos..).unwrap_or_default().iter();
+                        return Err(Error::ParseError);
+                    }
+                }
+                _ => {
+                    if !ch.is_ascii_whitespace() {
+                        *self = input.get(pos..).unwrap_or_default().iter();
+                        return Err(Error::ParseError);
+                    }
+                    break;
+                }
+            }
+        }
+
+        *self = input.get(pos..).unwrap_or_default().iter();
+        Ok((
+            std::cmp::min(ip4_length, 32),
+            std::cmp::min(ip6_length, 128),
+        ))
+    }
+
+    fn rr(&mut self) -> crate::Result<u8> {
+        let mut flags: u8 = 0;
+
+        'outer: while let Some(&ch) = self.next() {
+            match ch {
+                b'a' | b'A' => {
+                    for _ in 0..2 {
+                        match self.next().unwrap_or(&0) {
+                            b'l' | b'L' => {}
+                            b' ' | b'\t' => {
+                                return Ok(flags);
+                            }
+                            _ => {
+                                continue 'outer;
+                            }
+                        }
+                    }
+                    flags = u8::MAX;
+                }
+                b'e' | b'E' => {
+                    flags |= RR_TEMP_PERM_ERROR;
+                }
+                b'f' | b'F' => {
+                    flags |= RR_FAIL;
+                }
+                b's' | b'S' => {
+                    flags |= RR_SOFTFAIL;
+                }
+                b'n' | b'N' => {
+                    flags |= RR_NEUTRAL_NONE;
+                }
+                b':' => {}
+                _ => {
+                    if ch.is_ascii_whitespace() {
+                        break;
+                    } else if !ch.is_ascii_alphanumeric() {
+                        return Err(Error::ParseError);
+                    }
+                }
+            }
+        }
+
+        Ok(flags)
+    }
+
+    fn ra(&mut self) -> crate::Result<Vec<u8>> {
+        let input = self.as_slice();
+        let end = find_ascii_whitespace(input);
+        let ra = input.get(..end).unwrap_or_default().to_vec();
+        *self = input.get(end + 1..).unwrap_or_default().iter();
+        Ok(ra)
+    }
+}
+
+fn parse_ip6(input: &[u8]) -> (crate::Result<(Ipv6Addr, u8)>, usize) {
+    let mut pos = 0;
+    let mut stop_char = b' ';
+    let mut ip = [0u16; 8];
+    let mut ip_pos = 0;
+    let mut ip4_pos = 0;
+    let mut part = Ip6Part::default();
+    let mut zero_group_pos = usize::MAX;
+
+    while let Some(&ch) = input.get(pos) {
+        pos += 1;
+        match ch {
+            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => {
+                if !part.push(ch) {
+                    return (Err(Error::ParseError), pos);
+                }
+            }
+            b':' => {
+                if ip_pos < 8 {
+                    if !part.is_empty() {
+                        ip[ip_pos] = part.take_hex();
+                        ip_pos += 1;
+                    } else if zero_group_pos == usize::MAX {
+                        zero_group_pos = ip_pos;
+                    } else if zero_group_pos != ip_pos {
+                        return (Err(Error::ParseError), pos);
+                    }
+                } else {
+                    return (Err(Error::ParseError), pos);
+                }
+            }
+            b'.' => {
+                if ip_pos < 8 && !part.is_empty() {
+                    let Some(qnum) = part.take_octet() else {
+                        return (Err(Error::ParseError), pos);
+                    };
+                    if ip4_pos % 2 == 1 {
+                        ip[ip_pos] = (ip[ip_pos] << 8) | qnum;
+                        ip_pos += 1;
+                    } else {
+                        ip[ip_pos] = qnum;
+                    }
+                    ip4_pos += 1;
+                } else {
+                    return (Err(Error::ParseError), pos);
+                }
+            }
+            _ => {
+                stop_char = if ch.is_ascii_whitespace() { b' ' } else { ch };
+                break;
+            }
+        }
+    }
+
+    if !part.is_empty() {
+        if ip_pos < 8 {
+            ip[ip_pos] = if ip4_pos == 0 {
+                part.take_hex()
+            } else if ip4_pos == 3 {
+                match part.take_octet() {
+                    Some(qnum) => (ip[ip_pos] << 8) | qnum,
+                    None => return (Err(Error::ParseError), pos),
+                }
+            } else {
+                return (Err(Error::ParseError), pos);
+            };
+
+            ip_pos += 1;
+        } else {
+            return (Err(Error::ParseError), pos);
+        }
+    }
+    if zero_group_pos != usize::MAX && zero_group_pos < ip_pos {
+        if ip_pos <= 7 {
+            ip.copy_within(zero_group_pos..ip_pos, zero_group_pos + 8 - ip_pos);
+            ip[zero_group_pos..zero_group_pos + 8 - ip_pos].fill(0);
+        } else {
+            return (Err(Error::ParseError), pos);
+        }
+    }
+
+    if ip_pos != 0 || zero_group_pos != usize::MAX {
+        let [a, b, c, d, e, f, g, h] = ip;
+        (Ok((Ipv6Addr::new(a, b, c, d, e, f, g, h), stop_char)), pos)
+    } else {
+        (Err(Error::ParseError), pos)
+    }
+}
+
+struct Ip6Part {
+    hex: u16,
+    decimal: u16,
+    len: u8,
+    is_decimal: bool,
+}
+
+impl Default for Ip6Part {
+    fn default() -> Self {
+        Ip6Part {
+            hex: 0,
+            decimal: 0,
+            len: 0,
+            is_decimal: true,
+        }
+    }
+}
+
+impl Ip6Part {
+    #[inline(always)]
+    fn push(&mut self, ch: u8) -> bool {
+        if self.len < 4 {
+            self.len += 1;
+            self.hex = (self.hex << 4) | HEX_NIBBLE[ch as usize] as u16;
+            if ch.is_ascii_digit() {
+                self.decimal = self.decimal * 10 + (ch - b'0') as u16;
+            } else {
+                self.is_decimal = false;
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline(always)]
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[inline(always)]
+    fn take_hex(&mut self) -> u16 {
+        let value = self.hex;
+        *self = Ip6Part::default();
+        value
+    }
+
+    #[inline(always)]
+    fn take_octet(&mut self) -> Option<u16> {
+        let value = (self.is_decimal && self.decimal <= 255).then_some(self.decimal);
+        *self = Ip6Part::default();
+        value
+    }
+}
+
+const HEX_NIBBLE: [u8; 256] = {
+    let mut table = [0u8; 256];
+    let mut ch = 0usize;
+    while ch < 256 {
+        table[ch] = match ch as u8 {
+            b'0'..=b'9' => (ch as u8) - b'0',
+            b'a'..=b'f' => (ch as u8) - b'a' + 10,
+            b'A'..=b'F' => (ch as u8) - b'A' + 10,
+            _ => 0,
+        };
+        ch += 1;
+    }
+    table
+};
+
+#[inline(always)]
+fn literal_macro(literal: &[u8], stop_char: u8) -> crate::Result<(Macro, u8)> {
+    if literal.is_empty() {
+        Err(Error::ParseError)
+    } else {
+        Ok((Macro::Literal(literal.into()), stop_char))
+    }
+}
+
+trait SPFMacroParser {
+    fn macro_string_slow(&mut self, is_exp: bool) -> crate::Result<(Macro, u8)>;
+}
+
+impl SPFMacroParser for Iter<'_, u8> {
+    #[inline(never)]
+    #[allow(clippy::while_let_on_iterator)]
+    fn macro_string_slow(&mut self, is_exp: bool) -> crate::Result<(Macro, u8)> {
         let mut stop_char = b' ';
         let mut last_is_pct = false;
         let mut literal = Vec::with_capacity(16);
@@ -408,267 +829,18 @@ impl SPFParser for Iter<'_, u8> {
         }
 
         match macro_string.len() {
-            1 => Ok((macro_string.pop().unwrap(), stop_char)),
+            1 => macro_string
+                .pop()
+                .map(|m| (m, stop_char))
+                .ok_or(Error::ParseError),
             0 => Err(Error::ParseError),
             _ => Ok((Macro::List(macro_string.into_boxed_slice()), stop_char)),
         }
     }
-
-    fn ip4(&mut self) -> crate::Result<(Ipv4Addr, u8)> {
-        let mut stop_char = b' ';
-        let mut pos = 0;
-        let mut ip = [0u8; 4];
-
-        for &ch in self {
-            match ch {
-                b'0'..=b'9' => {
-                    ip[pos] = (ip[pos].saturating_mul(10)).saturating_add(ch - b'0');
-                }
-                b'.' if pos < 3 => {
-                    pos += 1;
-                }
-                _ => {
-                    stop_char = if ch.is_ascii_whitespace() { b' ' } else { ch };
-                    break;
-                }
-            }
-        }
-
-        if pos == 3 {
-            Ok((Ipv4Addr::new(ip[0], ip[1], ip[2], ip[3]), stop_char))
-        } else {
-            Err(Error::ParseError)
-        }
-    }
-
-    fn ip6(&mut self) -> crate::Result<(Ipv6Addr, u8)> {
-        let mut stop_char = b' ';
-        let mut ip = [0u16; 8];
-        let mut ip_pos = 0;
-        let mut ip4_pos = 0;
-        let mut ip_part = [0u8; 8];
-        let mut ip_part_pos = 0;
-        let mut zero_group_pos = usize::MAX;
-
-        for &ch in self {
-            match ch {
-                b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => {
-                    if ip_part_pos < 4 {
-                        ip_part[ip_part_pos] = ch;
-                        ip_part_pos += 1;
-                    } else {
-                        return Err(Error::ParseError);
-                    }
-                }
-                b':' => {
-                    if ip_pos < 8 {
-                        if ip_part_pos != 0 {
-                            ip[ip_pos] = u16::from_str_radix(
-                                std::str::from_utf8(&ip_part[..ip_part_pos]).unwrap(),
-                                16,
-                            )
-                            .map_err(|_| Error::ParseError)?;
-                            ip_part_pos = 0;
-                            ip_pos += 1;
-                        } else if zero_group_pos == usize::MAX {
-                            zero_group_pos = ip_pos;
-                        } else if zero_group_pos != ip_pos {
-                            return Err(Error::ParseError);
-                        }
-                    } else {
-                        return Err(Error::ParseError);
-                    }
-                }
-                b'.' => {
-                    if ip_pos < 8 && ip_part_pos > 0 {
-                        let qnum = std::str::from_utf8(&ip_part[..ip_part_pos])
-                            .unwrap()
-                            .parse::<u8>()
-                            .map_err(|_| Error::ParseError)?
-                            as u16;
-                        ip_part_pos = 0;
-                        if ip4_pos % 2 == 1 {
-                            ip[ip_pos] = (ip[ip_pos] << 8) | qnum;
-                            ip_pos += 1;
-                        } else {
-                            ip[ip_pos] = qnum;
-                        }
-                        ip4_pos += 1;
-                    } else {
-                        return Err(Error::ParseError);
-                    }
-                }
-                _ => {
-                    stop_char = if ch.is_ascii_whitespace() { b' ' } else { ch };
-                    break;
-                }
-            }
-        }
-
-        if ip_part_pos != 0 {
-            if ip_pos < 8 {
-                ip[ip_pos] = if ip4_pos == 0 {
-                    u16::from_str_radix(std::str::from_utf8(&ip_part[..ip_part_pos]).unwrap(), 16)
-                        .map_err(|_| Error::ParseError)?
-                } else if ip4_pos == 3 {
-                    (ip[ip_pos] << 8)
-                        | std::str::from_utf8(&ip_part[..ip_part_pos])
-                            .unwrap()
-                            .parse::<u8>()
-                            .map_err(|_| Error::ParseError)? as u16
-                } else {
-                    return Err(Error::ParseError);
-                };
-
-                ip_pos += 1;
-            } else {
-                return Err(Error::ParseError);
-            }
-        }
-        if zero_group_pos != usize::MAX && zero_group_pos < ip_pos {
-            if ip_pos <= 7 {
-                ip.copy_within(zero_group_pos..ip_pos, zero_group_pos + 8 - ip_pos);
-                ip[zero_group_pos..zero_group_pos + 8 - ip_pos].fill(0);
-            } else {
-                return Err(Error::ParseError);
-            }
-        }
-
-        if ip_pos != 0 || zero_group_pos != usize::MAX {
-            Ok((
-                Ipv6Addr::new(ip[0], ip[1], ip[2], ip[3], ip[4], ip[5], ip[6], ip[7]),
-                stop_char,
-            ))
-        } else {
-            Err(Error::ParseError)
-        }
-    }
-
-    fn cidr_length(&mut self) -> crate::Result<u8> {
-        let mut cidr_length: u8 = 0;
-        for &ch in self {
-            match ch {
-                b'0'..=b'9' => {
-                    cidr_length = (cidr_length.saturating_mul(10)).saturating_add(ch - b'0');
-                }
-                _ => {
-                    if ch.is_ascii_whitespace() {
-                        break;
-                    } else {
-                        return Err(Error::ParseError);
-                    }
-                }
-            }
-        }
-
-        Ok(cidr_length)
-    }
-
-    fn dual_cidr_length(&mut self) -> crate::Result<(u8, u8)> {
-        let mut ip4_length: u8 = u8::MAX;
-        let mut ip6_length: u8 = u8::MAX;
-        let mut in_ip6 = false;
-
-        for &ch in self {
-            match ch {
-                b'0'..=b'9' => {
-                    if in_ip6 {
-                        ip6_length = if ip6_length != u8::MAX {
-                            (ip6_length.saturating_mul(10)).saturating_add(ch - b'0')
-                        } else {
-                            ch - b'0'
-                        };
-                    } else {
-                        ip4_length = if ip4_length != u8::MAX {
-                            (ip4_length.saturating_mul(10)).saturating_add(ch - b'0')
-                        } else {
-                            ch - b'0'
-                        };
-                    }
-                }
-                b'/' => {
-                    if !in_ip6 {
-                        in_ip6 = true;
-                    } else if ip6_length != u8::MAX {
-                        return Err(Error::ParseError);
-                    }
-                }
-                _ => {
-                    if ch.is_ascii_whitespace() {
-                        break;
-                    } else {
-                        return Err(Error::ParseError);
-                    }
-                }
-            }
-        }
-
-        Ok((
-            std::cmp::min(ip4_length, 32),
-            std::cmp::min(ip6_length, 128),
-        ))
-    }
-
-    fn rr(&mut self) -> crate::Result<u8> {
-        let mut flags: u8 = 0;
-
-        'outer: while let Some(&ch) = self.next() {
-            match ch {
-                b'a' | b'A' => {
-                    for _ in 0..2 {
-                        match self.next().unwrap_or(&0) {
-                            b'l' | b'L' => {}
-                            b' ' | b'\t' => {
-                                return Ok(flags);
-                            }
-                            _ => {
-                                continue 'outer;
-                            }
-                        }
-                    }
-                    flags = u8::MAX;
-                }
-                b'e' | b'E' => {
-                    flags |= RR_TEMP_PERM_ERROR;
-                }
-                b'f' | b'F' => {
-                    flags |= RR_FAIL;
-                }
-                b's' | b'S' => {
-                    flags |= RR_SOFTFAIL;
-                }
-                b'n' | b'N' => {
-                    flags |= RR_NEUTRAL_NONE;
-                }
-                b':' => {}
-                _ => {
-                    if ch.is_ascii_whitespace() {
-                        break;
-                    } else if !ch.is_ascii_alphanumeric() {
-                        return Err(Error::ParseError);
-                    }
-                }
-            }
-        }
-
-        Ok(flags)
-    }
-
-    fn ra(&mut self) -> crate::Result<Vec<u8>> {
-        let mut ra = Vec::new();
-        for &ch in self {
-            if !ch.is_ascii_whitespace() {
-                ra.push(ch);
-            } else {
-                break;
-            }
-        }
-        Ok(ra)
-    }
 }
 
 impl Variable {
-    fn parse(ch: u8) -> Option<(Self, bool)> {
+    pub(crate) fn parse(ch: u8) -> Option<(Self, bool)> {
         match ch {
             b's' => (Variable::Sender, false),
             b'l' => (Variable::SenderLocalPart, false),
@@ -692,7 +864,7 @@ impl Variable {
         .into()
     }
 
-    fn parse_exp(ch: u8) -> Option<(Self, bool)> {
+    pub(crate) fn parse_exp(ch: u8) -> Option<(Self, bool)> {
         match ch {
             b's' => (Variable::Sender, false),
             b'l' => (Variable::SenderLocalPart, false),

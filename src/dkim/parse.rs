@@ -14,7 +14,6 @@ use crate::{
     common::{crypto::VerifyingKeyType, parse::*, verify::DomainKey},
     dkim::{RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION},
 };
-use mail_parser::decoders::base64::base64_decode_stream;
 use std::slice::Iter;
 
 const ATPSH: u64 = (b'a' as u64)
@@ -62,7 +61,6 @@ impl Signature {
             atps: None,
             atpsh: None,
         };
-        let header_len = header.len();
         let mut header = header.iter();
 
         while let Some(key) = header.key() {
@@ -76,14 +74,8 @@ impl Signature {
                 A => {
                     signature.a = header.algorithm()?;
                 }
-                B => {
-                    signature.b =
-                        base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
-                }
-                BH => {
-                    signature.bh =
-                        base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
-                }
+                B => signature.b = header.base64().ok_or(Error::Base64)?,
+                BH => signature.bh = header.base64().ok_or(Error::Base64)?,
                 C => {
                     let (ch, cb) = header.canonicalization(Canonicalization::Simple)?;
                     signature.ch = ch;
@@ -91,7 +83,7 @@ impl Signature {
                 }
                 D => signature.d = header.text(true),
                 H => signature.h = header.items(),
-                I => signature.i = header.text_qp(Vec::with_capacity(20), true, false),
+                I => signature.i = header.text_qp(Vec::new(), true, false),
                 L => signature.l = header.number().unwrap_or(0),
                 S => signature.s = header.text(true),
                 T => signature.t = header.number().unwrap_or(0),
@@ -240,7 +232,6 @@ impl SignatureParser for Iter<'_, u8> {
 impl TxtRecordParser for DomainKey {
     #[allow(clippy::while_let_on_iterator)]
     fn parse(header: &[u8]) -> crate::Result<Self> {
-        let header_len = header.len();
         let mut header = header.iter();
         let mut flags = 0;
         let mut key_type = VerifyingKeyType::Rsa;
@@ -255,7 +246,7 @@ impl TxtRecordParser for DomainKey {
                 }
                 H => flags |= header.flags::<HashAlgorithm>(),
                 P => {
-                    if let Some(bytes) = base64_decode_stream(&mut header, header_len, b';') {
+                    if let Some(bytes) = header.base64() {
                         public_key = Some(bytes);
                     }
                 }
@@ -312,13 +303,13 @@ impl TxtRecordParser for DomainKeyReport {
         while let Some(key) = header.key() {
             match key {
                 RA => {
-                    record.ra = header.text_qp(Vec::with_capacity(20), true, false);
+                    record.ra = header.text_qp(Vec::new(), true, false);
                 }
                 RP => {
                     record.rp = std::cmp::min(header.number().unwrap_or(0), 100) as u8;
                 }
                 RS => {
-                    record.rs = header.text_qp(Vec::with_capacity(20), false, false).into();
+                    record.rs = header.text_qp(Vec::new(), false, false).into();
                 }
                 RR => {
                     record.rr = 0;
@@ -456,6 +447,7 @@ mod test {
     use crate::{
         common::{
             crypto::{Algorithm, R_HASH_SHA1, R_HASH_SHA256},
+            headers::HeaderWriter,
             parse::TxtRecordParser,
             verify::DomainKey,
         },
@@ -613,6 +605,12 @@ mod test {
             assert_eq!(result.t, expected_result.t, "{signature:?}");
             assert_eq!(result.ch, expected_result.ch, "{signature:?}");
             assert_eq!(result.cb, expected_result.cb, "{signature:?}");
+
+            let header = result.to_header();
+            let value = header.strip_prefix("DKIM-Signature: ").unwrap();
+            let mut round_trip = Signature::parse(value.as_bytes()).unwrap();
+            round_trip.z = result.z.clone();
+            assert_eq!(round_trip, result, "{header:?}");
         }
     }
 

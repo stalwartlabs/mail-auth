@@ -29,6 +29,49 @@ const MF: u64 = (b'm' as u64) | ((b'f' as u64) << 8);
 const RT: u64 = (b'r' as u64) | ((b't' as u64) << 8);
 const ND: u64 = (b'n' as u64) | ((b'd' as u64) << 8);
 
+const HAS_I: u32 = 1 << 0;
+const HAS_M: u32 = 1 << 1;
+const HAS_T: u32 = 1 << 2;
+const HAS_D: u32 = 1 << 3;
+const HAS_S: u32 = 1 << 4;
+const HAS_MF: u32 = 1 << 5;
+const HAS_RT: u32 = 1 << 6;
+
+const SEEN_INLINE: usize = 16;
+
+#[derive(Default)]
+struct SeenTags {
+    inline: [u64; SEEN_INLINE],
+    len: usize,
+    spill: Vec<u64>,
+}
+
+impl SeenTags {
+    #[inline]
+    fn insert(&mut self, key: u64) -> bool {
+        if self.contains(key) {
+            return false;
+        }
+        match self.inline.get_mut(self.len) {
+            Some(slot) => {
+                *slot = key;
+                self.len += 1;
+            }
+            None => self.spill.push(key),
+        }
+        true
+    }
+
+    #[inline]
+    fn contains(&self, key: u64) -> bool {
+        self.inline
+            .get(..self.len)
+            .unwrap_or_default()
+            .contains(&key)
+            || self.spill.contains(&key)
+    }
+}
+
 impl Signature {
     /// Parses a single DKIM2-Signature header value (without the field name).
     #[allow(clippy::while_let_on_iterator)]
@@ -38,26 +81,38 @@ impl Signature {
         let mut rcpt_to: Vec<String> = Vec::new();
         let mut next_domain: Option<String> = None;
         let mut has_envelope = false;
-        let mut seen: Vec<u64> = Vec::with_capacity(16);
+        let mut seen = SeenTags::default();
+        let mut present = 0u32;
         let mut header = header.iter();
 
         while let Some(key) = header.key() {
-            if key != u64::MAX {
-                if seen.contains(&key) {
-                    return Err(Error::Dkim2(Dkim2Error::SignatureSyntax(signature.i)));
-                }
-                seen.push(key);
+            if key != u64::MAX && !seen.insert(key) {
+                return Err(Error::Dkim2(Dkim2Error::SignatureSyntax(signature.i)));
             }
             match key {
-                I => signature.i = header.number().unwrap_or(0) as u32,
-                M => signature.m = header.number().unwrap_or(0) as u32,
-                T => signature.t = header.number().unwrap_or(0),
-                D => signature.d = header.text(true),
+                I => {
+                    present |= HAS_I;
+                    signature.i = header.number().unwrap_or(0) as u32
+                }
+                M => {
+                    present |= HAS_M;
+                    signature.m = header.number().unwrap_or(0) as u32
+                }
+                T => {
+                    present |= HAS_T;
+                    signature.t = header.number().unwrap_or(0)
+                }
+                D => {
+                    present |= HAS_D;
+                    signature.d = header.text(true)
+                }
                 S => {
+                    present |= HAS_S;
                     signature.s = parse_signature_values(&header.text(false))
                         .ok_or(Error::Dkim2(Dkim2Error::SignatureSyntax(signature.i)))?;
                 }
                 MF => {
+                    present |= HAS_MF;
                     mail_from = Some(
                         decode_b64_string(&header.text(false))
                             .ok_or(Error::Dkim2(Dkim2Error::SignatureSyntax(signature.i)))?,
@@ -65,6 +120,7 @@ impl Signature {
                     has_envelope = true;
                 }
                 RT => {
+                    present |= HAS_RT;
                     let value = header.text(false);
                     rcpt_to = value
                         .split(',')
@@ -95,8 +151,14 @@ impl Signature {
             }
         }
 
-        for (key, tag) in [(I, "i"), (M, "m"), (T, "t"), (D, "d"), (S, "s")] {
-            if !seen.contains(&key) {
+        for (flag, tag) in [
+            (HAS_I, "i"),
+            (HAS_M, "m"),
+            (HAS_T, "t"),
+            (HAS_D, "d"),
+            (HAS_S, "s"),
+        ] {
+            if present & flag == 0 {
                 return Err(Error::Dkim2(Dkim2Error::SignatureTagMissing {
                     i: signature.i,
                     tag,
@@ -113,8 +175,8 @@ impl Signature {
             }
             (Some(domain), false) => ChainBinding::NextDomain(domain),
             (None, _) => {
-                for (key, tag) in [(MF, "mf"), (RT, "rt")] {
-                    if !seen.contains(&key) {
+                for (flag, tag) in [(HAS_MF, "mf"), (HAS_RT, "rt")] {
+                    if present & flag == 0 {
                         return Err(Error::Dkim2(Dkim2Error::SignatureTagMissing {
                             i: signature.i,
                             tag,
@@ -137,15 +199,12 @@ impl MessageInstance {
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &[u8]) -> crate::Result<MessageInstance> {
         let mut instance = MessageInstance::default();
-        let mut seen: Vec<u64> = Vec::with_capacity(4);
+        let mut seen = SeenTags::default();
         let mut header = header.iter();
 
         while let Some(key) = header.key() {
-            if key != u64::MAX {
-                if seen.contains(&key) {
-                    return Err(Error::Dkim2(Dkim2Error::InstanceSyntax(instance.m)));
-                }
-                seen.push(key);
+            if key != u64::MAX && !seen.insert(key) {
+                return Err(Error::Dkim2(Dkim2Error::InstanceSyntax(instance.m)));
             }
             match key {
                 M => instance.m = header.number().unwrap_or(0) as u32,
@@ -166,11 +225,11 @@ impl MessageInstance {
     }
 }
 
-fn decode_b64_string(value: &str) -> Option<String> {
+pub(crate) fn decode_b64_string(value: &str) -> Option<String> {
     base64_decode(value.as_bytes()).and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
-fn parse_signature_values(value: &str) -> Option<Vec<SignatureValue>> {
+pub(crate) fn parse_signature_values(value: &str) -> Option<Vec<SignatureValue>> {
     let value = value.trim();
     if value.is_empty() {
         return None;
@@ -201,7 +260,7 @@ fn parse_signature_values(value: &str) -> Option<Vec<SignatureValue>> {
     Some(values)
 }
 
-fn parse_hashes(value: &str) -> Option<Vec<MessageHash>> {
+pub(crate) fn parse_hashes(value: &str) -> Option<Vec<MessageHash>> {
     let mut hashes = Vec::new();
     for set in value.split(',') {
         let mut parts = set.splitn(3, ':');

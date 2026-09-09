@@ -13,7 +13,6 @@ use crate::{
         headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream, Writable, Writer},
     },
 };
-use mail_builder::encoders::Base64Encoder;
 
 impl<T: SigningKey> DkimSigner<T, Done> {
     /// Signs a message.
@@ -58,8 +57,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
 
         // Create Signature
         let mut signature = self.template.clone();
-        let body_hash = self.key.hash(canonical_body);
-        signature.bh = Base64Encoder::new().encode(body_hash.as_ref())?;
+        signature.bh = self.key.hash(canonical_body).as_ref().to_vec();
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
@@ -72,13 +70,10 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         }
 
         // Sign
-        let b = self.key.sign(SignableMessage {
+        signature.b = self.key.sign(SignableMessage {
             headers: canonical_headers,
             signature: &signature,
         })?;
-
-        // Encode
-        signature.b = Base64Encoder::new().encode(&b)?;
 
         Ok(signature)
     }
@@ -246,7 +241,7 @@ pub mod test {
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
-                .agent_user_identifier("\"John Doe\" <jdoe@example.com>")
+                .agent_user_identifier("\"John Doe\"@example.com")
                 .sign(message.as_bytes())
                 .unwrap(),
             message,
@@ -281,7 +276,7 @@ pub mod test {
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
-                .agent_user_identifier("\"John Doe\" <jdoe@example.com>")
+                .agent_user_identifier("\"John Doe\"@example.com")
                 .sign(empty_message.as_bytes())
                 .unwrap(),
             empty_message,
@@ -303,7 +298,7 @@ pub mod test {
                 .headers(["From", "To", "Subject"])
                 .header_canonicalization(Canonicalization::Simple)
                 .body_canonicalization(Canonicalization::Simple)
-                .agent_user_identifier("\"John Doe\" <jdoe@example.com>")
+                .agent_user_identifier("\"John Doe\"@example.com")
                 .sign(empty_message.as_bytes())
                 .unwrap(),
             empty_message,

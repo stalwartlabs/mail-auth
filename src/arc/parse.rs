@@ -11,7 +11,6 @@ use crate::{
     common::{crypto::Algorithm, parse::TagParser},
     dkim::{Canonicalization, parse::SignatureParser},
 };
-use mail_parser::decoders::base64::base64_decode_stream;
 
 pub(crate) const CV: u64 = (b'c' as u64) | ((b'v' as u64) << 8);
 
@@ -33,7 +32,6 @@ impl Signature {
             ch: Canonicalization::Simple,
             cb: Canonicalization::Simple,
         };
-        let header_len = header.len();
         let mut header = header.iter();
 
         while let Some(key) = header.key() {
@@ -47,14 +45,8 @@ impl Signature {
                 A => {
                     signature.a = header.algorithm()?;
                 }
-                B => {
-                    signature.b =
-                        base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
-                }
-                BH => {
-                    signature.bh =
-                        base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
-                }
+                B => signature.b = header.base64().ok_or(Error::Base64)?,
+                BH => signature.bh = header.base64().ok_or(Error::Base64)?,
                 C => {
                     let (ch, cb) = header.canonicalization(Canonicalization::Simple)?;
                     signature.ch = ch;
@@ -96,7 +88,6 @@ impl Seal {
             i: 0,
             cv: ChainValidation::None,
         };
-        let header_len = header.len();
         let mut header = header.iter();
         let mut cv = None;
 
@@ -108,10 +99,7 @@ impl Seal {
                 A => {
                     seal.a = header.algorithm()?;
                 }
-                B => {
-                    seal.b =
-                        base64_decode_stream(&mut header, header_len, b';').ok_or(Error::Base64)?
-                }
+                B => seal.b = header.base64().ok_or(Error::Base64)?,
                 D => seal.d = header.text(true),
                 S => seal.s = header.text(true),
                 T => seal.t = header.number().unwrap_or(0),

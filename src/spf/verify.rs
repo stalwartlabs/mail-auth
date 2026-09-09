@@ -11,6 +11,7 @@ use crate::{
     Error, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult,
     Txt, common::cache::NoCache,
 };
+use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 pub struct SpfParameters<'x> {
@@ -102,7 +103,7 @@ impl MessageAuthenticator {
         if !sender.is_empty() {
             vars.set_sender(sender.as_bytes());
         } else {
-            vars.set_sender(format!("postmaster@{domain}").into_bytes());
+            vars.set_sender(postmaster_at(domain).into_bytes());
         }
         vars.set_domain(domain.as_bytes());
         vars.set_host_domain(host_domain.as_bytes());
@@ -114,7 +115,7 @@ impl MessageAuthenticator {
             Err(err) => return output.with_result(err.into()),
         };
 
-        let mut domain = domain.to_string();
+        let mut domain = Cow::Borrowed(domain);
         let mut include_stack = Vec::new();
 
         let mut result = None;
@@ -244,20 +245,20 @@ impl MessageAuthenticator {
                         }
 
                         let target_name = macro_string.eval(&vars, &domain, true);
-                        match self
+                        let included = self
                             .txt_lookup::<Spf>(&*target_name, params.cache_txt)
-                            .await
-                        {
+                            .await;
+                        match included {
                             Ok(included_spf) => {
-                                let new_domain = target_name.to_string();
+                                let new_domain = target_name.into_owned();
                                 include_stack.push((
                                     std::mem::replace(&mut spf_record, included_spf),
                                     pos,
                                     domain,
                                 ));
                                 directives = spf_record.directives.iter().enumerate().skip(0);
-                                domain = new_domain;
-                                vars.set_domain(domain.as_bytes().to_vec());
+                                vars.set_domain(new_domain.as_bytes().to_vec());
+                                domain = Cow::Owned(new_domain);
                                 continue;
                             }
                             Err(
@@ -283,8 +284,9 @@ impl MessageAuthenticator {
                                 .with_report(&spf_record);
                         }
 
-                        let target_addr = macro_string.eval(&vars, &domain, true).to_lowercase();
-                        let target_sub_addr = format!(".{target_addr}");
+                        let target_name = macro_string.eval(&vars, &domain, true);
+                        let target_addr = to_lowercase(target_name.as_ref());
+                        let target_addr = target_addr.as_ref();
                         let mut matches = false;
 
                         if let Ok(records) = self.ptr_lookup(ip, params.cache_ptr).await {
@@ -301,11 +303,12 @@ impl MessageAuthenticator {
                                         )
                                         .await
                                 {
-                                    matches = record.as_ref() == target_addr.as_str()
+                                    matches = record.as_ref() == target_addr
                                         || record
                                             .strip_suffix('.')
                                             .unwrap_or(record.as_ref())
-                                            .ends_with(&target_sub_addr);
+                                            .strip_suffix(target_addr)
+                                            .is_some_and(|prefix| prefix.ends_with('.'));
                                     if matches {
                                         break;
                                     }
@@ -353,16 +356,16 @@ impl MessageAuthenticator {
                 }
 
                 let target_name = macro_string.eval(&vars, &domain, true);
-                match self
+                let redirect = self
                     .txt_lookup::<Spf>(&*target_name, params.cache_txt)
-                    .await
-                {
+                    .await;
+                match redirect {
                     Ok(redirect_spf) => {
-                        let new_domain = target_name.to_string();
+                        let new_domain = target_name.into_owned();
                         spf_record = redirect_spf;
                         directives = spf_record.directives.iter().enumerate().skip(0);
-                        domain = new_domain;
-                        vars.set_domain(domain.as_bytes().to_vec());
+                        vars.set_domain(new_domain.as_bytes().to_vec());
+                        domain = Cow::Owned(new_domain);
                         continue;
                     }
                     Err(
@@ -385,10 +388,12 @@ impl MessageAuthenticator {
             if let Some((prev_record, prev_pos, prev_domain)) = include_stack.pop() {
                 spf_record = prev_record;
                 directives = spf_record.directives.iter().enumerate().skip(prev_pos);
-                let (_, directive) = directives.next().unwrap();
+                let qualifier = directives.next().map(|(_, directive)| &directive.qualifier);
 
                 if matches!(result, Some(SpfResult::Pass)) {
-                    result = Some((&directive.qualifier).into());
+                    if let Some(qualifier) = qualifier {
+                        result = Some(qualifier.into());
+                    }
                     break;
                 } else {
                     vars.set_domain(prev_domain.as_bytes().to_vec());
@@ -403,15 +408,12 @@ impl MessageAuthenticator {
         // Evaluate explain
         if let (Some(macro_string), Some(SpfResult::Fail)) = (&spf_record.exp, &result)
             && let Ok(macro_string) = self
-                .txt_lookup::<Macro>(
-                    macro_string.eval(&vars, &domain, true).to_string(),
-                    params.cache_txt,
-                )
+                .txt_lookup::<Macro>(macro_string.eval(&vars, &domain, true), params.cache_txt)
                 .await
         {
             return output
                 .with_result(SpfResult::Fail)
-                .with_explanation(macro_string.eval(&vars, &domain, false).to_string())
+                .with_explanation(macro_string.eval(&vars, &domain, false).into_owned())
                 .with_report(&spf_record);
         }
 
@@ -446,6 +448,26 @@ impl MessageAuthenticator {
     }
 }
 
+fn postmaster_at(domain: &str) -> String {
+    const POSTMASTER: &str = "postmaster@";
+    let mut sender = String::with_capacity(POSTMASTER.len() + domain.len());
+    sender.push_str(POSTMASTER);
+    sender.push_str(domain);
+    sender
+}
+
+fn to_lowercase(value: &str) -> Cow<'_, str> {
+    if value.is_ascii() {
+        if value.bytes().any(|byte| byte.is_ascii_uppercase()) {
+            Cow::Owned(value.to_ascii_lowercase())
+        } else {
+            Cow::Borrowed(value)
+        }
+    } else {
+        Cow::Owned(value.to_lowercase())
+    }
+}
+
 impl<'x> SpfParameters<'x> {
     /// Verifies the SPF EHLO identity
     pub fn verify_ehlo(
@@ -458,7 +480,7 @@ impl<'x> SpfParameters<'x> {
             domain: helo_domain,
             helo_domain,
             host_domain,
-            sender: Sender::Ehlo(format!("postmaster@{helo_domain}")),
+            sender: Sender::Ehlo(postmaster_at(helo_domain)),
         }
     }
 

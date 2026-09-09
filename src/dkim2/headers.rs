@@ -5,32 +5,10 @@
  */
 
 use super::{ChainBinding, MessageInstance, Signature, SignatureValue};
-use crate::common::headers::{HeaderFolder, HeaderWriter, Writer};
-use mail_builder::encoders::Base64Encoder;
-use std::{
-    fmt::{Display, Formatter},
-    io::Write,
+use crate::common::headers::{
+    HEADER_CAPACITY, HeaderFolder, HeaderWriter, Writer, write_base64, write_integer,
 };
-
-struct Base64Writer<'x, W: Writer> {
-    inner: &'x mut W,
-}
-
-impl<'x, W: Writer> Write for Base64Writer<'x, W> {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.inner.write(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-fn write_base64(writer: &mut impl Writer, bytes: &[u8]) {
-    let mut base64_writer = Base64Writer { inner: writer };
-    let _ = Base64Encoder::new().encode_to_writer(bytes, &mut base64_writer);
-}
+use std::fmt::{Display, Formatter};
 
 impl SignatureValue {
     fn write(&self, writer: &mut impl Writer, empty: bool) {
@@ -45,13 +23,13 @@ impl SignatureValue {
 }
 
 impl Signature {
-    pub(super) fn write_value(&self, writer: &mut impl Writer, empty_signature: bool) {
+    pub(crate) fn write_value(&self, writer: &mut impl Writer, empty_signature: bool) {
         writer.write(b"i=");
-        writer.write(self.i.to_string().as_bytes());
+        write_integer(writer, self.i as u64);
         writer.write(b"; m=");
-        writer.write(self.m.to_string().as_bytes());
+        write_integer(writer, self.m as u64);
         writer.write(b"; t=");
-        writer.write(self.t.to_string().as_bytes());
+        write_integer(writer, self.t);
         writer.write(b"; d=");
         writer.write(self.d.as_bytes());
         writer.write(b"; ");
@@ -109,9 +87,9 @@ impl Signature {
 }
 
 impl MessageInstance {
-    pub(super) fn write_value(&self, writer: &mut impl Writer) {
+    pub(crate) fn write_value(&self, writer: &mut impl Writer) {
         writer.write(b"m=");
-        writer.write(self.m.to_string().as_bytes());
+        write_integer(writer, self.m as u64);
         writer.write(b"; h=");
         for (pos, hash) in self.hashes.iter().enumerate() {
             if pos > 0 {
@@ -155,7 +133,7 @@ impl HeaderWriter for MessageInstance {
 
 impl Display for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(HEADER_CAPACITY);
         self.write_value(&mut buf, false);
         f.write_str(&String::from_utf8_lossy(&buf))
     }
@@ -163,7 +141,7 @@ impl Display for Signature {
 
 impl Display for MessageInstance {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(HEADER_CAPACITY);
         self.write_value(&mut buf);
         f.write_str(&String::from_utf8_lossy(&buf))
     }

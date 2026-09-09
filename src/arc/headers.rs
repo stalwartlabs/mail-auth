@@ -9,7 +9,7 @@ use crate::{
     AuthenticationResults,
     common::{
         crypto::Algorithm,
-        headers::{HeaderWriter, Writer},
+        headers::{HeaderWriter, IntegerBuffer, Writer, write_integer, write_wrapped_base64},
     },
     dkim::Canonicalization,
 };
@@ -22,7 +22,7 @@ impl Signature {
         };
         writer.write(header);
         writer.write(b"i=");
-        writer.write(self.i.to_string().as_bytes());
+        write_integer(writer, self.i as u64);
         writer.write(b"; a=");
         writer.write(match self.a {
             Algorithm::RsaSha256 => b"rsa-sha256",
@@ -55,13 +55,14 @@ impl Signature {
             writer.write_len(h.as_bytes(), &mut bw);
         }
 
+        let mut integer = IntegerBuffer::new();
         for (tag, value) in [
             (&b"t="[..], self.t),
             (&b"x="[..], self.x),
             (&b"l="[..], self.l),
         ] {
             if value > 0 {
-                let value = value.to_string();
+                let value = integer.digits(value);
                 writer.write_len(b";", &mut bw);
                 if bw + tag.len() + value.len() >= 76 {
                     writer.write(new_line);
@@ -71,19 +72,13 @@ impl Signature {
                 }
 
                 writer.write_len(tag, &mut bw);
-                writer.write_len(value.as_bytes(), &mut bw);
+                writer.write_len(value, &mut bw);
             }
         }
 
         for (tag, value) in [(&b"; bh="[..], &self.bh), (&b"; b="[..], &self.b)] {
             writer.write_len(tag, &mut bw);
-            for &byte in value {
-                writer.write_len(&[byte], &mut bw);
-                if bw >= 76 {
-                    writer.write(new_line);
-                    bw = 1;
-                }
-            }
+            write_wrapped_base64(writer, value, &mut bw, new_line);
         }
 
         writer.write(b";");
@@ -103,7 +98,7 @@ impl Seal {
 
         writer.write(header);
         writer.write(b"i=");
-        writer.write(self.i.to_string().as_bytes());
+        write_integer(writer, self.i as u64);
         writer.write(b"; a=");
         writer.write(match self.a {
             Algorithm::RsaSha256 => b"rsa-sha256",
@@ -126,19 +121,14 @@ impl Seal {
 
         let mut bw = 1;
         if self.t > 0 {
+            let mut integer = IntegerBuffer::new();
             writer.write_len(b"t=", &mut bw);
-            writer.write_len(self.t.to_string().as_bytes(), &mut bw);
+            writer.write_len(integer.digits(self.t), &mut bw);
             writer.write_len(b"; ", &mut bw);
         }
 
         writer.write_len(b"b=", &mut bw);
-        for &byte in &self.b {
-            writer.write_len(&[byte], &mut bw);
-            if bw >= 76 {
-                writer.write(new_line);
-                bw = 1;
-            }
-        }
+        write_wrapped_base64(writer, &self.b, &mut bw, new_line);
 
         writer.write(b";");
         if as_header {
@@ -155,20 +145,32 @@ impl AuthenticationResults<'_> {
             b"ARC-Authentication-Results: "
         });
         writer.write(b"i=");
-        writer.write(i.to_string().as_bytes());
+        write_integer(writer, i as u64);
         writer.write(b"; ");
         writer.write(self.hostname.as_bytes());
         if !as_header {
+            let mut rest = self.auth_results.as_bytes();
             let mut last_is_space = false;
-            for &ch in self.auth_results.as_bytes() {
-                if !ch.is_ascii_whitespace() {
+            while !rest.is_empty() {
+                let run = rest
+                    .iter()
+                    .position(u8::is_ascii_whitespace)
+                    .unwrap_or(rest.len());
+                if run > 0 {
                     if last_is_space {
                         writer.write(b" ");
                         last_is_space = false;
                     }
-                    writer.write(&[ch]);
+                    let (head, tail) = rest.split_at(run);
+                    writer.write(head);
+                    rest = tail;
                 } else {
                     last_is_space = true;
+                    let spaces = rest
+                        .iter()
+                        .position(|ch| !ch.is_ascii_whitespace())
+                        .unwrap_or(rest.len());
+                    rest = rest.get(spaces..).unwrap_or_default();
                 }
             }
         } else {
@@ -183,5 +185,62 @@ impl HeaderWriter for ArcSet<'_> {
         self.seal.write(writer, true);
         self.signature.write(writer, true);
         self.results.write(writer, self.seal.i, true);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::arc::{Seal, Signature};
+
+    #[test]
+    fn arc_headers_round_trip() {
+        let signature = Signature::parse(
+            concat!(
+                "i=1; a=rsa-sha256; c=relaxed/relaxed; d=google.com; s=arc-20160816;\r\n",
+                "        h=sender:errors-to:content-transfer-encoding:mime-version\r\n",
+                "         :list-subscribe:list-help:list-post:list-archive:list-unsubscribe\r\n",
+                "         :list-id:precedence:subject:archived-at:date:message-id:user-agent\r\n",
+                "         :to:from:autocrypt:dkim-signature:delivered-to:dkim-signature\r\n",
+                "         :dkim-signature;\r\n",
+                "        bh=wA8UHicgWC9Xhbg+MPaDDXiNuk7OpeLzC4PgU7LJ3mQ=;\r\n",
+                "        b=0nKy4Nn+8nEVYv5YYtFjBFSi3BwcNSeqcf1t9IOA7le6cQG7QI/M33po0jAXzgOs76\r\n",
+                "         UaQ3Pg9K/ORHImUIOqWTHwXBK2ROYEVKoW/Z4Gezci76/LAy6gZCpourr+wVN5S5owWy\r\n",
+                "         W2obi6q+wIaemywp1Ky+WZKlQjF8ruuviyPWUwZCk414fk8n1RChWWDW/6X1nZWNHXjj\r\n",
+                "         o2qXzlcYIIoptcsfQrbKZiTwzvad/c+dHZdd8NTTCdEkw0DwAWcjIMflDllv5Fyd2pL5\r\n",
+                "         7DVuyNqgrNIJPR13Gd0iYjR5bUujKcPDNz/xxMHmoj65LRWMtAkwEv8047PL/4nL7F3z\r\n",
+                "         2QYg==\r\n",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let mut buf = Vec::new();
+        signature.write(&mut buf, true);
+        let header = String::from_utf8(buf).unwrap();
+        let value = header.strip_prefix("ARC-Message-Signature: ").unwrap();
+        assert_eq!(
+            Signature::parse(value.as_bytes()).unwrap(),
+            signature,
+            "{header:?}"
+        );
+
+        let seal = Seal::parse(
+            concat!(
+                "i=1; a=rsa-sha256; t=1667893878; cv=none;\r\n",
+                "        d=google.com; s=arc-20160816;\r\n",
+                "        b=kna37LD/XkkyCuF2pr6yqCft1v3+68UKvkcTDqgwys4t5BG8Nf/Wy8Yds2g3K3QizJ\r\n",
+                "         t142Y3gHsRkWPrjrcNUkx7udVx90nb71uOVNkkcqLxwlWNSSp1ob5GsdyijKBqvC1+sW\r\n",
+                "         MJaenWq8fymomRGMpH8FxoeJCnp+Kl3N6gFJ5Js7d5X11JqGSxUrU9fC0NmPx6Wn+IOx\r\n",
+                "         f/mxC87fM6RTYeTyMiDeNiBve8S/RBj4mkr1MMo9xhA795Wa3SVVA2Ry3RSrg3BmOOUL\r\n",
+                "         fX6mY0XAahlLvALABgOdCGXupQ6oT8wZWE1y77zSpC+NAGXeAFHF6MczR2ImHV8i2Crg\r\n",
+                "         SObA==\r\n",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+        let mut buf = Vec::new();
+        seal.write(&mut buf, true);
+        let header = String::from_utf8(buf).unwrap();
+        let value = header.strip_prefix("ARC-Seal: ").unwrap();
+        assert_eq!(Seal::parse(value.as_bytes()).unwrap(), seal, "{header:?}");
     }
 }

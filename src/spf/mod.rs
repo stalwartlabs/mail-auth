@@ -108,6 +108,7 @@ pub enum Variable {
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Variables<'x> {
     vars: [Cow<'x, [u8]>; 11],
+    current_time_on_demand: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -225,7 +226,12 @@ impl SpfOutput {
                         SpfResult::Pass => false,
                     } =>
             {
-                self.report = format!("{}@{}", String::from_utf8_lossy(ra), self.domain).into();
+                let ra = String::from_utf8_lossy(ra);
+                let mut report = String::with_capacity(ra.len() + self.domain.len() + 1);
+                report.push_str(ra.as_ref());
+                report.push('@');
+                report.push_str(&self.domain);
+                self.report = report.into();
             }
             _ => (),
         }

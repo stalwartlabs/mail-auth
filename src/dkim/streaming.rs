@@ -15,7 +15,7 @@ use crate::{
         headers::HeaderIterator,
     },
 };
-use mail_builder::encoders::Base64Encoder;
+use memchr::memmem;
 
 /// A streaming DKIM signer that allows signing messages in chunks.
 ///
@@ -49,10 +49,10 @@ pub struct DkimSigningStream<'a, T: SigningKey> {
 
 enum SigningState<H> {
     /// Accumulating headers until \r\n\r\n is found
-    ReadingHeaders { buffer: Vec<u8> },
-    /// Headers parsed, now hashing body
+    ReadingHeaders { buffer: Vec<u8>, scanned: usize },
+    /// Header section buffered, now hashing body
     HashingBody {
-        parsed_headers: Vec<(Vec<u8>, Vec<u8>)>,
+        header_section: Vec<u8>,
         body_hasher: BodyHasher<H>,
     },
     /// Finished or consumed
@@ -84,6 +84,7 @@ impl<T: SigningKey> DkimSigner<T, Done> {
             key: &self.key,
             state: SigningState::ReadingHeaders {
                 buffer: Vec::with_capacity(8192),
+                scanned: 0,
             },
         }
     }
@@ -99,38 +100,33 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
     /// is detected, subsequent body data is streamed directly to the hasher.
     pub fn write(&mut self, chunk: &[u8]) {
         match &mut self.state {
-            SigningState::ReadingHeaders { buffer } => {
+            SigningState::ReadingHeaders { buffer, scanned } => {
                 buffer.extend_from_slice(chunk);
 
                 // Check for header/body boundary
-                if let Some(boundary_pos) = find_header_boundary(buffer) {
-                    // Parse headers from buffer[..boundary_pos - 4] (exclude the \r\n\r\n)
-                    let header_section = &buffer[..boundary_pos - 4];
-                    let parsed_headers = parse_headers(header_section);
+                let Some(boundary_pos) =
+                    find_header_boundary(&buffer[*scanned..]).map(|pos| *scanned + pos)
+                else {
+                    *scanned = buffer.len().saturating_sub(3);
+                    return;
+                };
 
-                    // Create body hasher
-                    let body_hasher = BodyHasher::new(
-                        <T::Hasher as HashImpl>::hasher(),
-                        self.template.cb,
-                        if self.template.l > 0 { u64::MAX } else { 0 },
-                    );
+                let mut header_section = std::mem::take(buffer);
 
-                    // Get any body data that was in the buffer after the boundary
-                    let remaining_body = buffer[boundary_pos..].to_vec();
+                let mut body_hasher = BodyHasher::new(
+                    <T::Hasher as HashImpl>::hasher(),
+                    self.template.cb,
+                    if self.template.l > 0 { u64::MAX } else { 0 },
+                );
 
-                    // Transition state
-                    self.state = SigningState::HashingBody {
-                        parsed_headers,
-                        body_hasher,
-                    };
+                // Hash any body data that was in the buffer
+                body_hasher.write(&header_section[boundary_pos..]);
+                header_section.truncate(boundary_pos - 2);
 
-                    // Hash any body data that was in the buffer
-                    if !remaining_body.is_empty()
-                        && let SigningState::HashingBody { body_hasher, .. } = &mut self.state
-                    {
-                        body_hasher.write(&remaining_body);
-                    }
-                }
+                self.state = SigningState::HashingBody {
+                    header_section,
+                    body_hasher,
+                };
             }
             SigningState::HashingBody { body_hasher, .. } => {
                 body_hasher.write(chunk);
@@ -162,38 +158,40 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
             .unwrap_or(0);
 
         match std::mem::replace(&mut self.state, SigningState::Done) {
-            SigningState::ReadingHeaders { buffer } => {
-                // Never saw body boundary - check if we have any headers at all
-                // This handles the edge case of a message with no body
-                let (header_section, body_section) =
-                    if let Some(boundary_pos) = find_header_boundary(&buffer) {
-                        (&buffer[..boundary_pos - 4], &buffer[boundary_pos..])
-                    } else {
-                        // No boundary found - treat entire buffer as headers with empty body
-                        (buffer.as_slice(), &[][..])
-                    };
-
-                let parsed_headers = parse_headers(header_section);
-
+            SigningState::ReadingHeaders { mut buffer, .. } => {
                 // Hash the body (may be empty)
                 let mut body_hasher = BodyHasher::new(
                     <T::Hasher as HashImpl>::hasher(),
                     self.template.cb,
                     if self.template.l > 0 { u64::MAX } else { 0 },
                 );
-                body_hasher.write(body_section);
+
+                // Never saw body boundary - check if we have any headers at all
+                // This handles the edge case of a message with no body
+                let header_len = match find_header_boundary(&buffer) {
+                    Some(boundary_pos) => {
+                        body_hasher.write(&buffer[boundary_pos..]);
+                        boundary_pos - 2
+                    }
+                    None => {
+                        // No boundary found - treat entire buffer as headers with empty body
+                        buffer.extend_from_slice(b"\r\n");
+                        buffer.len()
+                    }
+                };
+
                 let (hasher, body_len) = body_hasher.finish();
                 let body_hash = hasher.complete();
 
-                self.finish_with_parsed_data(parsed_headers, body_hash, body_len, now)
+                self.finish_with_parsed_data(&buffer[..header_len], body_hash, body_len, now)
             }
             SigningState::HashingBody {
-                parsed_headers,
+                header_section,
                 body_hasher,
             } => {
                 let (hasher, body_len) = body_hasher.finish();
                 let body_hash = hasher.complete();
-                self.finish_with_parsed_data(parsed_headers, body_hash, body_len, now)
+                self.finish_with_parsed_data(&header_section, body_hash, body_len, now)
             }
             SigningState::Done => Err(Error::NoHeadersFound),
         }
@@ -201,7 +199,7 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
 
     fn finish_with_parsed_data(
         &self,
-        parsed_headers: Vec<(Vec<u8>, Vec<u8>)>,
+        header_section: &[u8],
         body_hash: crate::common::crypto::HashOutput,
         body_len: u64,
         now: u64,
@@ -211,14 +209,14 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
         let mut found_headers = vec![false; self.template.h.len()];
         let mut signed_headers = Vec::with_capacity(self.template.h.len());
 
-        for (name, value) in &parsed_headers {
+        for (name, value) in HeaderIterator::new(header_section) {
             if let Some(pos) = self
                 .template
                 .h
                 .iter()
                 .position(|header| name.eq_ignore_ascii_case(header.as_bytes()))
             {
-                headers.push((name.as_slice(), value.as_slice()));
+                headers.push((name, value));
                 found_headers[pos] = true;
                 signed_headers.push(std::str::from_utf8(name).unwrap_or_default().to_string());
             }
@@ -241,7 +239,7 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
 
         // Create Signature
         let mut signature = self.template.clone();
-        signature.bh = Base64Encoder::new().encode(body_hash.as_ref())?;
+        signature.bh = body_hash.as_ref().to_vec();
         signature.t = now;
         signature.x = if signature.x > 0 {
             now + signature.x
@@ -254,35 +252,18 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
         }
 
         // Sign
-        let b = self.key.sign(SignableMessage {
+        signature.b = self.key.sign(SignableMessage {
             headers: canonical_headers,
             signature: &signature,
         })?;
-
-        // Encode
-        signature.b = Base64Encoder::new().encode(&b)?;
 
         Ok(signature)
     }
 }
 
 /// Find the header/body boundary (\r\n\r\n) and return the position after it
-fn find_header_boundary(data: &[u8]) -> Option<usize> {
-    data.windows(4)
-        .position(|w| w == b"\r\n\r\n")
-        .map(|p| p + 4)
-}
-
-/// Parse raw header bytes into (name, value) pairs
-/// Uses the same HeaderIterator as the regular sign() method to ensure consistency
-fn parse_headers(header_section: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
-    // Add a fake body separator so HeaderIterator works correctly
-    let mut with_separator = header_section.to_vec();
-    with_separator.extend_from_slice(b"\r\n");
-
-    HeaderIterator::new(&with_separator)
-        .map(|(name, value)| (name.to_vec(), value.to_vec()))
-        .collect()
+pub(crate) fn find_header_boundary(data: &[u8]) -> Option<usize> {
+    memmem::find(data, b"\r\n\r\n").map(|p| p + 4)
 }
 
 #[cfg(test)]

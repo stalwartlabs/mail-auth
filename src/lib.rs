@@ -45,6 +45,7 @@ pub mod dmarc;
 pub mod mta_sts;
 #[cfg(feature = "report")]
 pub mod report;
+pub(crate) mod scan;
 pub mod spf;
 
 #[cfg(all(feature = "dns-hickory", feature = "dns-doh"))]

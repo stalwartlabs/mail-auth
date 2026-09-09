@@ -19,10 +19,7 @@ pub struct BodyHasher<H> {
     canonicalization: Canonicalization,
     body_length_limit: u64,
     bytes_hashed: u64,
-    // Canonicalization state
-    crlf_seq: usize,
-    last_ch: u8,
-    is_empty: bool,
+    state: CanonicalState,
     done: bool,
 }
 
@@ -39,9 +36,7 @@ impl<H: Writer> BodyHasher<H> {
             canonicalization,
             body_length_limit,
             bytes_hashed: 0,
-            crlf_seq: 0,
-            last_ch: 0,
-            is_empty: true,
+            state: CanonicalState::new(),
             done: false,
         }
     }
@@ -61,65 +56,14 @@ impl<H: Writer> BodyHasher<H> {
             if remaining == 0 {
                 return;
             }
-            let limit = std::cmp::min(remaining as usize, chunk.len());
-            &chunk[..limit]
+            &chunk[..remaining.min(chunk.len() as u64) as usize]
         } else {
             chunk
         };
 
         self.bytes_hashed += chunk.len() as u64;
-
-        match self.canonicalization {
-            Canonicalization::Relaxed => {
-                for &ch in chunk {
-                    match ch {
-                        b' ' | b'\t' => {
-                            while self.crlf_seq > 0 {
-                                self.hasher.write(b"\r\n");
-                                self.crlf_seq -= 1;
-                            }
-                            self.is_empty = false;
-                        }
-                        b'\n' => {
-                            self.crlf_seq += 1;
-                        }
-                        b'\r' => {}
-                        _ => {
-                            while self.crlf_seq > 0 {
-                                self.hasher.write(b"\r\n");
-                                self.crlf_seq -= 1;
-                            }
-
-                            if self.last_ch == b' ' || self.last_ch == b'\t' {
-                                self.hasher.write(b" ");
-                            }
-
-                            self.hasher.write(&[ch]);
-                            self.is_empty = false;
-                        }
-                    }
-                    self.last_ch = ch;
-                }
-            }
-            Canonicalization::Simple => {
-                for &ch in chunk {
-                    match ch {
-                        b'\n' => {
-                            self.crlf_seq += 1;
-                        }
-                        b'\r' => {}
-                        _ => {
-                            while self.crlf_seq > 0 {
-                                self.hasher.write(b"\r\n");
-                                self.crlf_seq -= 1;
-                            }
-                            self.hasher.write(&[ch]);
-                            self.is_empty = false;
-                        }
-                    }
-                }
-            }
-        }
+        self.state
+            .write(self.canonicalization, chunk, &mut self.hasher);
     }
 
     /// Finalize the body hash.
@@ -133,18 +77,225 @@ impl<H: Writer> BodyHasher<H> {
     {
         if !self.done {
             self.done = true;
-            match self.canonicalization {
-                Canonicalization::Relaxed => {
-                    if !self.is_empty {
-                        self.hasher.write(b"\r\n");
-                    }
-                }
-                Canonicalization::Simple => {
-                    self.hasher.write(b"\r\n");
-                }
-            }
+            self.state.finish(self.canonicalization, &mut self.hasher);
         }
         (self.hasher, self.bytes_hashed)
+    }
+}
+
+const CRLF_RUN_MAX: usize = 32;
+const CRLF_RUN: [u8; CRLF_RUN_MAX * 2] = {
+    let mut run = [b'\r'; CRLF_RUN_MAX * 2];
+    let mut pos = 1;
+    while pos < run.len() {
+        run[pos] = b'\n';
+        pos += 2;
+    }
+    run
+};
+const SWAR_ONES: u64 = 0x0101_0101_0101_0101;
+const SWAR_HIGH: u64 = 0x8080_8080_8080_8080;
+const MEMCHR_MIN_LEN: usize = 16;
+
+#[inline(always)]
+fn write_crlf_run(writer: &mut impl Writer, count: usize) {
+    if count == 1 {
+        writer.write(b"\r\n");
+    } else if count > 1 {
+        let mut left = count;
+        while left != 0 {
+            let take = left.min(CRLF_RUN_MAX);
+            writer.write(&CRLF_RUN[..take * 2]);
+            left -= take;
+        }
+    }
+}
+
+#[inline(always)]
+fn find_line_break(haystack: &[u8]) -> Option<usize> {
+    use memchr::memchr2;
+
+    if haystack.len() >= MEMCHR_MIN_LEN {
+        memchr2(b'\r', b'\n', haystack)
+    } else {
+        haystack.iter().position(|&ch| ch == b'\r' || ch == b'\n')
+    }
+}
+
+#[inline(always)]
+fn find_wsp_or_break(haystack: &[u8]) -> Option<usize> {
+    let (words, tail) = haystack.as_chunks::<8>();
+
+    for (index, word) in words.iter().enumerate() {
+        let value = u64::from_le_bytes(*word);
+        let found = value.wrapping_sub(SWAR_ONES * 0x21) & !value & SWAR_HIGH;
+        if found != 0 {
+            return Some(index * 8 + (found.trailing_zeros() / 8) as usize);
+        }
+    }
+
+    tail.iter()
+        .position(|&ch| ch <= b' ')
+        .map(|pos| words.len() * 8 + pos)
+}
+
+fn simple_run_end(chunk: &[u8]) -> usize {
+    let mut offset = 0;
+
+    while let Some(pos) = find_line_break(&chunk[offset..]) {
+        let start = offset + pos;
+        match &chunk[start..] {
+            [b'\r', b'\n', next, ..] if *next != b'\r' && *next != b'\n' => offset = start + 2,
+            _ => return start,
+        }
+    }
+
+    chunk.len()
+}
+
+fn relaxed_run_end(chunk: &[u8]) -> usize {
+    let mut offset = 0;
+
+    while let Some(pos) = find_wsp_or_break(&chunk[offset..]) {
+        let start = offset + pos;
+        match &chunk[start..] {
+            [b' ', next, ..] if start != 0 && *next > b' ' => offset = start + 2,
+            [b'\r', b'\n', next, ..] if start != 0 && *next > b' ' => offset = start + 2,
+            [b'\t' | b'\n' | b'\r' | b' ', ..] => return start,
+            _ => offset = start + 1,
+        }
+    }
+
+    chunk.len()
+}
+
+struct CanonicalState {
+    crlf_seq: usize,
+    last_ch: u8,
+    is_empty: bool,
+}
+
+impl CanonicalState {
+    fn new() -> Self {
+        CanonicalState {
+            crlf_seq: 0,
+            last_ch: 0,
+            is_empty: true,
+        }
+    }
+
+    fn write(
+        &mut self,
+        canonicalization: Canonicalization,
+        chunk: &[u8],
+        writer: &mut impl Writer,
+    ) {
+        match canonicalization {
+            Canonicalization::Relaxed => self.write_relaxed(chunk, writer),
+            Canonicalization::Simple => self.write_simple(chunk, writer),
+        }
+    }
+
+    fn finish(&mut self, canonicalization: Canonicalization, writer: &mut impl Writer) {
+        match canonicalization {
+            Canonicalization::Relaxed => {
+                if !self.is_empty {
+                    writer.write(b"\r\n");
+                }
+            }
+            Canonicalization::Simple => {
+                writer.write(b"\r\n");
+            }
+        }
+    }
+
+    #[inline(always)]
+    fn flush_breaks(&mut self, writer: &mut impl Writer) {
+        if self.crlf_seq != 0 {
+            write_crlf_run(writer, self.crlf_seq);
+            self.crlf_seq = 0;
+        }
+    }
+
+    fn write_simple(&mut self, chunk: &[u8], writer: &mut impl Writer) {
+        let mut rest = chunk;
+
+        while !rest.is_empty() {
+            let (run, tail) = rest.split_at(simple_run_end(rest));
+
+            if !run.is_empty() {
+                self.flush_breaks(writer);
+                writer.write(run);
+                self.is_empty = false;
+            }
+
+            let mut consumed = 0;
+            let mut breaks = self.crlf_seq;
+
+            for &ch in tail {
+                match ch {
+                    b'\n' => breaks += 1,
+                    b'\r' => {}
+                    _ => break,
+                }
+                consumed += 1;
+            }
+
+            self.crlf_seq = breaks;
+            rest = &tail[consumed..];
+        }
+    }
+
+    fn write_relaxed(&mut self, chunk: &[u8], writer: &mut impl Writer) {
+        let mut rest = chunk;
+
+        while !rest.is_empty() {
+            let (run, tail) = rest.split_at(relaxed_run_end(rest));
+
+            if let Some(&last_ch) = run.last() {
+                self.flush_breaks(writer);
+                if self.last_ch == b' ' || self.last_ch == b'\t' {
+                    writer.write(b" ");
+                }
+                writer.write(run);
+                self.is_empty = false;
+                self.last_ch = last_ch;
+            }
+
+            let mut consumed = 0;
+            let mut last_ch = self.last_ch;
+            let mut breaks = self.crlf_seq;
+            let mut pending = 0;
+            let mut has_wsp = false;
+
+            for &ch in tail {
+                match ch {
+                    b'\n' => pending += 1,
+                    b' ' | b'\t' => {
+                        breaks += pending;
+                        pending = 0;
+                        has_wsp = true;
+                    }
+                    b'\r' => {}
+                    _ => break,
+                }
+                consumed += 1;
+                last_ch = ch;
+            }
+
+            if consumed != 0 {
+                if has_wsp {
+                    write_crlf_run(writer, breaks);
+                    self.crlf_seq = pending;
+                    self.is_empty = false;
+                } else {
+                    self.crlf_seq = breaks + pending;
+                }
+                self.last_ch = last_ch;
+            }
+
+            rest = &tail[consumed..];
+        }
     }
 }
 
@@ -155,68 +306,9 @@ pub struct CanonicalBody<'a> {
 
 impl Writable for CanonicalBody<'_> {
     fn write(self, hasher: &mut impl Writer) {
-        let mut crlf_seq = 0;
-
-        match self.canonicalization {
-            Canonicalization::Relaxed => {
-                let mut last_ch = 0;
-                let mut is_empty = true;
-
-                for &ch in self.body {
-                    match ch {
-                        b' ' | b'\t' => {
-                            while crlf_seq > 0 {
-                                hasher.write(b"\r\n");
-                                crlf_seq -= 1;
-                            }
-                            is_empty = false;
-                        }
-                        b'\n' => {
-                            crlf_seq += 1;
-                        }
-                        b'\r' => {}
-                        _ => {
-                            while crlf_seq > 0 {
-                                hasher.write(b"\r\n");
-                                crlf_seq -= 1;
-                            }
-
-                            if last_ch == b' ' || last_ch == b'\t' {
-                                hasher.write(b" ");
-                            }
-
-                            hasher.write(&[ch]);
-                            is_empty = false;
-                        }
-                    }
-
-                    last_ch = ch;
-                }
-
-                if !is_empty {
-                    hasher.write(b"\r\n");
-                }
-            }
-            Canonicalization::Simple => {
-                for &ch in self.body {
-                    match ch {
-                        b'\n' => {
-                            crlf_seq += 1;
-                        }
-                        b'\r' => {}
-                        _ => {
-                            while crlf_seq > 0 {
-                                hasher.write(b"\r\n");
-                                crlf_seq -= 1;
-                            }
-                            hasher.write(&[ch]);
-                        }
-                    }
-                }
-
-                hasher.write(b"\r\n");
-            }
-        }
+        let mut state = CanonicalState::new();
+        state.write(self.canonicalization, self.body, hasher);
+        state.finish(self.canonicalization, hasher);
     }
 }
 
@@ -229,29 +321,8 @@ impl Canonicalization {
         match self {
             Canonicalization::Relaxed => {
                 for (name, value) in headers {
-                    for &ch in name {
-                        if !ch.is_ascii_whitespace() {
-                            hasher.write(&[ch.to_ascii_lowercase()]);
-                        }
-                    }
-
-                    hasher.write(b":");
-                    let mut bw = 0;
-                    let mut last_ch = 0;
-
-                    for &ch in value {
-                        if !ch.is_ascii_whitespace() {
-                            if b" \t".contains(&last_ch) && bw > 0 {
-                                hasher.write_len(b" ", &mut bw);
-                            }
-                            hasher.write_len(&[ch], &mut bw);
-                        }
-                        last_ch = ch;
-                    }
-
-                    if last_ch == b'\n' {
-                        hasher.write(b"\r\n");
-                    }
+                    write_relaxed_name(name, hasher);
+                    write_relaxed_value(value, hasher);
                 }
             }
             Canonicalization::Simple => {
@@ -277,10 +348,10 @@ impl Canonicalization {
     pub fn canonical_body<'a>(&self, body: &'a [u8], l: u64) -> CanonicalBody<'a> {
         CanonicalBody {
             canonicalization: *self,
-            body: if l == 0 || body.is_empty() {
+            body: if l == 0 {
                 body
             } else {
-                &body[..std::cmp::min(l as usize, body.len())]
+                &body[..l.min(body.len() as u64) as usize]
             },
         }
     }
@@ -299,7 +370,7 @@ impl Signature {
         mut message: impl HeaderStream<'x>,
     ) -> (usize, CanonicalHeaders<'x>, Vec<String>, CanonicalBody<'x>) {
         let mut headers = Vec::with_capacity(self.h.len());
-        let mut found_headers = vec![false; self.h.len()];
+        let mut found_headers = FoundHeaders::default();
         let mut signed_headers = Vec::with_capacity(self.h.len());
 
         while let Some((name, value)) = message.next_header() {
@@ -309,7 +380,7 @@ impl Signature {
                 .position(|header| name.eq_ignore_ascii_case(header.as_bytes()))
             {
                 headers.push((name, value));
-                found_headers[pos] = true;
+                found_headers.insert(pos);
                 signed_headers.push(std::str::from_utf8(name).unwrap().into());
             }
         }
@@ -321,8 +392,8 @@ impl Signature {
 
         // Add any missing headers
         signed_headers.reverse();
-        for (header, found) in self.h.iter().zip(found_headers) {
-            if !found {
+        for (pos, header) in self.h.iter().enumerate() {
+            if !found_headers.contains(pos) {
                 signed_headers.push(header.to_string());
             }
         }
@@ -340,6 +411,162 @@ impl Writable for CanonicalHeaders<'_> {
     fn write(self, writer: &mut impl Writer) {
         self.canonicalization
             .canonicalize_headers(self.headers.into_iter().rev(), writer)
+    }
+}
+
+const LANE_ONES: u64 = 0x0101_0101_0101_0101;
+const LANE_HIGH: u64 = 0x8080_8080_8080_8080;
+const NAME_BUF_LEN: usize = 64;
+
+#[inline(always)]
+const fn zero_lanes(word: u64) -> u64 {
+    word.wrapping_sub(LANE_ONES) & !word & LANE_HIGH
+}
+
+#[inline(always)]
+const fn whitespace_lanes(word: u64) -> u64 {
+    zero_lanes(word ^ (LANE_ONES * 0x09))
+        | zero_lanes(word ^ (LANE_ONES * 0x0a))
+        | zero_lanes(word ^ (LANE_ONES * 0x0c))
+        | zero_lanes(word ^ (LANE_ONES * 0x0d))
+        | zero_lanes(word ^ (LANE_ONES * 0x20))
+}
+
+#[inline(always)]
+pub(crate) fn find_whitespace(bytes: &[u8]) -> Option<usize> {
+    let (words, tail) = bytes.as_chunks::<8>();
+    for (index, word) in words.iter().enumerate() {
+        let lanes = whitespace_lanes(u64::from_le_bytes(*word));
+        if lanes != 0 {
+            return Some(index * 8 + (lanes.trailing_zeros() / 8) as usize);
+        }
+    }
+
+    tail.iter()
+        .position(u8::is_ascii_whitespace)
+        .map(|offset| words.len() * 8 + offset)
+}
+
+pub(crate) struct SpacedToken<'a> {
+    pub spaces: &'a [u8],
+    pub token: &'a [u8],
+    pub spaces_and_token: &'a [u8],
+}
+
+pub(crate) struct SpacedTokens<'a> {
+    rest: &'a [u8],
+}
+
+impl<'a> SpacedTokens<'a> {
+    #[inline(always)]
+    pub(crate) fn new(bytes: &'a [u8]) -> Self {
+        Self { rest: bytes }
+    }
+}
+
+impl<'a> Iterator for SpacedTokens<'a> {
+    type Item = SpacedToken<'a>;
+
+    #[inline(always)]
+    fn next(&mut self) -> Option<Self::Item> {
+        let start = self.rest.iter().position(|ch| !ch.is_ascii_whitespace())?;
+        let end = find_whitespace(&self.rest[start..]).map_or(self.rest.len(), |len| start + len);
+        let (spaces_and_token, rest) = self.rest.split_at_checked(end)?;
+        let (spaces, token) = spaces_and_token.split_at_checked(start)?;
+        self.rest = rest;
+
+        Some(SpacedToken {
+            spaces,
+            token,
+            spaces_and_token,
+        })
+    }
+}
+
+#[inline(always)]
+fn fill_lowercase(buf: &mut [u8; NAME_BUF_LEN], name: &[u8]) -> usize {
+    let mut len = 0;
+    for (slot, ch) in buf
+        .iter_mut()
+        .zip(name.iter().filter(|ch| !ch.is_ascii_whitespace()))
+    {
+        *slot = ch.to_ascii_lowercase();
+        len += 1;
+    }
+    len
+}
+
+pub(crate) fn write_relaxed_name(name: &[u8], writer: &mut impl Writer) {
+    let mut buf = [0u8; NAME_BUF_LEN];
+    let mut rest = name;
+
+    while rest.len() >= NAME_BUF_LEN {
+        let (chunk, tail) = rest.split_at(NAME_BUF_LEN - 1);
+        let len = fill_lowercase(&mut buf, chunk);
+        writer.write(buf.get(..len).unwrap_or_default());
+        rest = tail;
+    }
+
+    let len = fill_lowercase(&mut buf, rest);
+    if let Some(slot) = buf.get_mut(len) {
+        *slot = b':';
+    }
+    writer.write(buf.get(..len + 1).unwrap_or_default());
+}
+
+fn write_relaxed_value(value: &[u8], writer: &mut impl Writer) {
+    let mut tokens = SpacedTokens::new(value);
+
+    if let Some(first) = tokens.next() {
+        writer.write(first.token);
+
+        for token in tokens {
+            if token.spaces == b" " {
+                writer.write(token.spaces_and_token);
+            } else {
+                if matches!(token.spaces.last(), Some(b' ' | b'\t')) {
+                    writer.write(b" ");
+                }
+                writer.write(token.token);
+            }
+        }
+    }
+
+    if value.last() == Some(&b'\n') {
+        writer.write(b"\r\n");
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct FoundHeaders {
+    inline: u64,
+    spilled: Vec<u64>,
+}
+
+impl FoundHeaders {
+    pub(crate) fn insert(&mut self, position: usize) {
+        match position.checked_sub(u64::BITS as usize) {
+            None => self.inline |= 1 << position,
+            Some(offset) => {
+                let word = offset / u64::BITS as usize;
+                if self.spilled.len() <= word {
+                    self.spilled.resize(word + 1, 0);
+                }
+                if let Some(slot) = self.spilled.get_mut(word) {
+                    *slot |= 1 << (offset % u64::BITS as usize);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn contains(&self, position: usize) -> bool {
+        match position.checked_sub(u64::BITS as usize) {
+            None => self.inline & (1 << position) != 0,
+            Some(offset) => self
+                .spilled
+                .get(offset / u64::BITS as usize)
+                .is_some_and(|word| word & (1 << (offset % u64::BITS as usize)) != 0),
+        }
     }
 }
 

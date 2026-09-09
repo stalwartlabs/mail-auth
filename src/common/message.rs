@@ -10,6 +10,8 @@ use crate::arc;
 use crate::{AuthenticatedMessage, Error, common::crypto::HashAlgorithm, dkim, dkim2};
 use mail_parser::{Address, HeaderName, HeaderValue, Message, parsers::MessageStream};
 
+const EXPECTED_HEADER_COUNT: usize = 32;
+
 impl<'x> AuthenticatedMessage<'x> {
     pub fn parse(raw_message: &'x [u8]) -> Option<Self> {
         Self::parse_with_opts(raw_message, None, true)
@@ -78,6 +80,7 @@ impl<'x> AuthenticatedMessage<'x> {
     ) -> Option<Self> {
         let mut message = AuthenticatedMessage {
             raw_message,
+            headers: Vec::with_capacity(EXPECTED_HEADER_COUNT),
             ..Default::default()
         };
 

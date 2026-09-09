@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use super::{Alignment, Dmarc, Policy, Psd, Report, URI};
 use crate::DnsError;
 use crate::{
     Error, Version,
@@ -11,8 +12,6 @@ use crate::{
 };
 use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
 use std::slice::Iter;
-
-use super::{Alignment, Dmarc, Policy, Psd, Report, URI};
 
 impl TxtRecordParser for Dmarc {
     fn parse(bytes: &[u8]) -> crate::Result<Self> {
@@ -234,7 +233,7 @@ impl DMARCParser for Iter<'_, u8> {
                                 if !uri.is_empty() {
                                     if found_uri && found_at {
                                         uris.push(URI {
-                                            uri: String::from_utf8_lossy(&uri).to_lowercase(),
+                                            uri: lowercase_uri(&uri),
                                             max_size: size,
                                         });
                                     }
@@ -257,7 +256,7 @@ impl DMARCParser for Iter<'_, u8> {
                     if !uri.is_empty() {
                         if found_uri && found_at {
                             uris.push(URI {
-                                uri: String::from_utf8_lossy(&uri).to_lowercase(),
+                                uri: lowercase_uri(&uri),
                                 max_size: size,
                             });
                         }
@@ -281,6 +280,20 @@ impl DMARCParser for Iter<'_, u8> {
                 _ => {
                     if !ch.is_ascii_whitespace() {
                         uri.push(ch);
+                        let rest = self.as_slice();
+                        let table = if found_uri {
+                            &URI_STOP_AFTER_SCHEME
+                        } else {
+                            &URI_STOP
+                        };
+                        let run_end = rest
+                            .iter()
+                            .position(|&ch| table[ch as usize])
+                            .unwrap_or(rest.len());
+                        if run_end != 0 {
+                            uri.extend_from_slice(rest.get(..run_end).unwrap_or_default());
+                            *self = rest.get(run_end..).unwrap_or_default().iter();
+                        }
                     }
                 }
             }
@@ -288,12 +301,38 @@ impl DMARCParser for Iter<'_, u8> {
 
         if !uri.is_empty() && found_uri && found_at {
             uris.push(URI {
-                uri: String::from_utf8_lossy(&uri).to_lowercase(),
+                uri: lowercase_uri(&uri),
                 max_size: size,
             })
         }
 
         Ok(uris)
+    }
+}
+
+const URI_STOP: [bool; 256] = uri_stop_table(true);
+const URI_STOP_AFTER_SCHEME: [bool; 256] = uri_stop_table(false);
+
+const fn uri_stop_table(stop_colon: bool) -> [bool; 256] {
+    let mut table = [false; 256];
+    let mut ch = 0usize;
+    while ch < 256 {
+        table[ch] = matches!(
+            ch as u8,
+            b'%' | b'!' | b',' | b';' | b'@' | b'\t' | b'\n' | b'\x0C' | b'\r' | b' '
+        ) || (stop_colon && ch as u8 == b':');
+        ch += 1;
+    }
+    table
+}
+
+fn lowercase_uri(uri: &[u8]) -> String {
+    let mut value = String::from_utf8_lossy(uri).into_owned();
+    if value.is_ascii() {
+        value.make_ascii_lowercase();
+        value
+    } else {
+        value.to_lowercase()
     }
 }
 

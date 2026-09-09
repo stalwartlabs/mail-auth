@@ -24,6 +24,7 @@ use hickory_resolver::{
     },
     system_conf::read_system_conf,
 };
+use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 
@@ -168,7 +169,7 @@ impl MessageAuthenticator {
         let result: Txt = result.into();
 
         if let Some(cache) = cache {
-            cache.insert(key, result.clone(), expires);
+            cache.insert(key.into_owned().into_boxed_str(), result.clone(), expires);
         }
 
         T::unwrap_txt(result)
@@ -241,7 +242,7 @@ impl MessageAuthenticator {
         };
 
         if let Some(cache) = cache {
-            cache.insert(key, records.clone(), expires);
+            cache.insert(key.into_owned().into_boxed_str(), records.clone(), expires);
         }
 
         Ok(records)
@@ -264,7 +265,11 @@ impl MessageAuthenticator {
         };
 
         if let Some(cache) = cache {
-            cache.insert(key, records.clone(), ipv4_lookup.expires);
+            cache.insert(
+                key.into_owned().into_boxed_str(),
+                records.clone(),
+                ipv4_lookup.expires,
+            );
         }
 
         Ok(records)
@@ -319,7 +324,11 @@ impl MessageAuthenticator {
         };
 
         if let Some(cache) = cache {
-            cache.insert(key, records.clone(), ipv6_lookup.expires);
+            cache.insert(
+                key.into_owned().into_boxed_str(),
+                records.clone(),
+                ipv6_lookup.expires,
+            );
         }
 
         Ok(records)
@@ -679,16 +688,33 @@ impl UnwrapTxtRecord for TlsRpt {
 }
 
 pub trait ToFqdn {
-    fn to_fqdn(&self) -> Box<str>;
+    fn to_fqdn(&self) -> Cow<'_, str>;
 }
 
 impl<T: AsRef<str>> ToFqdn for T {
-    fn to_fqdn(&self) -> Box<str> {
+    fn to_fqdn(&self) -> Cow<'_, str> {
         let value = self.as_ref();
-        if value.ends_with('.') {
-            value.to_lowercase().into()
+        let bytes = value.as_bytes();
+        if matches!(bytes.last(), Some(b'.'))
+            && !bytes
+                .iter()
+                .any(|byte| byte.is_ascii_uppercase() || !byte.is_ascii())
+        {
+            Cow::Borrowed(value)
+        } else if value.is_ascii() {
+            let mut fqdn = String::with_capacity(value.len() + 1);
+            fqdn.push_str(value);
+            fqdn.make_ascii_lowercase();
+            if !matches!(bytes.last(), Some(b'.')) {
+                fqdn.push('.');
+            }
+            Cow::Owned(fqdn)
         } else {
-            format!("{}.", value.to_lowercase()).into()
+            let mut fqdn = value.to_lowercase();
+            if !value.ends_with('.') {
+                fqdn.push('.');
+            }
+            Cow::Owned(fqdn)
         }
     }
 }
@@ -699,33 +725,54 @@ pub trait ToReverseName {
 
 impl ToReverseName for IpAddr {
     fn to_reverse_name(&self) -> String {
-        use std::fmt::Write;
-
         match self {
             IpAddr::V4(ip) => {
                 let mut segments = String::with_capacity(15);
+                let mut buf = [0u8; 3];
                 for octet in ip.octets().iter().rev() {
                     if !segments.is_empty() {
                         segments.push('.');
                     }
-                    let _ = write!(&mut segments, "{}", octet);
+                    for &digit in decimal_u8(*octet, &mut buf) {
+                        segments.push(char::from(digit));
+                    }
                 }
                 segments
             }
             IpAddr::V6(ip) => {
                 let mut segments = String::with_capacity(63);
                 for segment in ip.segments().iter().rev() {
-                    for &p in format!("{segment:04x}").as_bytes().iter().rev() {
+                    for shift in [0u32, 4, 8, 12] {
                         if !segments.is_empty() {
                             segments.push('.');
                         }
-                        segments.push(char::from(p));
+                        segments.push(char::from(hex_nibble((segment >> shift) as u8)));
                     }
                 }
                 segments
             }
         }
     }
+}
+
+#[inline(always)]
+pub(crate) fn hex_nibble(value: u8) -> u8 {
+    b"0123456789abcdef"[(value & 0x0f) as usize]
+}
+
+#[inline(always)]
+pub(crate) fn decimal_u8(value: u8, buf: &mut [u8; 3]) -> &[u8] {
+    buf[0] = b'0' + value / 100;
+    buf[1] = b'0' + (value / 10) % 10;
+    buf[2] = b'0' + value % 10;
+    let start = if value >= 100 {
+        0
+    } else if value >= 10 {
+        1
+    } else {
+        2
+    };
+    &buf[start..]
 }
 
 #[cfg(any(test, feature = "test"))]

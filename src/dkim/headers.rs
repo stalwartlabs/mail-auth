@@ -5,8 +5,17 @@
  */
 
 use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
-use crate::common::headers::{HeaderWriter, Writer};
+use crate::common::headers::{
+    HEADER_CAPACITY, HeaderWriter, IntegerBuffer, Writer, write_wrapped, write_wrapped_base64,
+};
 use std::fmt::{Display, Formatter};
+
+const HEX_DIGITS: &[u8; 16] = b"0123456789ABCDEF";
+
+#[inline(always)]
+fn is_quoted_printable(ch: u8) -> bool {
+    matches!(ch, 0..=0x20 | b';' | 0x7f..=u8::MAX)
+}
 
 impl Signature {
     pub fn write(&self, writer: &mut impl Writer, as_header: bool) {
@@ -71,29 +80,42 @@ impl Signature {
             }
             writer.write_len(b"i=", &mut bw);
 
-            for &ch in self.i.as_bytes().iter() {
-                match ch {
-                    0..=0x20 | b';' | 0x7f..=u8::MAX => {
-                        writer.write_len(format!("={ch:02X}").as_bytes(), &mut bw);
+            let mut rest = self.i.as_bytes();
+            while let Some(&ch) = rest.first() {
+                if is_quoted_printable(ch) {
+                    writer.write_len(
+                        &[
+                            b'=',
+                            HEX_DIGITS[(ch >> 4) as usize],
+                            HEX_DIGITS[(ch & 0x0f) as usize],
+                        ],
+                        &mut bw,
+                    );
+                    rest = rest.get(1..).unwrap_or_default();
+                    if bw >= 76 {
+                        writer.write(new_line);
+                        bw = 1;
                     }
-                    _ => {
-                        writer.write_len(&[ch], &mut bw);
-                    }
-                }
-                if bw >= 76 {
-                    writer.write(new_line);
-                    bw = 1;
+                } else {
+                    let run = rest
+                        .iter()
+                        .position(|ch| is_quoted_printable(*ch))
+                        .unwrap_or(rest.len());
+                    let (head, tail) = rest.split_at(run);
+                    write_wrapped(writer, head, &mut bw, new_line);
+                    rest = tail;
                 }
             }
         }
 
+        let mut integer = IntegerBuffer::new();
         for (tag, value) in [
             (&b"t="[..], self.t),
             (&b"x="[..], self.x),
             (&b"l="[..], self.l),
         ] {
             if value > 0 {
-                let value = value.to_string();
+                let value = integer.digits(value);
                 writer.write_len(b";", &mut bw);
                 if bw + tag.len() + value.len() >= 76 {
                     writer.write(new_line);
@@ -103,19 +125,13 @@ impl Signature {
                 }
 
                 writer.write_len(tag, &mut bw);
-                writer.write_len(value.as_bytes(), &mut bw);
+                writer.write_len(value, &mut bw);
             }
         }
 
         for (tag, value) in [(&b"; bh="[..], &self.bh), (&b"; b="[..], &self.b)] {
             writer.write_len(tag, &mut bw);
-            for &byte in value {
-                writer.write_len(&[byte], &mut bw);
-                if bw >= 76 {
-                    writer.write(new_line);
-                    bw = 1;
-                }
-            }
+            write_wrapped_base64(writer, value, &mut bw, new_line);
         }
 
         writer.write(b";");
@@ -133,7 +149,7 @@ impl HeaderWriter for Signature {
 
 impl Display for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let mut buf = Vec::new();
+        let mut buf = Vec::with_capacity(HEADER_CAPACITY);
         self.write(&mut buf, false);
         f.write_str(&String::from_utf8_lossy(&buf))
     }
