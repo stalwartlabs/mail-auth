@@ -1,3 +1,7 @@
+mail-auth 0.13.1
+================================
+- Bump to `mail-builder` 1.0.0
+
 mail-auth 0.13.0
 ================================
 - Performance enhancements

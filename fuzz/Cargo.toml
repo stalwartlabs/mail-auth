@@ -30,3 +30,6 @@ name = "canonicalize"
 path = "fuzz_targets/canonicalize.rs"
 test = false
 doc = false
+
+[patch.crates-io]
+mail-builder = { path = "../../mail-builder" }

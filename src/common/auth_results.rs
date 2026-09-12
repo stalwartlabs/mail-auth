@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::headers::{HeaderWriter, IntegerBuffer, Writer, base64_encode_slice};
+use super::headers::{HeaderWriter, IntegerBuffer, Writer};
 #[cfg(feature = "arc")]
 use crate::{ArcOutput, arc::ArcError};
 use crate::{
@@ -13,6 +13,7 @@ use crate::{
     dkim2::Dkim2Output,
 };
 use crate::{DnsError, common::crypto::CryptoError, dmarc::Policy};
+use mail_builder::encoders::base64::base64_encode_slice;
 use std::{
     borrow::Cow,
     fmt::{Display, Write},

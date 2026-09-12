@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use mail_builder::encoders::base64::base64_encode_slice;
 use memchr::{memchr, memchr2};
 
 impl<'x, T> Header<'x, T> {
@@ -587,53 +588,9 @@ pub(crate) fn write_wrapped(
     }
 }
 
-const BASE64_ALPHABET: &[u8; 64] =
-    b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 pub(crate) const BASE64_GROUP_LEN: usize = 4;
 const BASE64_INPUT_LEN: usize = 192;
 const BASE64_OUTPUT_LEN: usize = BASE64_INPUT_LEN / 3 * BASE64_GROUP_LEN;
-
-#[inline(always)]
-fn base64_group(word: u32, len: usize) -> [u8; BASE64_GROUP_LEN] {
-    let pad = |shift: u32, keep: usize| {
-        if len > keep {
-            BASE64_ALPHABET[(word >> shift) as usize & 0x3f]
-        } else {
-            b'='
-        }
-    };
-    [
-        BASE64_ALPHABET[(word >> 18) as usize & 0x3f],
-        BASE64_ALPHABET[(word >> 12) as usize & 0x3f],
-        pad(6, 1),
-        pad(0, 2),
-    ]
-}
-
-pub(crate) fn base64_encode_slice(bytes: &[u8], out: &mut [u8]) -> usize {
-    let (groups, tail) = bytes.as_chunks::<3>();
-    let mut written = 0;
-
-    let (slots, _) = out.as_chunks_mut::<BASE64_GROUP_LEN>();
-    for (group, slot) in groups.iter().zip(slots.iter_mut()) {
-        let [b0, b1, b2] = *group;
-        let word = ((b0 as u32) << 16) | ((b1 as u32) << 8) | b2 as u32;
-        slot.copy_from_slice(&base64_group(word, 3));
-        written += BASE64_GROUP_LEN;
-    }
-
-    if !tail.is_empty() {
-        let word = tail.iter().enumerate().fold(0u32, |word, (pos, byte)| {
-            word | (*byte as u32) << (16 - pos * 8)
-        });
-        if let Some(slot) = out.get_mut(written..written + BASE64_GROUP_LEN) {
-            slot.copy_from_slice(&base64_group(word, tail.len()));
-            written += BASE64_GROUP_LEN;
-        }
-    }
-
-    written
-}
 
 pub(crate) fn write_base64(writer: &mut impl Writer, bytes: &[u8]) {
     let mut buffer = [0u8; BASE64_OUTPUT_LEN];
