@@ -529,8 +529,8 @@ impl MessageAuthenticator {
 
 #[cfg(not(feature = "dns-doh"))]
 impl From<ProtoError> for Error {
-    fn from(err: ProtoError) -> Self {
-        Error::Dns(crate::DnsError::Resolver(err.to_string()))
+    fn from(_: ProtoError) -> Self {
+        Error::ParseError
     }
 }
 
@@ -793,6 +793,16 @@ mod test {
     use std::net::IpAddr;
 
     use crate::common::resolver::ToReverseName;
+
+    #[cfg(not(feature = "dns-doh"))]
+    #[test]
+    fn invalid_name_is_permanent_error() {
+        use super::Name;
+        use crate::Error;
+
+        let err = Name::from_str_relaxed(format!("{}.example.org", "a".repeat(64))).unwrap_err();
+        assert_eq!(Error::from(err), Error::ParseError);
+    }
 
     #[test]
     fn reverse_lookup_addr() {

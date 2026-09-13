@@ -155,14 +155,9 @@ impl<'x> AuthenticationResults<'x> {
 
     pub fn with_dmarc_result(mut self, dmarc: &DmarcOutput) -> Self {
         self.auth_results.push_str(";\r\n\tdmarc=");
-        if dmarc.spf_result == DmarcResult::Pass || dmarc.dkim_result == DmarcResult::Pass {
-            DmarcResult::Pass.as_auth_result(&mut self.auth_results);
-        } else if dmarc.spf_result != DmarcResult::None {
-            dmarc.spf_result.as_auth_result(&mut self.auth_results);
-        } else if dmarc.dkim_result != DmarcResult::None {
-            dmarc.dkim_result.as_auth_result(&mut self.auth_results);
-        } else {
-            DmarcResult::None.as_auth_result(&mut self.auth_results);
+        match dmarc.mechanism_result() {
+            Some(result) => result.as_auth_result(&mut self.auth_results),
+            None => dmarc.result().as_auth_result(&mut self.auth_results),
         }
         self.auth_results.push_str(" header.from=");
         push_pvalue(&mut self.auth_results, &dmarc.domain);
@@ -608,9 +603,13 @@ mod test {
     use crate::{ArcOutput, arc::ArcError};
     use crate::{
         AuthenticationResults, DkimOutput, DkimResult, DmarcOutput, DmarcResult, DnsError, Error,
-        IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult, common::crypto::CryptoError,
-        dkim::Signature, dmarc::Policy,
+        IprevOutput, IprevResult, ReceivedSpf, SpfOutput, SpfResult,
+        common::crypto::CryptoError,
+        common::parse::TxtRecordParser,
+        dkim::Signature,
+        dmarc::{Dmarc, Policy},
     };
+    use std::sync::Arc;
 
     #[test]
     fn authentication_results() {
@@ -783,6 +782,26 @@ mod test {
                     spf_result: DmarcResult::None,
                     domain: "example.com".to_string(),
                     policy: Policy::Quarantine,
+                    record: None,
+                },
+            ),
+            (
+                "dmarc=fail (policy not aligned) header.from=example.net policy.dmarc=reject",
+                DmarcOutput {
+                    dkim_result: DmarcResult::None,
+                    spf_result: DmarcResult::None,
+                    domain: "example.net".to_string(),
+                    policy: Policy::Reject,
+                    record: Some(Arc::new(Dmarc::parse(b"v=DMARC1; p=reject").unwrap())),
+                },
+            ),
+            (
+                "dmarc=none header.from=example.net policy.dmarc=none",
+                DmarcOutput {
+                    dkim_result: DmarcResult::None,
+                    spf_result: DmarcResult::None,
+                    domain: "example.net".to_string(),
+                    policy: Policy::None,
                     record: None,
                 },
             ),

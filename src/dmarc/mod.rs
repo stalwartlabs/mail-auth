@@ -156,6 +156,31 @@ impl DmarcOutput {
         &self.spf_result
     }
 
+    pub fn result(&self) -> DmarcResult {
+        match self.mechanism_result() {
+            Some(result) => result.clone(),
+            None if self.record.is_some() => DmarcResult::Fail(Error::NotAligned),
+            None => DmarcResult::None,
+        }
+    }
+
+    pub(crate) fn mechanism_result(&self) -> Option<&DmarcResult> {
+        [&self.spf_result, &self.dkim_result]
+            .into_iter()
+            .filter_map(|result| {
+                let rank = match result {
+                    DmarcResult::Pass => 0,
+                    DmarcResult::TempError(_) => 1,
+                    DmarcResult::PermError(_) => 2,
+                    DmarcResult::Fail(_) => 3,
+                    DmarcResult::None => return None,
+                };
+                Some((rank, result))
+            })
+            .min_by_key(|(rank, _)| *rank)
+            .map(|(_, result)| result)
+    }
+
     pub fn dmarc_record(&self) -> Option<&Dmarc> {
         self.record.as_deref()
     }
@@ -176,6 +201,7 @@ impl DmarcOutput {
         match &self.record {
             Some(record)
                 if !record.ruf.is_empty()
+                    && !matches!(self.mechanism_result(), Some(DmarcResult::TempError(_)))
                     && ((self.dkim_result != DmarcResult::Pass
                         && matches!(record.fo, Report::Any | Report::Dkim | Report::DkimSpf))
                         || (self.spf_result != DmarcResult::Pass

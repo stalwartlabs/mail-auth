@@ -236,7 +236,7 @@ impl MessageAuthenticator {
         let mut message = Message::query();
         message.metadata.recursion_desired = true;
         message.add_query(Query::query(
-            Name::from_str_relaxed::<&str>(name).map_err(resolver_error)?,
+            Name::from_str_relaxed::<&str>(name).map_err(|_| Error::ParseError)?,
             RecordType::from(record_type),
         ));
         let request = message.to_vec().map_err(resolver_error)?;

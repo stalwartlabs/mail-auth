@@ -1,6 +1,10 @@
 mail-auth 0.13.2
 ================================
 - SPF: `SpfParameters::verify` now checks the `MAIL FROM` identity whenever the `HELO` check does not return `fail`, instead of only when it returns `pass` (#61).
+- DMARC: New `DmarcOutput::result` returns the overall DMARC result: `fail` when a policy record exists but no Authenticated Identifier aligns (RFC 9989 Section 5.3.5).
+- DMARC: A `temperror` SPF result or DKIM signature whose identifier aligns with the Author Domain, or a DNS error while resolving an Organizational Domain for relaxed alignment, yields `temperror` instead of `fail` (RFC 9989 Section 5.3.6).
+- DMARC: A policy record without a `p` tag is treated as `p=none` when it has a `rua` tag and ignored otherwise, regardless of its `sp` and `np` tags (RFC 9989 Section 4.10.1).
+- DNS: A name that cannot be encoded as a DNS name, such as one with a label longer than 63 bytes, is reported as `Error::ParseError` instead of a resolver error.
 
 mail-auth 0.13.1
 ================================
