@@ -1,0 +1,45 @@
+# RFC 7208 Section 2.3 and 2.4: when both identities are checked, "HELO" is
+# checked first. If it reaches a definitive failure the "MAIL FROM" check can
+# be skipped; otherwise "MAIL FROM" MUST be checked. A null reverse-path makes
+# "postmaster@<HELO domain>" the "MAIL FROM" identity, which is the "HELO"
+# check already performed.
+
+name: HELO and MAIL FROM identities
+records:
+  spf: helo-none.test.org v=something-else not=spf
+  spf: helo-neutral.test.org v=spf1 ?all
+  spf: helo-softfail.test.org v=spf1 ~all
+  spf: helo-fail.test.org v=spf1 -all
+  spf: helo-pass.test.org v=spf1 ip4:172.168.0.1 -all
+  spf: from-fail.test.org v=spf1 -all
+  spf: from-pass.test.org v=spf1 ip4:172.168.0.1 -all
+  spf: from-all.test.org v=spf1 +all
+tests:
+  - domain: helo-none.test.org
+    sender: user@from-fail.test.org
+    ip: 172.168.0.1
+    expect: fail
+  - domain: helo-neutral.test.org
+    sender: user@from-fail.test.org
+    ip: 172.168.0.1
+    expect: fail
+  - domain: helo-softfail.test.org
+    sender: user@from-pass.test.org
+    ip: 172.168.0.1
+    expect: pass
+  - domain: helo-fail.test.org
+    sender: user@from-all.test.org
+    ip: 172.168.0.1
+    expect: fail
+  - domain: helo-pass.test.org
+    sender: user@from-fail.test.org
+    ip: 172.168.0.1
+    expect: fail
+  - domain: helo-pass.test.org
+    sender: user@from-pass.test.org
+    ip: 172.168.0.1
+    expect: pass
+  - domain: helo-neutral.test.org
+    sender:
+    ip: 172.168.0.1
+    expect: neutral

@@ -45,16 +45,16 @@ impl MessageAuthenticator {
         let params = params.into();
         match &params.params.sender {
             Sender::Full(sender) => {
-                // Verify HELO identity
-                let output = self
+                let helo_output = self
                     .check_host(params.clone_with(SpfParameters::verify_ehlo(
                         params.params.ip,
                         params.params.helo_domain,
                         params.params.host_domain,
                     )))
                     .await;
-                if matches!(output.result(), SpfResult::Pass) {
-                    // Verify MAIL FROM identity
+                if sender.is_empty() || helo_output.result() == SpfResult::Fail {
+                    helo_output
+                } else {
                     self.check_host(params.clone_with(SpfParameters::verify_mail_from(
                         params.params.ip,
                         params.params.helo_domain,
@@ -62,8 +62,6 @@ impl MessageAuthenticator {
                         sender,
                     )))
                     .await
-                } else {
-                    output
                 }
             }
             _ => self.check_host(params).await,

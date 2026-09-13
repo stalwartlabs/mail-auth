@@ -1,3 +1,7 @@
+mail-auth 0.13.2
+================================
+- SPF: `SpfParameters::verify` now checks the `MAIL FROM` identity whenever the `HELO` check does not return `fail`, instead of only when it returns `pass` (#61).
+
 mail-auth 0.13.1
 ================================
 - Bump to `mail-builder` 1.0.0
