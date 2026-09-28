@@ -4,19 +4,48 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! Parsing of ARF feedback reports from their field format and from feedback
+//! report email messages.
+
 use crate::{
-    common::headers::HeaderIterator,
-    report::{AuthFailureType, DeliveryResult, Error, Feedback, FeedbackType, IdentityAlignment},
+    headers::HeaderIterator,
+    report::{
+        ReportError,
+        arf::{AuthFailureType, DeliveryResult, FeedbackReport, FeedbackType, IdentityAlignment},
+    },
+    utf8::{into_string_lossy, to_str_lossy},
 };
 use mail_parser::{HeaderValue, MessageParser, MimeHeaders, PartType, parsers::MessageStream};
 use std::borrow::Cow;
 
-impl<'x> Feedback<'x> {
-    pub fn parse_rfc5322(message: &'x [u8]) -> Result<Self, Error> {
+impl<'x> FeedbackReport<'x> {
+    /// Extracts and parses the feedback report in an RFC 5322 message.
+    ///
+    /// Reads the `message/feedback-report` part with
+    /// [`parse_arf`](Self::parse_arf); when there are several, the last one
+    /// wins. A `message/rfc822` part is stored in `message` and a
+    /// `text/rfc822-headers` part in `headers`. Strings borrow from `message`
+    /// where possible.
+    ///
+    /// `max_size` caps the length of the raw message, since ARF reports embed
+    /// the original message.
+    ///
+    /// # Errors
+    ///
+    /// - [`ReportError::TooLarge`] if `message` is longer than `max_size`.
+    /// - [`ReportError::MailParse`] if `message` is not a parseable message.
+    /// - [`ReportError::NotFound`] if there is no `message/feedback-report`
+    ///   part.
+    /// - [`ReportError::Parse`] if the feedback report part is invalid (see
+    ///   [`parse_arf`](Self::parse_arf)).
+    pub fn parse_rfc5322(message: &'x [u8], max_size: usize) -> Result<Self, ReportError> {
+        if message.len() > max_size {
+            return Err(ReportError::TooLarge);
+        }
         let message = MessageParser::new()
             .parse(message)
-            .ok_or(Error::MailParseError)?;
-        let mut feedback = None;
+            .ok_or(ReportError::MailParse)?;
+        let mut feedback = Err(ReportError::NotFound);
         let mut included_message = None;
         let mut included_headers = None;
 
@@ -59,38 +88,40 @@ impl<'x> Feedback<'x> {
             };
 
             feedback = match arf {
-                Cow::Borrowed(arf) => Feedback::parse_arf(arf),
-                Cow::Owned(arf) => Feedback::parse_arf(&arf).map(|f| f.into_owned()),
+                Cow::Borrowed(arf) => FeedbackReport::parse_arf(arf),
+                Cow::Owned(arf) => FeedbackReport::parse_arf(&arf).map(|f| f.into_owned()),
             };
         }
 
-        if let Some(mut feedback) = feedback {
+        feedback.map(|mut feedback| {
             for (feedback, included) in [
                 (&mut feedback.message, included_message),
                 (&mut feedback.headers, included_headers),
             ] {
                 if let Some(included) = included {
                     *feedback = match included {
-                        Cow::Borrowed(bytes) => Some(String::from_utf8_lossy(bytes)),
-                        Cow::Owned(bytes) => Some(
-                            String::from_utf8(bytes)
-                                .unwrap_or_else(|err| {
-                                    String::from_utf8_lossy(err.as_bytes()).into_owned()
-                                })
-                                .into(),
-                        ),
+                        Cow::Borrowed(bytes) => Some(to_str_lossy(bytes)),
+                        Cow::Owned(bytes) => Some(into_string_lossy(bytes).into()),
                     };
                 }
             }
 
-            Ok(feedback)
-        } else {
-            Err(Error::NoReportsFound)
-        }
+            feedback
+        })
     }
 
-    pub fn parse_arf(arf: &'x [u8]) -> Option<Self> {
-        let mut f = Feedback {
+    /// Parses the fields of a `message/feedback-report` part.
+    ///
+    /// Field names are case-insensitive and unknown fields are ignored.
+    /// Fields with unrecognized values keep their default. `incidents`
+    /// defaults to 1.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReportError::Parse`] if there is no `Feedback-Type` field
+    /// with a recognized value.
+    pub fn parse_arf(arf: &'x [u8]) -> Result<Self, ReportError> {
+        let mut f = FeedbackReport {
             incidents: 1,
             ..Default::default()
         };
@@ -212,10 +243,10 @@ impl<'x> Feedback<'x> {
                     f.original_rcpt_to = Some(txt_value.into());
                 },
                 b"Reported-Domain" => {
-                    f.reported_domain.push(txt_value.into());
+                    f.reported_domains.push(txt_value.into());
                 },
                 b"Reported-URI" => {
-                    f.reported_uri.push(txt_value.into());
+                    f.reported_uris.push(txt_value.into());
                 },
                 b"Reporting-MTA" => {
                     f.reporting_mta = Some(if let Some(mta) = txt_value.strip_prefix("dns;") {
@@ -252,7 +283,13 @@ impl<'x> Feedback<'x> {
             );
         }
 
-        if has_ft { Some(f) } else { None }
+        if has_ft {
+            Ok(f)
+        } else {
+            Err(ReportError::Parse(
+                "Missing Feedback-Type field".to_string(),
+            ))
+        }
     }
 }
 
@@ -260,7 +297,7 @@ impl<'x> Feedback<'x> {
 mod test {
     use std::{fs, path::PathBuf};
 
-    use crate::report::Feedback;
+    use crate::report::arf::FeedbackReport;
 
     #[test]
     fn arf_report_parse() {
@@ -276,21 +313,15 @@ mod test {
             println!("Parsing ARF feedback {}", file_name.to_str().unwrap());
 
             let arf = fs::read(&file_name).unwrap();
-            let mut feedback = Feedback::parse_rfc5322(&arf).unwrap();
+            let mut feedback = FeedbackReport::parse_rfc5322(&arf, arf.len()).unwrap();
             feedback.message = None;
 
             file_name.set_extension("json");
 
             let expected_feedback =
-                serde_json::from_slice::<Feedback>(&fs::read(&file_name).unwrap()).unwrap();
+                serde_json::from_slice::<FeedbackReport>(&fs::read(&file_name).unwrap()).unwrap();
 
             assert_eq!(expected_feedback, feedback);
-
-            /*fs::write(
-                &file_name,
-                serde_json::to_string_pretty(&feedback).unwrap().as_bytes(),
-            )
-            .unwrap();*/
         }
     }
 }

@@ -8,10 +8,10 @@
   "original_envelope_id": null,
   "original_mail_from": "<randomuser@example.net>",
   "original_rcpt_to": "<user@example.com>",
-  "reported_domain": [
+  "reported_domains": [
     "example.net"
   ],
-  "reported_uri": [],
+  "reported_uris": [],
   "reporting_mta": null,
   "source_ip": "192.0.2.1",
   "user_agent": "SomeDKIMFilter/1.0",

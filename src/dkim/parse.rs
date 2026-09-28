@@ -4,15 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! Parsers for DKIM1 `DKIM-Signature` headers and for the `_domainkey`,
+//! `_report._domainkey` and `_atps` TXT records.
+
 use super::{
-    Algorithm, Atps, Canonicalization, DkimError, DomainKeyReport, Flag, HashAlgorithm, RR_DNS,
-    RR_OTHER, RR_POLICY, Service, Signature, Version,
+    Algorithm, AtpsRecord, Canonicalization, DkimError, DkimReportRecord, Flag, HashAlgorithm,
+    RR_DNS, RR_OTHER, RR_POLICY, Service, Signature,
 };
 use crate::DnsError;
 use crate::{
     Error,
-    common::{crypto::VerifyingKeyType, parse::*, verify::DomainKey},
+    crypto::VerifyingKeyType,
+    dkim::DomainKey,
     dkim::{RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION},
+    parse::*,
 };
 use std::slice::Iter;
 
@@ -40,6 +45,22 @@ const RS: u64 = (b'r' as u64) | ((b's' as u64) << 8);
 const ALL: u64 = (b'a' as u64) | ((b'l' as u64) << 8) | ((b'l' as u64) << 16);
 
 impl Signature {
+    /// Parses the value of a `DKIM-Signature` header (RFC 6376, Section 3.5).
+    ///
+    /// `header` is the raw header value, after the colon. Unknown tags are
+    /// ignored. When `c=` is absent, `simple/simple` is assumed. An `atpsh=`
+    /// value other than `sha1`, `sha256` or `none` clears the ATPS domain so
+    /// that no ATPS check can succeed.
+    ///
+    /// # Errors
+    ///
+    /// - [`DkimError::UnsupportedVersion`] when `v=` is present and not `1`.
+    /// - [`DkimError::UnsupportedAlgorithm`] for an unknown `a=` value.
+    /// - [`DkimError::UnsupportedCanonicalization`] for an unknown `c=` value.
+    /// - [`Error::Base64`] when `b=` or `bh=` is not valid base64.
+    /// - [`Error::Parse`] when `i=` is not valid quoted printable.
+    /// - [`Error::MissingParameters`] when any of `d=`, `s=`, `b=`, `bh=` or
+    ///   `h=` is missing or empty.
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
@@ -83,7 +104,7 @@ impl Signature {
                 }
                 D => signature.d = header.text(true),
                 H => signature.h = header.items(),
-                I => signature.i = header.text_qp(true).ok_or(Error::ParseError)?,
+                I => signature.i = header.text_qp(true).ok_or(Error::Parse)?,
                 L => signature.l = header.number().unwrap_or(0),
                 S => signature.s = header.text(true),
                 T => signature.t = header.number().unwrap_or(0),
@@ -278,7 +299,7 @@ impl TxtRecordParser for DomainKey {
 
         match public_key {
             Some(public_key) if public_key.is_empty() => {
-                Err(Error::Dkim(DkimError::RevokedPublicKey))
+                Err(Error::Dkim(DkimError::PublicKeyRevoked))
             }
             Some(public_key) => Ok(DomainKey {
                 p: key_type.verifying_key(&public_key)?,
@@ -289,11 +310,11 @@ impl TxtRecordParser for DomainKey {
     }
 }
 
-impl TxtRecordParser for DomainKeyReport {
+impl TxtRecordParser for DkimReportRecord {
     #[allow(clippy::while_let_on_iterator)]
     fn parse(header: &[u8]) -> crate::Result<Self> {
         let mut header = header.iter();
-        let mut record = DomainKeyReport {
+        let mut record = DkimReportRecord {
             ra: String::new(),
             rp: 100,
             rr: u8::MAX,
@@ -363,14 +384,11 @@ impl TxtRecordParser for DomainKeyReport {
     }
 }
 
-impl TxtRecordParser for Atps {
+impl TxtRecordParser for AtpsRecord {
     #[allow(clippy::while_let_on_iterator)]
     fn parse(header: &[u8]) -> crate::Result<Self> {
         let mut header = header.iter();
-        let mut record = Atps {
-            v: Version::V1,
-            d: None,
-        };
+        let mut record = AtpsRecord { d: None };
         let mut has_version = false;
 
         while let Some(key) = header.key() {
@@ -395,12 +413,6 @@ impl TxtRecordParser for Atps {
         }
 
         Ok(record)
-    }
-}
-
-impl DomainKey {
-    pub fn has_flag(&self, flag: impl Into<u64>) -> bool {
-        (self.f & flag.into()) != 0
     }
 }
 
@@ -446,17 +458,15 @@ mod test {
 
     use crate::{
         Error,
-        common::{
-            crypto::{Algorithm, R_HASH_SHA1, R_HASH_SHA256},
-            headers::HeaderWriter,
-            parse::TxtRecordParser,
-            verify::DomainKey,
-        },
+        crypto::{Algorithm, R_HASH_SHA1, R_HASH_SHA256},
+        dkim::DomainKey,
         dkim::{
-            Canonicalization, DomainKeyReport, R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_SVC_ALL,
-            R_SVC_EMAIL, RR_DNS, RR_EXPIRATION, RR_OTHER, RR_POLICY, RR_SIGNATURE, RR_UNKNOWN_TAG,
-            RR_VERIFICATION, Signature,
+            Canonicalization, DkimReportRecord, RR_DNS, RR_EXPIRATION, RR_OTHER, RR_POLICY,
+            RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION, Signature,
+            record::{R_FLAG_MATCH_DOMAIN, R_FLAG_TESTING, R_SVC_ALL, R_SVC_EMAIL},
         },
+        headers::HeaderWriter,
+        parse::TxtRecordParser,
     };
 
     #[test]
@@ -642,7 +652,7 @@ mod test {
             );
             match (Signature::parse(header.as_bytes()), expected) {
                 (Ok(signature), Some(expected)) => assert_eq!(signature.i, expected, "{auid:?}"),
-                (Err(Error::ParseError), None) => {}
+                (Err(Error::Parse), None) => {}
                 (result, _) => panic!("{auid:?}: unexpected {result:?}"),
             }
         }
@@ -705,7 +715,7 @@ mod test {
             assert!(
                 matches!(
                     DomainKey::parse(record.as_bytes()),
-                    Err(Error::Dkim(DkimError::RevokedPublicKey))
+                    Err(Error::Dkim(DkimError::PublicKeyRevoked))
                 ),
                 "{record:?}"
             );
@@ -717,7 +727,7 @@ mod test {
         for (record, expected_result) in [
             (
                 "ra=dkim-errors; rp=97; rr=v:x",
-                DomainKeyReport {
+                DkimReportRecord {
                     ra: "dkim-errors".to_string(),
                     rp: 97,
                     rr: RR_VERIFICATION | RR_EXPIRATION,
@@ -726,7 +736,7 @@ mod test {
             ),
             (
                 "ra=postmaster; rp=1; rr=d:o:p:s:u:v:x; rs=Error=20Message;",
-                DomainKeyReport {
+                DkimReportRecord {
                     ra: "postmaster".to_string(),
                     rp: 1,
                     rr: RR_DNS
@@ -741,7 +751,7 @@ mod test {
             ),
             (
                 "ra=dkim=2Derrors; rs=bad=zz;",
-                DomainKeyReport {
+                DkimReportRecord {
                     ra: "dkim-errors".to_string(),
                     rp: 100,
                     rr: u8::MAX,
@@ -750,7 +760,7 @@ mod test {
             ),
         ] {
             assert_eq!(
-                DomainKeyReport::parse(record.as_bytes()).unwrap(),
+                DkimReportRecord::parse(record.as_bytes()).unwrap(),
                 expected_result
             );
         }

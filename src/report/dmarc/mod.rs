@@ -4,593 +4,554 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-pub mod generate;
-pub mod parse;
-use super::PolicyPublished;
-#[cfg(feature = "arc")]
-use crate::ArcOutput;
-use crate::{
-    Dkim2Result, DkimOutput, DmarcOutput, SpfOutput,
-    dkim2::Dkim2Output,
-    dmarc::Dmarc,
-    report::{
-        ActionDisposition, Alignment, DKIMAuthResult, Discovery, Disposition, DkimResult,
-        DmarcResult, PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult,
-        SPFDomainScope, SpfResult,
-    },
+//! DMARC aggregate reports (RFC 9990).
+//!
+//! [`AggregateReport`] models the XML `feedback` document. Reports are parsed
+//! with [`AggregateReport::parse_rfc5322`] or [`AggregateReport::parse_xml`];
+//! legacy reports in the RFC 7489 Appendix C format still parse. Reports are
+//! built as struct literals, with [`Record`] and [`PolicyPublished`] filled
+//! from verification results by [`Record::with_dkim_output`] and the other
+//! `with_*_output` helpers and [`PolicyPublished::from_record`], and written with
+//! [`AggregateReport::write_rfc5322`] or [`AggregateReport::to_xml`].
+//!
+//! Field documentation names the XML element each field maps to.
+
+use crate::dmarc::{Alignment, Policy};
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
 };
-#[cfg(feature = "arc")]
-use std::fmt::Write;
-use std::net::IpAddr;
+use std::{
+    fmt::{Display, Formatter},
+    net::IpAddr,
+    str::FromStr,
+};
 
-impl Report {
-    pub fn new() -> Self {
-        Self::default()
+mod builder;
+mod generate;
+mod parse;
+
+/// Reporting period covered by an aggregate report (`date_range` element).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct DateRange {
+    /// Start of the period in seconds since the Unix epoch (`begin`).
+    pub begin: u64,
+    /// End of the period in seconds since the Unix epoch (`end`).
+    pub end: u64,
+}
+
+/// Information about the reporting organization (`report_metadata` element).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct ReportMetadata {
+    /// Name of the reporting organization (`org_name`).
+    pub org_name: String,
+    /// Contact email address of the reporting organization (`email`).
+    pub email: String,
+    /// Additional contact details (`extra_contact_info`).
+    pub extra_contact_info: Option<String>,
+    /// Unique identifier of the report within the reporting organization
+    /// (`report_id`).
+    pub report_id: String,
+    /// Reporting period (`date_range`).
+    pub date_range: DateRange,
+    /// Errors encountered while generating the report, one per `error`
+    /// element.
+    pub errors: Vec<String>,
+    /// Name and version of the software that generated the report
+    /// (`generator`, RFC 9990 only).
+    #[serde(default)]
+    pub generator: Option<String>,
+}
+
+/// Policy applied to the messages of a row (`disposition` element of
+/// `policy_evaluated`).
+#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum Disposition {
+    /// No action was taken (`none`).
+    None,
+    /// The messages passed DMARC (`pass`).
+    Pass,
+    /// The messages were quarantined (`quarantine`).
+    Quarantine,
+    /// The messages were rejected (`reject`).
+    Reject,
+    /// The element was absent or had an unrecognized value. Written as `none`.
+    #[default]
+    Unspecified,
+}
+
+/// DMARC policy published by the domain owner (`policy_published` element).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct PolicyPublished {
+    /// Domain whose DMARC record was applied (`domain`). This is the Report
+    /// Domain of the generated report message.
+    pub domain: String,
+    /// Version of the published policy (`version_published`). Not written by
+    /// [`AggregateReport::to_xml`].
+    #[serde(default, deserialize_with = "deserialize_version")]
+    pub version_published: Option<ReportVersion>,
+    /// DKIM identifier alignment mode (`adkim`). `None` when the element is
+    /// absent or unrecognized.
+    pub adkim: Option<Alignment>,
+    /// SPF identifier alignment mode (`aspf`). `None` when the element is
+    /// absent or unrecognized.
+    pub aspf: Option<Alignment>,
+    /// Policy for the domain (`p`). [`Policy::Unspecified`] when the element
+    /// is absent or unrecognized.
+    pub p: Policy,
+    /// Policy for subdomains (`sp`). [`Policy::Unspecified`] when the element
+    /// is absent or unrecognized; not written in that case.
+    pub sp: Policy,
+    /// Policy for non-existent subdomains (`np`, RFC 9990 only).
+    /// [`Policy::Unspecified`] when the element is absent or unrecognized;
+    /// not written in that case.
+    #[serde(default)]
+    pub np: Policy,
+    /// Whether the policy is in test mode (`testing`, `y` or `n`), from the
+    /// DMARC `t` tag.
+    pub testing: bool,
+    /// Method used to find the DMARC record (`discovery_method`, RFC 9990
+    /// only).
+    #[serde(default)]
+    pub discovery_method: Discovery,
+    /// Failure reporting options, verbatim (`fo`).
+    pub fo: Option<String>,
+}
+
+/// Method used to discover the DMARC policy record (`discovery_method`
+/// element).
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum Discovery {
+    /// Public Suffix List lookup, as in RFC 7489 (`psl`).
+    Psl,
+    /// DNS tree walk, as in RFC 9989 (`treewalk`).
+    Treewalk,
+    /// The element was absent or had an unrecognized value. Not written.
+    #[default]
+    Unspecified,
+}
+
+/// DMARC-aligned result of one mechanism (`dkim` and `spf` elements of
+/// `policy_evaluated`).
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum DmarcStatus {
+    /// The mechanism passed and was aligned (`pass`).
+    Pass,
+    /// The mechanism failed or was not aligned (`fail`).
+    Fail,
+    /// The element was absent or had an unrecognized value. Written as an
+    /// empty element.
+    #[default]
+    Unspecified,
+}
+
+/// Reason the applied disposition differs from the published policy (`type`
+/// element of `reason`).
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum PolicyOverride {
+    /// A local policy overrode the published one (`local_policy`).
+    LocalPolicy,
+    /// The message came from a mailing list (`mailing_list`).
+    MailingList,
+    /// The policy was in test mode (`policy_test_mode`).
+    PolicyTestMode,
+    /// The message came from a trusted forwarder (`trusted_forwarder`).
+    TrustedForwarder,
+    /// `other`, or a value that is absent or unrecognized, such as the RFC
+    /// 7489 `forwarded` and `sampled_out` types.
+    #[default]
+    Other,
+}
+
+/// One policy override reason (`reason` element of `policy_evaluated`).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct PolicyOverrideReason {
+    /// Kind of override (`type`).
+    pub kind: PolicyOverride,
+    /// Free-form explanation (`comment`).
+    pub comment: Option<String>,
+}
+
+/// Result of applying the DMARC policy to a row (`policy_evaluated` element).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct PolicyEvaluated {
+    /// Action taken on the messages (`disposition`).
+    pub disposition: Disposition,
+    /// DMARC-aligned DKIM result (`dkim`).
+    pub dkim: DmarcStatus,
+    /// DMARC-aligned SPF result (`spf`).
+    pub spf: DmarcStatus,
+    /// Reasons the disposition differs from the published policy, one per
+    /// `reason` element.
+    pub reason: Vec<PolicyOverrideReason>,
+}
+
+/// Source and count of the messages of a record (`row` element).
+#[derive(Debug, Clone, Hash, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct Row {
+    /// IP address the messages came from (`source_ip`). `None` when the
+    /// element is absent or not a valid address.
+    pub source_ip: Option<IpAddr>,
+    /// Number of messages this record covers (`count`).
+    pub count: u32,
+    /// Policy evaluation result (`policy_evaluated`).
+    pub policy_evaluated: PolicyEvaluated,
+}
+
+/// Report extension declared with an `extension` element inside an
+/// `extensions` element.
+///
+/// Only the `name` and `definition` attributes are kept; the extension content
+/// is skipped. Extensions are not written by [`AggregateReport::to_xml`].
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct Extension {
+    /// Extension name (`name` attribute).
+    pub name: String,
+    /// URI of the extension definition (`definition` attribute).
+    pub definition: String,
+}
+
+/// Identifiers of the messages of a record (`identifiers` element).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct Identifiers {
+    /// Domain of the envelope recipient (`envelope_to`).
+    pub envelope_to: Option<String>,
+    /// Domain of the `MAIL FROM` envelope sender (`envelope_from`).
+    pub envelope_from: String,
+    /// Domain of the `From` header field (`header_from`).
+    pub header_from: String,
+}
+
+/// Result of verifying one DKIM signature (`result` element of an
+/// `auth_results/dkim` element).
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum DkimStatus {
+    /// The message was not signed (`none`). Also used when the element is
+    /// absent or has an unrecognized value.
+    #[default]
+    None,
+    /// The signature verified (`pass`).
+    Pass,
+    /// The signature did not verify (`fail`).
+    Fail,
+    /// The signature verified but was not accepted by local policy (`policy`).
+    Policy,
+    /// The signature could not be processed (`neutral`).
+    Neutral,
+    /// A transient error, such as a DNS timeout, prevented verification
+    /// (`temperror`).
+    TempError,
+    /// A permanent error, such as a malformed key record, prevented
+    /// verification (`permerror`).
+    PermError,
+}
+
+/// Raw result of one DKIM signature (`dkim` element of `auth_results`).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct DkimAuthResult {
+    /// Signing domain, from the signature's `d=` tag (`domain`).
+    pub domain: String,
+    /// Selector, from the signature's `s=` tag (`selector`).
+    pub selector: String,
+    /// Verification result (`result`).
+    pub result: DkimStatus,
+    /// Human-readable detail about the result (`human_result`).
+    pub human_result: Option<String>,
+}
+
+/// Identity checked by SPF (`scope` element of an `auth_results/spf`
+/// element).
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum SpfScope {
+    /// The `HELO` identity (`helo`, RFC 7489 only).
+    Helo,
+    /// The `MAIL FROM` identity (`mfrom`).
+    MailFrom,
+    /// The element was absent or had an unrecognized value. Not written by
+    /// [`AggregateReport::to_xml`].
+    #[default]
+    Unspecified,
+}
+
+/// Result of an SPF check (`result` element of an `auth_results/spf`
+/// element).
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum SpfStatus {
+    /// No SPF record was found (`none`). Also used when the element is absent
+    /// or has an unrecognized value.
+    #[default]
+    None,
+    /// The record makes no assertion about the sender (`neutral`).
+    Neutral,
+    /// The sender is authorized (`pass`).
+    Pass,
+    /// The sender is not authorized (`fail`).
+    Fail,
+    /// The sender is probably not authorized (`softfail`).
+    SoftFail,
+    /// A transient error, such as a DNS timeout, prevented the check
+    /// (`temperror`).
+    TempError,
+    /// A permanent error, such as a malformed record, prevented the check
+    /// (`permerror`).
+    PermError,
+}
+
+/// Raw result of one SPF check (`spf` element of `auth_results`).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct SpfAuthResult {
+    /// Domain that was checked (`domain`).
+    pub domain: String,
+    /// Identity that was checked (`scope`).
+    pub scope: SpfScope,
+    /// Check result (`result`).
+    pub result: SpfStatus,
+    /// Human-readable detail about the result (`human_result`).
+    pub human_result: Option<String>,
+}
+
+/// Raw authentication results of a record, before DMARC alignment
+/// (`auth_results` element).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct AuthResults {
+    /// DKIM results, one per `dkim` element.
+    pub dkim: Vec<DkimAuthResult>,
+    /// SPF results, one per `spf` element.
+    ///
+    /// Parsing keeps every element. [`AggregateReport::to_xml`] writes at most
+    /// one: the first result whose scope is not [`SpfScope::Helo`].
+    pub spf: Vec<SpfAuthResult>,
+}
+
+/// Results for one group of messages sharing a source and identifiers
+/// (`record` element).
+///
+/// Build it from verification outputs with [`Record::with_dkim_output`],
+/// [`Record::with_spf_output`], [`Record::with_dmarc_output`],
+/// [`Record::with_dkim2_output`] and `with_arc_output` (feature `arc`).
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct Record {
+    /// Message source, count and policy evaluation (`row`).
+    pub row: Row,
+    /// Message identifiers (`identifiers`).
+    pub identifiers: Identifiers,
+    /// Raw DKIM and SPF results (`auth_results`).
+    pub auth_results: AuthResults,
+    /// Record-level extensions (`extensions`). Not written by
+    /// [`AggregateReport::to_xml`].
+    pub extensions: Vec<Extension>,
+}
+
+/// DMARC aggregate report (`feedback` element), as defined in RFC 9990.
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub struct AggregateReport {
+    /// Report format version (`version`). `None` when the element is absent
+    /// or holds a version other than 1.0; not written in that case.
+    #[serde(default, deserialize_with = "deserialize_version")]
+    pub version: Option<ReportVersion>,
+    /// Reporting organization and period (`report_metadata`).
+    pub report_metadata: ReportMetadata,
+    /// Policy published by the domain owner (`policy_published`).
+    pub policy_published: PolicyPublished,
+    /// Per-source results, one per `record` element.
+    pub records: Vec<Record>,
+    /// Report-level extensions (`extensions`). Not written by
+    /// [`AggregateReport::to_xml`].
+    pub extensions: Vec<Extension>,
+}
+
+/// Aggregate report format version (`version` and `version_published`
+/// elements).
+///
+/// Only version 1.0 is known. Parsing any other version, from XML or with
+/// serde, yields `None` in the enclosing `Option`. Serde serializes
+/// [`ReportVersion::V1`] as the number `1.0` and accepts `1`, `1.0` or the
+/// string `"1.0"`.
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+pub enum ReportVersion {
+    /// Version 1.0.
+    V1,
+}
+
+impl ReportVersion {
+    /// Returns the version as written in XML, such as `"1.0"`.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ReportVersion::V1 => "1.0",
+        }
     }
 
-    pub fn version(&self) -> f32 {
-        self.version
-    }
-
-    pub fn with_version(mut self, version: f32) -> Self {
-        self.version = version;
-        self
-    }
-
-    pub fn org_name(&self) -> &str {
-        &self.report_metadata.org_name
-    }
-
-    pub fn with_org_name(mut self, org_name: impl Into<String>) -> Self {
-        self.report_metadata.org_name = org_name.into();
-        self
-    }
-
-    pub fn email(&self) -> &str {
-        &self.report_metadata.email
-    }
-
-    pub fn with_email(mut self, email: impl Into<String>) -> Self {
-        self.report_metadata.email = email.into();
-        self
-    }
-
-    pub fn extra_contact_info(&self) -> Option<&str> {
-        self.report_metadata.extra_contact_info.as_deref()
-    }
-
-    pub fn with_extra_contact_info(mut self, extra_contact_info: impl Into<String>) -> Self {
-        self.report_metadata.extra_contact_info = Some(extra_contact_info.into());
-        self
-    }
-
-    pub fn report_id(&self) -> &str {
-        &self.report_metadata.report_id
-    }
-
-    pub fn with_report_id(mut self, report_id: impl Into<String>) -> Self {
-        self.report_metadata.report_id = report_id.into();
-        self
-    }
-
-    pub fn date_range_begin(&self) -> u64 {
-        self.report_metadata.date_range.begin
-    }
-
-    pub fn with_date_range_begin(mut self, date_range_begin: u64) -> Self {
-        self.report_metadata.date_range.begin = date_range_begin;
-        self
-    }
-
-    pub fn date_range_end(&self) -> u64 {
-        self.report_metadata.date_range.end
-    }
-
-    pub fn with_date_range_end(mut self, date_range_end: u64) -> Self {
-        self.report_metadata.date_range.end = date_range_end;
-        self
-    }
-
-    pub fn error(&self) -> &[String] {
-        &self.report_metadata.error
-    }
-
-    pub fn with_error(mut self, error: impl Into<String>) -> Self {
-        self.report_metadata.error.push(error.into());
-        self
-    }
-
-    pub fn domain(&self) -> &str {
-        &self.policy_published.domain
-    }
-
-    pub fn with_domain(mut self, domain: impl Into<String>) -> Self {
-        self.policy_published.domain = domain.into();
-        self
-    }
-
-    pub fn fo(&self) -> Option<&str> {
-        self.policy_published.fo.as_deref()
-    }
-
-    pub fn with_fo(mut self, fo: impl Into<String>) -> Self {
-        self.policy_published.fo = Some(fo.into());
-        self
-    }
-
-    pub fn version_published(&self) -> Option<f32> {
-        self.policy_published.version_published
-    }
-
-    pub fn with_version_published(mut self, version_published: f32) -> Self {
-        self.policy_published.version_published = Some(version_published);
-        self
-    }
-
-    pub fn adkim(&self) -> Alignment {
-        self.policy_published.adkim
-    }
-
-    pub fn with_adkim(mut self, adkim: Alignment) -> Self {
-        self.policy_published.adkim = adkim;
-        self
-    }
-
-    pub fn aspf(&self) -> Alignment {
-        self.policy_published.aspf
-    }
-
-    pub fn with_aspf(mut self, aspf: Alignment) -> Self {
-        self.policy_published.aspf = aspf;
-        self
-    }
-
-    pub fn p(&self) -> Disposition {
-        self.policy_published.p
-    }
-
-    pub fn with_p(mut self, p: Disposition) -> Self {
-        self.policy_published.p = p;
-        self
-    }
-
-    pub fn sp(&self) -> Disposition {
-        self.policy_published.sp
-    }
-
-    pub fn with_sp(mut self, sp: Disposition) -> Self {
-        self.policy_published.sp = sp;
-        self
-    }
-
-    pub fn testing(&self) -> bool {
-        self.policy_published.testing
-    }
-
-    pub fn with_testing(mut self, testing: bool) -> Self {
-        self.policy_published.testing = testing;
-        self
-    }
-
-    pub fn np(&self) -> Disposition {
-        self.policy_published.np
-    }
-
-    pub fn with_np(mut self, np: Disposition) -> Self {
-        self.policy_published.np = np;
-        self
-    }
-
-    pub fn discovery_method(&self) -> Discovery {
-        self.policy_published.discovery_method
-    }
-
-    pub fn with_discovery_method(mut self, discovery_method: Discovery) -> Self {
-        self.policy_published.discovery_method = discovery_method;
-        self
-    }
-
-    pub fn generator(&self) -> Option<&str> {
-        self.report_metadata.generator.as_deref()
-    }
-
-    pub fn with_generator(mut self, generator: impl Into<String>) -> Self {
-        self.report_metadata.generator = Some(generator.into());
-        self
-    }
-
-    pub fn records(&self) -> &[Record] {
-        &self.record
-    }
-
-    pub fn with_record(mut self, record: Record) -> Self {
-        self.record.push(record);
-        self
-    }
-
-    pub fn add_record(&mut self, record: Record) {
-        self.record.push(record);
-    }
-
-    pub fn with_policy_published(mut self, policy_published: PolicyPublished) -> Self {
-        self.policy_published = policy_published;
-        self
+    fn from_number(value: f64) -> Option<Self> {
+        (value == 1.0).then_some(ReportVersion::V1)
     }
 }
 
-impl Record {
-    pub fn new() -> Self {
-        Record::default()
+impl Display for ReportVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
     }
+}
 
-    pub fn with_dkim_output(mut self, dkim_output: &[DkimOutput]) -> Self {
-        for dkim in dkim_output {
-            if let Some(signature) = &dkim.signature {
-                let (result, human_result) = match &dkim.result {
-                    crate::DkimResult::Pass => (DkimResult::Pass, None),
-                    crate::DkimResult::Neutral(err) => {
-                        (DkimResult::Neutral, err.to_string().into())
-                    }
-                    crate::DkimResult::Fail(err) => (DkimResult::Fail, err.to_string().into()),
-                    crate::DkimResult::PermError(err) => {
-                        (DkimResult::PermError, err.to_string().into())
-                    }
-                    crate::DkimResult::TempError(err) => {
-                        (DkimResult::TempError, err.to_string().into())
-                    }
-                    crate::DkimResult::None => (DkimResult::None, None),
-                };
+impl FromStr for ReportVersion {
+    type Err = ();
 
-                self.auth_results.dkim.push(DKIMAuthResult {
-                    domain: signature.d.to_string(),
-                    selector: signature.s.to_string(),
-                    result,
-                    human_result,
-                });
-            }
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.trim()
+            .parse::<f64>()
+            .ok()
+            .and_then(ReportVersion::from_number)
+            .ok_or(())
+    }
+}
+
+impl Serialize for ReportVersion {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            ReportVersion::V1 => serializer.serialize_f32(1.0),
         }
-        self
+    }
+}
+
+struct VersionVisitor;
+
+impl<'de> Visitor<'de> for VersionVisitor {
+    type Value = Option<ReportVersion>;
+
+    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
+        formatter.write_str("a report version number")
     }
 
-    pub fn with_dkim2_output(mut self, dkim2_output: &Dkim2Output) -> Self {
-        for link in dkim2_output.chain() {
-            let (result, human_result) = match &link.result {
-                Dkim2Result::Pass => (DkimResult::Pass, None),
-                Dkim2Result::Fail(err) => (DkimResult::Fail, err.to_string().into()),
-                Dkim2Result::PermError(err) => (DkimResult::PermError, err.to_string().into()),
-                Dkim2Result::TempError(err) => (DkimResult::TempError, err.to_string().into()),
-                Dkim2Result::None => (DkimResult::None, None),
-            };
-
-            self.auth_results.dkim.push(DKIMAuthResult {
-                domain: link.signature.d.to_string(),
-                selector: link
-                    .signature
-                    .s
-                    .first()
-                    .map(|value| value.selector.clone())
-                    .unwrap_or_default(),
-                result,
-                human_result,
-            });
-        }
-        self
+    fn visit_f64<E: de::Error>(self, value: f64) -> Result<Self::Value, E> {
+        Ok(ReportVersion::from_number(value))
     }
 
-    pub fn with_spf_output(mut self, spf_output: &SpfOutput, scope: SPFDomainScope) -> Self {
-        self.auth_results.spf.push(SPFAuthResult {
-            domain: spf_output.domain.to_string(),
-            scope,
-            result: match spf_output.result {
-                crate::SpfResult::Pass => SpfResult::Pass,
-                crate::SpfResult::Fail => SpfResult::Fail,
-                crate::SpfResult::SoftFail => SpfResult::SoftFail,
-                crate::SpfResult::Neutral => SpfResult::Neutral,
-                crate::SpfResult::TempError => SpfResult::TempError,
-                crate::SpfResult::PermError => SpfResult::PermError,
-                crate::SpfResult::None => SpfResult::None,
-            },
-            human_result: None,
-        });
-        self
+    fn visit_u64<E: de::Error>(self, value: u64) -> Result<Self::Value, E> {
+        Ok((value == 1).then_some(ReportVersion::V1))
     }
 
-    pub fn with_dmarc_output(mut self, dmarc_output: &DmarcOutput) -> Self {
-        self.row.policy_evaluated.disposition = if dmarc_output.dkim_result
-            == crate::DmarcResult::Pass
-            || dmarc_output.spf_result == crate::DmarcResult::Pass
-        {
-            ActionDisposition::Pass
+    fn visit_i64<E: de::Error>(self, value: i64) -> Result<Self::Value, E> {
+        Ok((value == 1).then_some(ReportVersion::V1))
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(value.parse().ok())
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_any(self)
+    }
+}
+
+fn deserialize_version<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<ReportVersion>, D::Error> {
+    if deserializer.is_human_readable() {
+        deserializer.deserialize_any(VersionVisitor)
+    } else {
+        Ok(Option::<f32>::deserialize(deserializer)?
+            .and_then(|value| ReportVersion::from_number(value.into())))
+    }
+}
+
+impl<'de> Deserialize<'de> for ReportVersion {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let version = if deserializer.is_human_readable() {
+            deserializer.deserialize_any(VersionVisitor)?
         } else {
-            match dmarc_output.policy {
-                crate::dmarc::Policy::None => ActionDisposition::None,
-                crate::dmarc::Policy::Quarantine => ActionDisposition::Quarantine,
-                crate::dmarc::Policy::Reject => ActionDisposition::Reject,
-                crate::dmarc::Policy::Unspecified => ActionDisposition::None,
-            }
+            ReportVersion::from_number(f32::deserialize(deserializer)?.into())
         };
-        self.row.policy_evaluated.dkim = (&dmarc_output.dkim_result).into();
-        self.row.policy_evaluated.spf = (&dmarc_output.spf_result).into();
-        self
-    }
-
-    #[cfg(feature = "arc")]
-    pub fn with_arc_output(mut self, arc_output: &ArcOutput) -> Self {
-        if arc_output.result == crate::DkimResult::Pass {
-            let mut comment = "arc=pass".to_string();
-            for set in arc_output.set.iter().rev() {
-                let seal = &set.seal.header;
-                write!(
-                    &mut comment,
-                    " as[{}].d={} as[{}].s={}",
-                    seal.i, seal.d, seal.i, seal.s
-                )
-                .ok();
-            }
-            self.row
-                .policy_evaluated
-                .reason
-                .push(PolicyOverrideReason::new(PolicyOverride::LocalPolicy).with_comment(comment));
-        }
-        self
-    }
-
-    pub fn source_ip(&self) -> Option<IpAddr> {
-        self.row.source_ip
-    }
-
-    pub fn with_source_ip(mut self, source_ip: IpAddr) -> Self {
-        self.row.source_ip = source_ip.into();
-        self
-    }
-
-    pub fn count(&self) -> u32 {
-        self.row.count
-    }
-
-    pub fn with_count(mut self, count: u32) -> Self {
-        self.row.count = count;
-        self
-    }
-
-    pub fn action_disposition(&self) -> ActionDisposition {
-        self.row.policy_evaluated.disposition
-    }
-
-    pub fn with_action_disposition(mut self, disposition: ActionDisposition) -> Self {
-        self.row.policy_evaluated.disposition = disposition;
-        self
-    }
-
-    pub fn dmarc_dkim_result(&self) -> DmarcResult {
-        self.row.policy_evaluated.dkim
-    }
-
-    pub fn with_dmarc_dkim_result(mut self, dkim: DmarcResult) -> Self {
-        self.row.policy_evaluated.dkim = dkim;
-        self
-    }
-
-    pub fn dmarc_spf_result(&self) -> DmarcResult {
-        self.row.policy_evaluated.spf
-    }
-
-    pub fn with_dmarc_spf_result(mut self, spf: DmarcResult) -> Self {
-        self.row.policy_evaluated.spf = spf;
-        self
-    }
-
-    pub fn policy_override_reason(&self) -> &[PolicyOverrideReason] {
-        &self.row.policy_evaluated.reason
-    }
-
-    pub fn with_policy_override_reason(mut self, reason: PolicyOverrideReason) -> Self {
-        self.row.policy_evaluated.reason.push(reason);
-        self
-    }
-
-    pub fn envelope_from(&self) -> &str {
-        &self.identifiers.envelope_from
-    }
-
-    pub fn with_envelope_from(mut self, envelope_from: impl Into<String>) -> Self {
-        self.identifiers.envelope_from = envelope_from.into();
-        self
-    }
-
-    pub fn header_from(&self) -> &str {
-        &self.identifiers.header_from
-    }
-
-    pub fn with_header_from(mut self, header_from: impl Into<String>) -> Self {
-        self.identifiers.header_from = header_from.into();
-        self
-    }
-
-    pub fn envelope_to(&self) -> Option<&str> {
-        self.identifiers.envelope_to.as_deref()
-    }
-
-    pub fn with_envelope_to(mut self, envelope_to: impl Into<String>) -> Self {
-        self.identifiers.envelope_to = Some(envelope_to.into());
-        self
-    }
-
-    pub fn dkim_auth_result(&self) -> &[DKIMAuthResult] {
-        &self.auth_results.dkim
-    }
-
-    pub fn with_dkim_auth_result(mut self, auth_result: DKIMAuthResult) -> Self {
-        self.auth_results.dkim.push(auth_result);
-        self
-    }
-
-    pub fn spf_auth_result(&self) -> &[SPFAuthResult] {
-        &self.auth_results.spf
-    }
-
-    pub fn with_spf_auth_result(mut self, auth_result: SPFAuthResult) -> Self {
-        self.auth_results.spf.push(auth_result);
-        self
-    }
-}
-
-impl PolicyPublished {
-    pub fn from_record(domain: impl Into<String>, dmarc: &Dmarc) -> Self {
-        PolicyPublished {
-            domain: domain.into(),
-            adkim: (&dmarc.adkim).into(),
-            aspf: (&dmarc.aspf).into(),
-            p: (&dmarc.p).into(),
-            sp: (&dmarc.sp).into(),
-            np: (&dmarc.np).into(),
-            testing: dmarc.t,
-            discovery_method: Discovery::Treewalk,
-            fo: match &dmarc.fo {
-                crate::dmarc::Report::All => "0",
-                crate::dmarc::Report::Any => "1",
-                crate::dmarc::Report::Dkim => "d",
-                crate::dmarc::Report::Spf => "s",
-                crate::dmarc::Report::DkimSpf => "d:s",
-            }
-            .to_string()
-            .into(),
-            version_published: None,
-        }
-    }
-}
-
-impl DKIMAuthResult {
-    pub fn new() -> Self {
-        DKIMAuthResult::default()
-    }
-
-    pub fn domain(&self) -> &str {
-        &self.domain
-    }
-
-    pub fn with_domain(mut self, domain: impl Into<String>) -> Self {
-        self.domain = domain.into();
-        self
-    }
-
-    pub fn selector(&self) -> &str {
-        &self.selector
-    }
-
-    pub fn with_selector(mut self, selector: impl Into<String>) -> Self {
-        self.selector = selector.into();
-        self
-    }
-
-    pub fn result(&self) -> DkimResult {
-        self.result
-    }
-
-    pub fn with_result(mut self, result: DkimResult) -> Self {
-        self.result = result;
-        self
-    }
-
-    pub fn human_result(&self) -> Option<&str> {
-        self.human_result.as_deref()
-    }
-
-    pub fn with_human_result(mut self, human_result: impl Into<String>) -> Self {
-        self.human_result = Some(human_result.into());
-        self
-    }
-}
-
-impl SPFAuthResult {
-    pub fn new() -> Self {
-        SPFAuthResult::default()
-    }
-
-    pub fn domain(&self) -> &str {
-        &self.domain
-    }
-
-    pub fn with_domain(mut self, domain: impl Into<String>) -> Self {
-        self.domain = domain.into();
-        self
-    }
-
-    pub fn scope(&self) -> SPFDomainScope {
-        self.scope
-    }
-
-    pub fn with_scope(mut self, scope: SPFDomainScope) -> Self {
-        self.scope = scope;
-        self
-    }
-
-    pub fn result(&self) -> SpfResult {
-        self.result
-    }
-
-    pub fn with_result(mut self, result: SpfResult) -> Self {
-        self.result = result;
-        self
-    }
-
-    pub fn human_result(&self) -> Option<&str> {
-        self.human_result.as_deref()
-    }
-
-    pub fn with_human_result(mut self, human_result: impl Into<String>) -> Self {
-        self.human_result = Some(human_result.into());
-        self
-    }
-}
-
-impl PolicyOverrideReason {
-    pub fn new(type_: PolicyOverride) -> Self {
-        PolicyOverrideReason {
-            type_,
-            comment: None,
-        }
-    }
-
-    pub fn with_comment(mut self, comment: impl Into<String>) -> Self {
-        self.comment = Some(comment.into());
-        self
-    }
-
-    pub fn comment(&self) -> Option<&str> {
-        self.comment.as_deref()
-    }
-
-    pub fn policy_override(&self) -> PolicyOverride {
-        self.type_
-    }
-}
-
-impl From<&crate::DmarcResult> for DmarcResult {
-    fn from(result: &crate::DmarcResult) -> Self {
-        match result {
-            crate::DmarcResult::Pass => DmarcResult::Pass,
-            _ => DmarcResult::Fail,
-        }
-    }
-}
-
-impl From<&crate::dmarc::Alignment> for Alignment {
-    fn from(aligment: &crate::dmarc::Alignment) -> Self {
-        match aligment {
-            crate::dmarc::Alignment::Relaxed => Alignment::Relaxed,
-            crate::dmarc::Alignment::Strict => Alignment::Strict,
-        }
-    }
-}
-
-impl From<&crate::dmarc::Policy> for Disposition {
-    fn from(policy: &crate::dmarc::Policy) -> Self {
-        match policy {
-            crate::dmarc::Policy::None => Disposition::None,
-            crate::dmarc::Policy::Quarantine => Disposition::Quarantine,
-            crate::dmarc::Policy::Reject => Disposition::Reject,
-            crate::dmarc::Policy::Unspecified => Disposition::None,
-        }
+        version.ok_or_else(|| de::Error::custom("unsupported report version"))
     }
 }

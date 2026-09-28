@@ -4,53 +4,127 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{Alignment, Dmarc, Policy, Psd};
+use super::{Alignment, DmarcRecord, Policy, Psd};
 use crate::DnsError;
+use crate::dns::DnsCache;
 use crate::{
-    AuthenticatedMessage, Dkim2Result, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error, MX,
-    MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult, Txt,
-    common::cache::NoCache, common::to_a_label, dkim2::Dkim2Output,
+    AuthenticatedMessage, Dkim2Result, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
+    MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult, TxtRecord,
+    dkim2::Dkim2Output, dns::cache::NoCache, dns::to_a_label,
 };
-use std::{
-    borrow::Cow,
-    net::{IpAddr, Ipv4Addr, Ipv6Addr},
-    sync::Arc,
-};
+use std::{borrow::Cow, net::Ipv4Addr, sync::Arc};
 
 const DMARC_PREFIX: &str = "_dmarc.";
 const REPORT_PREFIX: &str = "._report._dmarc.";
 
+/// Input of [`MessageAuthenticator::verify_dmarc`]: the message and the
+/// results of the underlying authentication checks.
+///
+/// Built with [`DmarcParameters::new`], optionally extended with
+/// [`DmarcParameters::with_dkim2_output`], and optionally wrapped in
+/// [`Parameters`] to supply a DNS cache.
 pub struct DmarcParameters<'x> {
+    /// The message; its RFC5322.From header gives the Author Domain.
     pub message: &'x AuthenticatedMessage<'x>,
+    /// Output of [`MessageAuthenticator::verify_dkim`] for the message.
     pub dkim_output: &'x [DkimOutput<'x>],
+    /// Output of DKIM2 verification, if performed; only instance 1 is used
+    /// for alignment.
     pub dkim2_output: Option<&'x Dkim2Output<'x>>,
-    pub rfc5321_mail_from_domain: &'x str,
+    /// The RFC5321.MailFrom domain (or the HELO domain for a null
+    /// reverse-path) that SPF was evaluated for.
+    pub mail_from_domain: &'x str,
+    /// Output of SPF verification for `mail_from_domain`.
     pub spf_output: &'x SpfOutput,
 }
 
 impl MessageAuthenticator {
-    /// Verifies the DMARC policy of an RFC5321.MailFrom domain
-    pub async fn verify_dmarc<'x, TXT, MXX, IPV4, IPV6, PTR>(
+    /// Evaluates the DMARC policy of a message (RFC 9989, Section 4.10).
+    ///
+    /// The Author Domain is taken from the RFC5322.From header. Messages
+    /// without a From domain, or whose From header lists several different
+    /// domains, are exempt and yield an empty output (result `None`).
+    ///
+    /// DNS lookups performed:
+    ///
+    /// - A DNS Tree Walk of TXT queries for `_dmarc.<name>`, from the Author
+    ///   Domain up to the top-level domain, capped at eight queries. A record
+    ///   with `psd=y` or `psd=n` stops the walk. The Author Domain's own
+    ///   record applies if present, otherwise the Organizational Domain's,
+    ///   otherwise the shortest one found.
+    /// - An A query for the Author Domain when a record found above it has
+    ///   `np` different from `sp`, to tell a non-existent subdomain (NXDOMAIN,
+    ///   RFC 8020) from an existing one.
+    /// - Further Tree Walks to find the Organizational Domain of SPF and DKIM
+    ///   identifiers under relaxed alignment.
+    ///
+    /// A record without a valid `p` tag is treated as `p=none` when it has a
+    /// valid `rua` tag; otherwise DMARC does not apply.
+    ///
+    /// The returned [`DmarcOutput`] carries per-mechanism results
+    /// ([`DmarcOutput::spf_result`], [`DmarcOutput::dkim_result`]) and the
+    /// overall [`DmarcOutput::result`]:
+    ///
+    /// - [`DmarcResult::Pass`]: SPF or DKIM produced an aligned pass.
+    /// - [`DmarcResult::Fail`]: a record applies and no mechanism produced
+    ///   an aligned pass.
+    /// - [`DmarcResult::TempError`]: a transient DNS error prevented the
+    ///   evaluation.
+    /// - [`DmarcResult::PermError`]: the DMARC record could not be
+    ///   retrieved.
+    /// - [`DmarcResult::None`]: DMARC does not apply to the message.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{
+    ///     AuthenticatedMessage, DmarcResult, MessageAuthenticator, dmarc::Policy,
+    ///     dmarc::verify::DmarcParameters, spf::verify::SpfParameters,
+    /// };
+    ///
+    /// # async fn run(authenticator: &MessageAuthenticator, raw_message: &[u8]) {
+    /// let message = AuthenticatedMessage::parse(raw_message).unwrap();
+    /// let dkim_output = authenticator.verify_dkim(&message).await;
+    /// let spf_output = authenticator
+    ///     .verify_spf(SpfParameters::mail_from(
+    ///         "192.0.2.1".parse().unwrap(),
+    ///         "mx.example.org",
+    ///         "mx.my-host.org",
+    ///         "sender@example.org",
+    ///     ))
+    ///     .await;
+    /// let dmarc_output = authenticator
+    ///     .verify_dmarc(DmarcParameters::new(
+    ///         &message,
+    ///         &dkim_output,
+    ///         "example.org",
+    ///         &spf_output,
+    ///     ))
+    ///     .await;
+    ///
+    /// if matches!(dmarc_output.result(), DmarcResult::Fail(_))
+    ///     && dmarc_output.policy() == Policy::Reject
+    /// {
+    ///     println!("reject message from {}", dmarc_output.domain());
+    /// }
+    /// # }
+    /// ```
+    pub async fn verify_dmarc<'x, C>(
         &self,
-        params: impl Into<Parameters<'x, DmarcParameters<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
+        params: impl Into<Parameters<'x, DmarcParameters<'x>, C>>,
     ) -> DmarcOutput
     where
-        TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
-        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
-        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
-        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
+        C: DnsCache + 'x,
     {
-        // Extract RFC5322.From domain
         let params = params.into();
-        let message = params.params.message;
-        let dkim_output = params.params.dkim_output;
-        let dkim2_output = params.params.dkim2_output;
-        let rfc5321_mail_from_domain = to_a_label(params.params.rfc5321_mail_from_domain);
-        let rfc5321_mail_from_domain = rfc5321_mail_from_domain.as_ref();
-        let spf_output = params.params.spf_output;
-        let cache_txt = params.cache_txt;
-        let cache_ipv4 = params.cache_ipv4;
+        let message = params.input.message;
+        let dkim_output = params.input.dkim_output;
+        let dkim2_output = params.input.dkim2_output;
+        let mail_from_domain = to_a_label(params.input.mail_from_domain);
+        let mail_from_domain = mail_from_domain.as_ref();
+        let spf_output = params.input.spf_output;
+        let cache_txt = params.txt_cache();
+        let cache_ipv4 = params.ipv4_cache();
         let mut rfc5322_from_domain = Cow::Borrowed("");
         for from in &message.from {
             if let Some((_, domain)) = from.rsplit_once('@') {
@@ -58,8 +132,6 @@ impl MessageAuthenticator {
                 if rfc5322_from_domain.is_empty() {
                     rfc5322_from_domain = domain;
                 } else if rfc5322_from_domain != domain {
-                    // Multi-valued RFC5322.From header fields with multiple
-                    // domains MUST be exempt from DMARC checking.
                     return DmarcOutput::default();
                 }
             }
@@ -69,8 +141,6 @@ impl MessageAuthenticator {
         }
         let rfc5322_from_domain = rfc5322_from_domain.as_ref();
 
-        // Perform a DNS Tree Walk to discover the DMARC Policy Record for the
-        // Author Domain (RFC 9989 Section 4.10.1)
         let walk = match self.dmarc_tree_walk(rfc5322_from_domain, cache_txt).await {
             Ok(walk) => walk,
             Err(err) => {
@@ -85,13 +155,9 @@ impl MessageAuthenticator {
             return DmarcOutput::default().with_domain(rfc5322_from_domain);
         }
 
-        // Determine the Organizational Domain of the Author Domain
         let author_org =
             organizational_domain(&walk, rfc5322_from_domain).unwrap_or(rfc5322_from_domain);
 
-        // Select the DMARC Policy Record to apply: the Author Domain's own
-        // record, otherwise the Organizational Domain's, otherwise the PSD's
-        // (RFC 9989 Section 4.10.1).
         let (record, is_author_record) =
             if let Some((_, record)) = walk.iter().find(|(name, _)| *name == rfc5322_from_domain) {
                 (record, true)
@@ -105,30 +171,21 @@ impl MessageAuthenticator {
                 return DmarcOutput::default().with_domain(rfc5322_from_domain);
             };
 
-        // Determine the Domain Owner Assessment Policy. A record without a
-        // valid "p" tag is treated as "p=none" when a valid "rua" tag is
-        // present, otherwise DMARC does not apply (Section 4.10.1)
         let mut policy = if record.p == Policy::Unspecified {
             if record.rua.is_empty() {
                 return DmarcOutput::default().with_domain(rfc5322_from_domain);
             }
             Policy::None
         } else if is_author_record {
-            // A record published at the Author Domain uses the "p" tag
             record.p
         } else if record.np != record.sp
             && self.domain_exists(rfc5322_from_domain, cache_ipv4).await == Some(false)
         {
-            // The Author Domain returns NXDOMAIN, i.e. is a non-existent
-            // subdomain (RFC 8020), so "np" applies
             record.np
         } else {
-            // The Author Domain is an existing subdomain, so "sp" applies
             record.sp
         };
 
-        // In test mode ("t=y") the stated policy is not applied; enforcement is
-        // dropped by one level (RFC 9989 Section 4.7)
         if record.t {
             policy = match policy {
                 Policy::Reject => Policy::Quarantine,
@@ -173,16 +230,13 @@ impl MessageAuthenticator {
             .map(|(d, temp_error)| (to_a_label(d), temp_error))
             .collect::<Vec<_>>();
 
-        // Cache Organizational Domains resolved during alignment
         let mut org_memo: Vec<(&str, &str)> = vec![(rfc5322_from_domain, author_org)];
 
-        // Check SPF alignment (Section 4.10.2). A DNS error on a check whose
-        // identifier aligns means DMARC can neither pass nor fail (Section 5.3.6)
         if matches!(spf_output.result, SpfResult::Pass | SpfResult::TempError) {
             let spf_pass = spf_output.result == SpfResult::Pass;
             output.spf_result = match self
                 .is_aligned(
-                    rfc5321_mail_from_domain,
+                    mail_from_domain,
                     rfc5322_from_domain,
                     author_org,
                     aspf,
@@ -199,7 +253,6 @@ impl MessageAuthenticator {
             };
         }
 
-        // Check DKIM alignment (Section 4.10.2)
         let mut has_dkim_pass = false;
         let mut dkim_temp_error = None;
         for (d, temp_error) in &dkim_signatures {
@@ -243,13 +296,53 @@ impl MessageAuthenticator {
         output.with_record(Arc::clone(record))
     }
 
-    /// Validates the external report e-mail addresses of a DMARC record
-    pub async fn verify_dmarc_report_address<'x, T: AsRef<str>>(
+    /// Returns the reporting addresses that are authorized to receive DMARC
+    /// reports for a policy domain (RFC 9989).
+    ///
+    /// Takes a `(policy_domain, addresses)` pair, optionally wrapped in
+    /// [`Parameters`] to supply a DNS cache. `addresses` is usually
+    /// [`DmarcRecord::rua`] or [`DmarcRecord::ruf`], but any `AsRef<str>`
+    /// holding an email address works. An address is authorized when its
+    /// domain is the policy domain or a subdomain of it (internal), or, for
+    /// an external destination, when a `v=DMARC1` TXT record exists at
+    /// `<policy_domain>._report._dmarc.<destination_domain>`. One TXT lookup
+    /// is performed per external address. Addresses are returned in input
+    /// order.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Dns`] with [`DnsError::Resolver`] when a lookup fails
+    /// with a transient resolver error. A missing or invalid authorization
+    /// record is not an error: the address is left out.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{DmarcOutput, MessageAuthenticator};
+    ///
+    /// # async fn run(authenticator: &MessageAuthenticator, output: &DmarcOutput) -> mail_auth::Result<()> {
+    /// if let Some(record) = output.record() {
+    ///     let authorized = authenticator
+    ///         .authorized_report_addresses((output.domain(), record.rua()))
+    ///         .await?;
+    ///     for uri in authorized {
+    ///         println!("send aggregate report to {}", uri.uri());
+    ///     }
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn authorized_report_addresses<'x, 'y, T, C>(
         &self,
-        domain: &str,
-        addresses: &'x [T],
-        txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
-    ) -> Option<Vec<&'x T>> {
+        params: impl Into<Parameters<'y, (&'y str, &'x [T]), C>>,
+    ) -> crate::Result<Vec<&'x T>>
+    where
+        T: AsRef<str> + 'x,
+        C: DnsCache + 'y,
+    {
+        let params = params.into();
+        let (domain, addresses) = params.input;
+        let txt_cache = params.txt_cache();
         let domain = to_a_label(domain);
         let domain = domain.as_ref();
         let mut result = Vec::with_capacity(addresses.len());
@@ -263,8 +356,6 @@ impl MessageAuthenticator {
                     .unwrap_or_default(),
             );
             let address_domain = address_domain.as_ref();
-            // No external authorization is required when the destination is the
-            // policy domain itself or a subdomain of it.
             let is_internal = address_domain == domain
                 || address_domain
                     .strip_suffix(domain)
@@ -276,9 +367,9 @@ impl MessageAuthenticator {
                 key.push_str(REPORT_PREFIX);
                 key.push_str(address_domain);
                 key.push('.');
-                match self.txt_lookup::<Dmarc>(&key, txt_cache).await {
+                match self.txt_lookup::<DmarcRecord>(&key, txt_cache).await {
                     Ok(_) => true,
-                    Err(Error::Dns(DnsError::Resolver(_))) => return None,
+                    Err(err @ Error::Dns(DnsError::Resolver(_))) => return Err(err),
                     _ => false,
                 }
             };
@@ -287,7 +378,7 @@ impl MessageAuthenticator {
             }
         }
 
-        result.into()
+        Ok(result)
     }
 
     /// Performs a DNS Tree Walk (RFC 9989 Section 4.10) starting at `domain`
@@ -296,17 +387,14 @@ impl MessageAuthenticator {
     async fn dmarc_tree_walk<'x>(
         &self,
         domain: &'x str,
-        txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
-    ) -> crate::Result<Vec<(&'x str, Arc<Dmarc>)>> {
+        txt_cache: Option<&impl ResolverCache<Box<str>, TxtRecord>>,
+    ) -> crate::Result<Vec<(&'x str, Arc<DmarcRecord>)>> {
         let total = domain.split('.').filter(|l| !l.is_empty()).count();
         let mut found = Vec::new();
         if total < 2 {
             return Ok(found);
         }
 
-        // The first query targets the starting point; subsequent queries drop
-        // to 7 labels when the name has 8 or more (the eight-query cap) and then
-        // one label at a time down to the top-level domain.
         let mut count = total;
         let mut key = String::with_capacity(domain.len() + DMARC_PREFIX.len() + 1);
         loop {
@@ -315,9 +403,8 @@ impl MessageAuthenticator {
             key.push_str(DMARC_PREFIX);
             key.push_str(name);
             key.push('.');
-            match self.txt_lookup::<Dmarc>(&key, txt_cache).await {
+            match self.txt_lookup::<DmarcRecord>(&key, txt_cache).await {
                 Ok(dmarc) => {
-                    // A record carrying "psd=y" or "psd=n" stops the walk
                     let stop = matches!(dmarc.psd, Psd::Yes | Psd::No);
                     found.push((name, dmarc));
                     if stop {
@@ -345,12 +432,9 @@ impl MessageAuthenticator {
         cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
     ) -> Option<bool> {
         match self.ipv4_lookup(domain, cache_ipv4).await {
-            // The name resolves to an address: it exists.
             Ok(_) => Some(true),
-            // NODATA (any RCODE other than NXDOMAIN) means the name exists but
-            // has no A record; only NXDOMAIN means the name does not exist.
             Err(Error::Dns(DnsError::RecordNotFound(code))) => {
-                Some(code != crate::DNS_RCODE_NXDOMAIN)
+                Some(code != crate::dns::DNS_RCODE_NXDOMAIN)
             }
             Err(_) => None,
         }
@@ -362,7 +446,7 @@ impl MessageAuthenticator {
         author_domain: &'x str,
         author_org: &'x str,
         alignment: Alignment,
-        txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
+        txt_cache: Option<&impl ResolverCache<Box<str>, TxtRecord>>,
         memo: &mut Vec<(&'x str, &'x str)>,
     ) -> crate::Result<bool> {
         Ok(domain == author_domain
@@ -380,7 +464,7 @@ impl MessageAuthenticator {
     async fn organizational_domain_of<'x>(
         &self,
         domain: &'x str,
-        txt_cache: Option<&impl ResolverCache<Box<str>, Txt>>,
+        txt_cache: Option<&impl ResolverCache<Box<str>, TxtRecord>>,
         memo: &mut Vec<(&'x str, &'x str)>,
     ) -> crate::Result<&'x str> {
         if let Some(&(_, org)) = memo.iter().find(|(d, _)| *d == domain) {
@@ -399,7 +483,10 @@ impl MessageAuthenticator {
 /// Selects the Organizational Domain from the set of DMARC Policy Records
 /// retrieved by a Tree Walk (RFC 9989 Section 4.10.2). The `walk` is ordered
 /// from the longest name (the starting domain) to the shortest.
-fn organizational_domain<'x>(walk: &[(&'x str, Arc<Dmarc>)], start: &'x str) -> Option<&'x str> {
+fn organizational_domain<'x>(
+    walk: &[(&'x str, Arc<DmarcRecord>)],
+    start: &'x str,
+) -> Option<&'x str> {
     for (name, record) in walk {
         match record.psd {
             Psd::No => return Some(name),
@@ -430,651 +517,44 @@ fn drop_leftmost_labels(domain: &str, n: usize) -> &str {
 }
 
 impl<'x> DmarcParameters<'x> {
+    /// Creates the parameters from the message, the DKIM verification
+    /// output, the domain SPF was evaluated for (RFC5321.MailFrom domain, or
+    /// the HELO domain for a null reverse-path) and the SPF output.
     pub fn new(
         message: &'x AuthenticatedMessage<'x>,
         dkim_output: &'x [DkimOutput<'x>],
-        rfc5321_mail_from_domain: &'x str,
+        mail_from_domain: &'x str,
         spf_output: &'x SpfOutput,
     ) -> Self {
         Self {
             message,
             dkim_output,
             dkim2_output: None,
-            rfc5321_mail_from_domain,
+            mail_from_domain,
             spf_output,
         }
     }
 
+    /// Adds the DKIM2 verification output; a passing instance 1 signature
+    /// takes part in DKIM alignment.
     pub fn with_dkim2_output(mut self, dkim2_output: &'x Dkim2Output<'x>) -> Self {
         self.dkim2_output = Some(dkim2_output);
         self
     }
 }
 
-impl<'x> From<DmarcParameters<'x>>
-    for Parameters<
-        'x,
-        DmarcParameters<'x>,
-        NoCache<Box<str>, Txt>,
-        NoCache<Box<str>, RecordSet<MX>>,
-        NoCache<Box<str>, RecordSet<Ipv4Addr>>,
-        NoCache<Box<str>, RecordSet<Ipv6Addr>>,
-        NoCache<IpAddr, RecordSet<Box<str>>>,
-    >
-{
+impl<'x> From<DmarcParameters<'x>> for Parameters<'x, DmarcParameters<'x>, NoCache> {
     fn from(params: DmarcParameters<'x>) -> Self {
+        Parameters::new(params)
+    }
+}
+
+impl<'x, 'y, T> From<(&'y str, &'x [T])> for Parameters<'y, (&'y str, &'x [T]), NoCache> {
+    fn from(params: (&'y str, &'x [T])) -> Self {
         Parameters::new(params)
     }
 }
 
 #[cfg(test)]
 #[allow(unused)]
-mod test {
-    use super::DmarcParameters;
-    use crate::{
-        AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, DnsError, Error,
-        MessageAuthenticator, SpfOutput, SpfResult,
-        common::{cache::test::DummyCaches, parse::TxtRecordParser},
-        dkim::{DkimError, Signature},
-        dmarc::{Dmarc, Policy, URI},
-    };
-    use mail_parser::MessageParser;
-    use std::time::{Duration, Instant};
-
-    #[tokio::test]
-    async fn dmarc_verify_alignment() {
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = DummyCaches::new();
-
-        for (
-            dmarc_dns,
-            dmarc,
-            message,
-            rfc5321_mail_from_domain,
-            signature_domain,
-            dkim,
-            spf,
-            expect_dkim,
-            expect_spf,
-            policy,
-        ) in [
-            // Strict - Pass
-            (
-                "_dmarc.example.org.",
-                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@example.org",
-                "From: hello@example.org\r\n\r\n",
-                "example.org",
-                "example.org",
-                DkimResult::Pass,
-                SpfResult::Pass,
-                DmarcResult::Pass,
-                DmarcResult::Pass,
-                Policy::Reject,
-            ),
-            // Relaxed - Pass on the Organizational Domain
-            (
-                "_dmarc.example.org.",
-                "v=DMARC1; p=reject; aspf=r; adkim=r; fo=1; rua=mailto:d@example.org",
-                "From: hello@example.org\r\n\r\n",
-                "subdomain.example.org",
-                "subdomain.example.org",
-                DkimResult::Pass,
-                SpfResult::Pass,
-                DmarcResult::Pass,
-                DmarcResult::Pass,
-                Policy::Reject,
-            ),
-            // Strict - Fail (subdomain identifiers do not match exactly)
-            (
-                "_dmarc.example.org.",
-                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@example.org",
-                "From: hello@example.org\r\n\r\n",
-                "subdomain.example.org",
-                "subdomain.example.org",
-                DkimResult::Pass,
-                SpfResult::Pass,
-                DmarcResult::Fail(Error::NotAligned),
-                DmarcResult::Fail(Error::NotAligned),
-                Policy::Reject,
-            ),
-            // Strict - Pass on a U-label From against A-label identifiers
-            (
-                "_dmarc.xn--eebajf.xn--9dbq2a.",
-                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@xn--eebajf.xn--9dbq2a",
-                "From: hello@\u{5de}\u{5d9}\u{5d9}\u{5dc}.\u{5e7}\u{5d5}\u{5dd}\r\n\r\n",
-                "xn--eebajf.xn--9dbq2a",
-                "xn--eebajf.xn--9dbq2a",
-                DkimResult::Pass,
-                SpfResult::Pass,
-                DmarcResult::Pass,
-                DmarcResult::Pass,
-                Policy::Reject,
-            ),
-            // Strict - Pass on an A-label From against U-label identifiers
-            (
-                "_dmarc.xn--eebajf.xn--9dbq2a.",
-                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@xn--eebajf.xn--9dbq2a",
-                "From: hello@xn--eebajf.xn--9dbq2a\r\n\r\n",
-                "\u{5de}\u{5d9}\u{5d9}\u{5dc}.\u{5e7}\u{5d5}\u{5dd}",
-                "\u{5de}\u{5d9}\u{5d9}\u{5dc}.\u{5e7}\u{5d5}\u{5dd}",
-                DkimResult::Pass,
-                SpfResult::Pass,
-                DmarcResult::Pass,
-                DmarcResult::Pass,
-                Policy::Reject,
-            ),
-            // Failed mechanisms produce no aligned result
-            (
-                "_dmarc.example.org.",
-                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@example.org",
-                "From: hello@example.org\r\n\r\n",
-                "example.org",
-                "example.org",
-                DkimResult::Fail(Error::Dkim(DkimError::SignatureExpired)),
-                SpfResult::Fail,
-                DmarcResult::None,
-                DmarcResult::None,
-                Policy::Reject,
-            ),
-        ] {
-            caches.txt_add(
-                dmarc_dns,
-                Dmarc::parse(dmarc.as_bytes()).unwrap(),
-                Instant::now() + Duration::new(3200, 0),
-            );
-
-            let auth_message = AuthenticatedMessage::parse(message.as_bytes()).unwrap();
-            let signature = Signature {
-                d: signature_domain.into(),
-                ..Default::default()
-            };
-            let dkim = DkimOutput {
-                result: dkim,
-                signature: (&signature).into(),
-                report: None,
-                is_atps: false,
-            };
-            let spf = SpfOutput {
-                result: spf,
-                domain: rfc5321_mail_from_domain.to_string(),
-                report: None,
-                explanation: None,
-            };
-            let result = resolver
-                .verify_dmarc(caches.parameters(DmarcParameters::new(
-                    &auth_message,
-                    &[dkim],
-                    rfc5321_mail_from_domain,
-                    &spf,
-                )))
-                .await;
-            assert_eq!(result.dkim_result, expect_dkim, "dkim {message}");
-            assert_eq!(result.spf_result, expect_spf, "spf {message}");
-            assert_eq!(result.policy, policy, "policy {message}");
-            let expect_result =
-                if expect_dkim == DmarcResult::Pass || expect_spf == DmarcResult::Pass {
-                    DmarcResult::Pass
-                } else {
-                    DmarcResult::Fail(Error::NotAligned)
-                };
-            assert_eq!(result.result(), expect_result, "result {message}");
-        }
-    }
-
-    #[tokio::test]
-    async fn dmarc_policy_discovery() {
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let expires = Instant::now() + Duration::new(3200, 0);
-
-        // Author Domain has its own record -> "p" applies
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.org.",
-            Dmarc::parse(b"v=DMARC1; p=reject; sp=quarantine; np=none").unwrap(),
-            expires,
-        );
-        assert_eq!(
-            policy_of(&resolver, &caches, "hello@example.org").await,
-            Policy::Reject,
-        );
-
-        // Existing subdomain, only the Organizational Domain publishes a
-        // record -> "sp" applies
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.org.",
-            Dmarc::parse(b"v=DMARC1; p=reject; sp=quarantine; np=none").unwrap(),
-            expires,
-        );
-        caches.ipv4_add("sub.example.org.", vec![[127, 0, 0, 1].into()], expires);
-        assert_eq!(
-            policy_of(&resolver, &caches, "hello@sub.example.org").await,
-            Policy::Quarantine,
-        );
-
-        // Non-existent subdomain -> "np" applies
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.org.",
-            Dmarc::parse(b"v=DMARC1; p=reject; sp=quarantine; np=none").unwrap(),
-            expires,
-        );
-        assert_eq!(
-            policy_of(&resolver, &caches, "hello@ghost.example.org").await,
-            Policy::None,
-        );
-
-        // Missing "p" with a valid "rua" -> treated as "p=none"
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.org.",
-            Dmarc::parse(b"v=DMARC1; rua=mailto:d@example.org").unwrap(),
-            expires,
-        );
-        assert_eq!(
-            policy_of(&resolver, &caches, "hello@example.org").await,
-            Policy::None,
-        );
-
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.org.",
-            Dmarc::parse(b"v=DMARC1; sp=reject; rua=mailto:d@example.org").unwrap(),
-            expires,
-        );
-        caches.ipv4_add("sub.example.org.", vec![[127, 0, 0, 1].into()], expires);
-        assert_eq!(
-            policy_of(&resolver, &caches, "hello@sub.example.org").await,
-            Policy::None,
-        );
-
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.org.",
-            Dmarc::parse(b"v=DMARC1; sp=reject; np=reject").unwrap(),
-            expires,
-        );
-        caches.ipv4_add("sub.example.org.", vec![[127, 0, 0, 1].into()], expires);
-        let result = verify(&resolver, &caches, "hello@sub.example.org").await;
-        assert_eq!(result.dmarc_record(), None);
-        assert_eq!(result.result(), DmarcResult::None);
-
-        // No record at all -> DMARC does not apply
-        let caches = DummyCaches::new();
-        let result = verify(&resolver, &caches, "hello@nothing.example").await;
-        assert_eq!(result.dmarc_record(), None);
-        assert_eq!(result.result(), DmarcResult::None);
-    }
-
-    #[tokio::test]
-    async fn dmarc_verify_temp_errors() {
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.org.",
-            Dmarc::parse(b"v=DMARC1; p=reject; rua=mailto:d@example.org; ruf=mailto:f@example.org")
-                .unwrap(),
-            Instant::now() + Duration::new(3200, 0),
-        );
-        let dns_error = Error::Dns(DnsError::Resolver("timeout".to_string()));
-        let empty_dns_error = Error::Dns(DnsError::Resolver(String::new()));
-        let auth_message = AuthenticatedMessage::parse(b"From: hello@example.org\r\n\r\n").unwrap();
-
-        for (mail_from_domain, spf, signature_domain, dkim, expect_spf, expect_dkim, expect) in [
-            (
-                "example.org",
-                SpfResult::TempError,
-                "example.org",
-                DkimResult::Fail(Error::Dkim(DkimError::FailedBodyHashMatch)),
-                DmarcResult::TempError(empty_dns_error.clone()),
-                DmarcResult::None,
-                DmarcResult::TempError(empty_dns_error.clone()),
-            ),
-            (
-                "other.net",
-                SpfResult::TempError,
-                "other.net",
-                DkimResult::TempError(dns_error.clone()),
-                DmarcResult::None,
-                DmarcResult::None,
-                DmarcResult::Fail(Error::NotAligned),
-            ),
-            (
-                "other.net",
-                SpfResult::Fail,
-                "example.org",
-                DkimResult::TempError(dns_error.clone()),
-                DmarcResult::None,
-                DmarcResult::TempError(dns_error.clone()),
-                DmarcResult::TempError(dns_error.clone()),
-            ),
-            (
-                "example.org",
-                SpfResult::TempError,
-                "example.org",
-                DkimResult::Pass,
-                DmarcResult::TempError(empty_dns_error.clone()),
-                DmarcResult::Pass,
-                DmarcResult::Pass,
-            ),
-            (
-                "attacker._dns_error.net",
-                SpfResult::Pass,
-                "attacker._dns_error.net",
-                DkimResult::Pass,
-                DmarcResult::Fail(Error::NotAligned),
-                DmarcResult::Fail(Error::NotAligned),
-                DmarcResult::Fail(Error::NotAligned),
-            ),
-            (
-                "sub._dns_error.example.org",
-                SpfResult::Pass,
-                "other.net",
-                DkimResult::None,
-                DmarcResult::TempError(empty_dns_error.clone()),
-                DmarcResult::None,
-                DmarcResult::TempError(empty_dns_error.clone()),
-            ),
-        ] {
-            let signature = Signature {
-                d: signature_domain.into(),
-                ..Default::default()
-            };
-            let dkim = DkimOutput {
-                result: dkim,
-                signature: (&signature).into(),
-                report: None,
-                is_atps: false,
-            };
-            let spf = SpfOutput {
-                result: spf,
-                domain: mail_from_domain.to_string(),
-                report: None,
-                explanation: None,
-            };
-            let result = resolver
-                .verify_dmarc(caches.parameters(DmarcParameters::new(
-                    &auth_message,
-                    &[dkim],
-                    mail_from_domain,
-                    &spf,
-                )))
-                .await;
-            let case = format!("{mail_from_domain} {signature_domain}");
-            assert_eq!(result.spf_result, expect_spf, "spf {case}");
-            assert_eq!(result.dkim_result, expect_dkim, "dkim {case}");
-            assert_eq!(result.result(), expect, "result {case}");
-            assert_eq!(
-                result.failure_report().is_none(),
-                matches!(expect, DmarcResult::TempError(_) | DmarcResult::Pass),
-                "failure report {case}"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn dmarc_tree_walk_psd() {
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let expires = Instant::now() + Duration::new(3200, 0);
-
-        // "psd=n" marks the Organizational Domain: relaxed alignment between
-        // "a.mail.example.com" and an identifier under "mail.example.com" holds
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.mail.example.com.",
-            Dmarc::parse(b"v=DMARC1; p=reject; psd=n; rua=mailto:d@example.com").unwrap(),
-            expires,
-        );
-        caches.ipv4_add("a.mail.example.com.", vec![[127, 0, 0, 1].into()], expires);
-        let result = verify_aligned(
-            &resolver,
-            &caches,
-            "hello@a.mail.example.com",
-            "b.mail.example.com",
-        )
-        .await;
-        assert_eq!(result.spf_result(), &DmarcResult::Pass);
-
-        // "psd=y" pushes the Organizational Domain one label below, so
-        // "giant.bank.example" and "mega.bank.example" are different
-        // Organizational Domains and do not align
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.bank.example.",
-            Dmarc::parse(b"v=DMARC1; p=reject; psd=y; rua=mailto:d@bank.example").unwrap(),
-            expires,
-        );
-        caches.txt_add(
-            "_dmarc.giant.bank.example.",
-            Dmarc::parse(b"v=DMARC1; p=reject; rua=mailto:d@giant.bank.example").unwrap(),
-            expires,
-        );
-        let result = verify_aligned(
-            &resolver,
-            &caches,
-            "hello@giant.bank.example",
-            "mega.bank.example",
-        )
-        .await;
-        assert_eq!(result.spf_result(), &DmarcResult::Fail(Error::NotAligned));
-    }
-
-    #[tokio::test]
-    async fn dmarc_tree_walk_query_cap() {
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let expires = Instant::now() + Duration::new(3200, 0);
-
-        // A record published between the Author Domain and the 7-labels-remaining
-        // shortcut is never discovered, but "example.com" is reached within the
-        // eight-query budget.
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.com.",
-            Dmarc::parse(b"v=DMARC1; p=reject; np=none; rua=mailto:d@example.com").unwrap(),
-            expires,
-        );
-        assert_eq!(
-            policy_of(
-                &resolver,
-                &caches,
-                "hello@a.b.c.d.e.f.g.h.i.j.mail.example.com",
-            )
-            .await,
-            Policy::None,
-        );
-    }
-
-    async fn verify(
-        resolver: &MessageAuthenticator,
-        caches: &DummyCaches,
-        from: &str,
-    ) -> DmarcOutputHelper {
-        verify_aligned(resolver, caches, from, "").await
-    }
-
-    async fn verify_aligned(
-        resolver: &MessageAuthenticator,
-        caches: &DummyCaches,
-        from: &str,
-        mail_from_domain: &str,
-    ) -> DmarcOutputHelper {
-        let message = format!("From: {from}\r\n\r\n");
-        let auth_message = AuthenticatedMessage::parse(message.as_bytes()).unwrap();
-        let spf = SpfOutput {
-            result: SpfResult::Pass,
-            domain: mail_from_domain.to_string(),
-            report: None,
-            explanation: None,
-        };
-        resolver
-            .verify_dmarc(caches.parameters(DmarcParameters::new(
-                &auth_message,
-                &[],
-                mail_from_domain,
-                &spf,
-            )))
-            .await
-    }
-
-    async fn policy_of(
-        resolver: &MessageAuthenticator,
-        caches: &DummyCaches,
-        from: &str,
-    ) -> Policy {
-        verify(resolver, caches, from).await.policy()
-    }
-
-    type DmarcOutputHelper = crate::DmarcOutput;
-
-    #[tokio::test]
-    async fn dmarc_verify_dkim2() {
-        use crate::Dkim2Result;
-        use crate::dkim2::{ChainLink, Dkim2Output, Signature as Dkim2Signature};
-
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = DummyCaches::new();
-
-        for (dmarc_dns, dmarc, message, signature_domain, dkim2_result, expect_dkim, policy) in [
-            // Strict - Pass
-            (
-                "_dmarc.example.org.",
-                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@example.org",
-                "From: hello@example.org\r\n\r\n",
-                "example.org",
-                Dkim2Result::Pass,
-                DmarcResult::Pass,
-                Policy::Reject,
-            ),
-            // Relaxed - Pass on the Organizational Domain
-            (
-                "_dmarc.example.org.",
-                "v=DMARC1; p=reject; aspf=r; adkim=r; fo=1; rua=mailto:d@example.org",
-                "From: hello@example.org\r\n\r\n",
-                "subdomain.example.org",
-                Dkim2Result::Pass,
-                DmarcResult::Pass,
-                Policy::Reject,
-            ),
-            // Strict - Fail (subdomain does not match exactly)
-            (
-                "_dmarc.example.org.",
-                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@example.org",
-                "From: hello@example.org\r\n\r\n",
-                "subdomain.example.org",
-                Dkim2Result::Pass,
-                DmarcResult::Fail(Error::NotAligned),
-                Policy::Reject,
-            ),
-            // Chain did not verify - no DKIM alignment
-            (
-                "_dmarc.example.org.",
-                "v=DMARC1; p=reject; aspf=s; adkim=s; fo=1; rua=mailto:d@example.org",
-                "From: hello@example.org\r\n\r\n",
-                "example.org",
-                Dkim2Result::Fail(Error::NotAligned),
-                DmarcResult::None,
-                Policy::Reject,
-            ),
-        ] {
-            caches.txt_add(
-                dmarc_dns,
-                Dmarc::parse(dmarc.as_bytes()).unwrap(),
-                Instant::now() + Duration::new(3200, 0),
-            );
-
-            let auth_message = AuthenticatedMessage::parse(message.as_bytes()).unwrap();
-            let signature = Dkim2Signature {
-                i: 1,
-                d: signature_domain.into(),
-                ..Default::default()
-            };
-            let dkim2 = Dkim2Output {
-                result: dkim2_result.clone(),
-                chain: vec![ChainLink {
-                    signature: &signature,
-                    instance: None,
-                    result: dkim2_result,
-                    custody_ok: true,
-                }],
-            };
-            let spf = SpfOutput {
-                result: SpfResult::None,
-                domain: "example.org".to_string(),
-                report: None,
-                explanation: None,
-            };
-            let result = resolver
-                .verify_dmarc(
-                    caches.parameters(
-                        DmarcParameters::new(&auth_message, &[], "example.org", &spf)
-                            .with_dkim2_output(&dkim2),
-                    ),
-                )
-                .await;
-            assert_eq!(result.dkim_result, expect_dkim);
-            assert_eq!(result.policy, policy);
-        }
-    }
-
-    #[tokio::test]
-    async fn dmarc_verify_report_address() {
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = DummyCaches::new().with_txt(
-            "example.org._report._dmarc.external.org.",
-            Dmarc::parse(b"v=DMARC1").unwrap(),
-            Instant::now() + Duration::new(3200, 0),
-        );
-        let uris = vec![
-            URI::new("dmarc@example.org", 0),
-            URI::new("dmarc@external.org", 0),
-            URI::new("domain@other.org", 0),
-        ];
-
-        assert_eq!(
-            resolver
-                .verify_dmarc_report_address("example.org", &uris, Some(&caches.txt))
-                .await
-                .unwrap(),
-            vec![
-                &URI::new("dmarc@example.org", 0),
-                &URI::new("dmarc@external.org", 0),
-            ]
-        );
-    }
-
-    #[tokio::test]
-    async fn dmarc_verify_report_address_idn() {
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = DummyCaches::new();
-        let uris = vec![
-            URI::new(
-                "dmarc@\u{5de}\u{5d9}\u{5d9}\u{5dc}.\u{5e7}\u{5d5}\u{5dd}",
-                0,
-            ),
-            URI::new("dmarc@sub.xn--eebajf.xn--9dbq2a", 0),
-        ];
-
-        // A U-label reporting address is internal to its A-label policy domain
-        assert_eq!(
-            resolver
-                .verify_dmarc_report_address("xn--eebajf.xn--9dbq2a", &uris, Some(&caches.txt))
-                .await
-                .unwrap(),
-            uris.iter().collect::<Vec<_>>()
-        );
-    }
-
-    #[tokio::test]
-    async fn dmarc_alignment_is_case_insensitive() {
-        let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = DummyCaches::new();
-        caches.txt_add(
-            "_dmarc.example.org.",
-            Dmarc::parse(b"v=DMARC1; p=reject; aspf=s; rua=mailto:d@example.org").unwrap(),
-            Instant::now() + Duration::new(3200, 0),
-        );
-
-        let result = verify_aligned(&resolver, &caches, "hello@example.org", "EXAMPLE.ORG").await;
-        assert_eq!(result.spf_result(), &DmarcResult::Pass);
-    }
-}
+mod tests;

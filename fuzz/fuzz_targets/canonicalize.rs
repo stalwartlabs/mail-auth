@@ -9,11 +9,11 @@ use libfuzzer_sys::fuzz_target;
 
 use mail_auth::{
     AuthenticatedMessage,
-    common::{
-        crypto::{Ed25519Key, HashContext, HashImpl, Sha256},
-        headers::{HeaderFolder, HeaderWriter, Writable, Writer},
-    },
-    dkim::{Canonicalization, DkimSigner, Done, canonicalize::BodyHasher},
+    crypto::Ed25519Key,
+    dkim::{Canonicalization, DkimSigner},
+    testing::{canonicalize_headers, chunked_body_digest, whole_body_digest},
+    headers::{HeaderFolder, HeaderWriter, Writer},
+    signer::Ready,
 };
 use std::sync::LazyLock;
 
@@ -26,7 +26,7 @@ const ED25519_PUBLIC: [u8; 32] = [
     0x0e, 0xe1, 0x72, 0xf3, 0xda, 0xa6, 0x23, 0x25, 0xaf, 0x02, 0x1a, 0x68, 0xf7, 0x07, 0x51, 0x1a,
 ];
 
-static SIGNER: LazyLock<DkimSigner<Ed25519Key, Done>> = LazyLock::new(|| {
+static SIGNER: LazyLock<DkimSigner<Ed25519Key, Ready>> = LazyLock::new(|| {
     DkimSigner::from_key(
         Ed25519Key::from_seed_and_public_key(&ED25519_SEED, &ED25519_PUBLIC)
             .expect("test key is valid"),
@@ -35,28 +35,6 @@ static SIGNER: LazyLock<DkimSigner<Ed25519Key, Done>> = LazyLock::new(|| {
     .selector("ed")
     .headers(["From", "To", "Subject", "Date", "Message-ID"])
 });
-
-fn whole_body_digest(canonicalization: Canonicalization, body: &[u8], limit: u64) -> Vec<u8> {
-    let mut hasher = Sha256::hasher();
-    canonicalization
-        .canonical_body(body, limit)
-        .write(&mut hasher);
-    hasher.complete().as_ref().to_vec()
-}
-
-fn chunked_body_digest(
-    canonicalization: Canonicalization,
-    body: &[u8],
-    limit: u64,
-    chunk: usize,
-) -> (Vec<u8>, u64) {
-    let mut hasher = BodyHasher::new(Sha256::hasher(), canonicalization, limit);
-    for piece in body.chunks(chunk) {
-        hasher.write(piece);
-    }
-    let (hasher, hashed) = hasher.finish();
-    (hasher.complete().as_ref().to_vec(), hashed)
-}
 
 fn check_body(seed: u8, body: &[u8]) {
     let chunk = usize::from(seed % 13) + 1;
@@ -82,10 +60,10 @@ fn check_headers(message: &[u8]) {
     };
     for canonicalization in [Canonicalization::Relaxed, Canonicalization::Simple] {
         let mut out = Vec::new();
-        canonicalization.canonicalize_headers(parsed.headers.iter().copied(), &mut out);
+        canonicalize_headers(canonicalization, parsed.headers().iter().copied(), &mut out);
         if canonicalization == Canonicalization::Simple {
             let expected: usize = parsed
-                .headers
+                .headers()
                 .iter()
                 .map(|(name, value)| name.len() + 1 + value.len())
                 .sum();
@@ -146,9 +124,9 @@ fn check_streaming(seed: u8, message: &[u8]) {
 
 fn has_signable_header(message: &[u8]) -> bool {
     AuthenticatedMessage::parse(message).is_some_and(|parsed| {
-        parsed.headers.iter().any(|(name, _)| {
+        parsed.headers().iter().any(|(name, _)| {
             SIGNER
-                .template
+                .template()
                 .h
                 .iter()
                 .any(|signed| name.eq_ignore_ascii_case(signed.as_bytes()))

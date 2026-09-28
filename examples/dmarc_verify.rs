@@ -47,7 +47,7 @@ async fn main() {
 
     // Verify SPF MAIL-FROM identity
     let spf_result = authenticator
-        .verify_spf(SpfParameters::verify_mail_from(
+        .verify_spf(SpfParameters::mail_from(
             "::1".parse().unwrap(),
             "example.org",
             "my-host-domain.org",

@@ -12,8 +12,8 @@
     in a real-world application. Use at your own risk.
 */
 
-use mail_auth::dkim::generate::DkimKeyPair;
 use encodify::pem;
+use mail_auth::dkim::generate::DkimKeyPair;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 

@@ -6,12 +6,10 @@
 
 use encodify::base64;
 use mail_auth::{
-    common::{
-        crypto::RsaKey,
-        crypto::{Ed25519Key, Sha256},
-        headers::HeaderWriter,
-    },
+    crypto::RsaKey,
+    crypto::{Ed25519Key, Sha256},
     dkim::DkimSigner,
+    headers::HeaderWriter,
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
 

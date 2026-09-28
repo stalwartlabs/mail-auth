@@ -4,35 +4,65 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{ArcError, ChainValidation, Set};
+use super::{ArcError, ChainLink, ChainValidation};
 use crate::SystemTime;
+use crate::dns::DnsCache;
 use crate::{
-    ArcOutput, AuthenticatedMessage, DkimResult, Error, MX, MessageAuthenticator, Parameters,
-    RecordSet, ResolverCache, Txt,
-    common::{
-        crypto::HashAlgorithm,
-        headers::Header,
-        verify::{DomainKey, VerifySignature},
-    },
+    ArcOutput, AuthenticatedMessage, DkimResult, Error, MessageAuthenticator, Parameters,
+    crypto::HashAlgorithm,
     dkim::{Canonicalization, verify::Verifier},
+    dkim::{DomainKey, VerifySignature},
+    headers::Header,
 };
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 impl MessageAuthenticator {
-    /// Verifies ARC headers of an RFC5322 message.
-    pub async fn verify_arc<'x, TXT, MXX, IPV4, IPV6, PTR>(
+    /// Validates the ARC chain of a message (RFC 8617, Section 5.2).
+    ///
+    /// Takes a parsed [`AuthenticatedMessage`], optionally wrapped in
+    /// [`Parameters`] to supply a DNS cache. The chain is checked for
+    /// structure (instance numbers, `cv=` values, matching header counts),
+    /// then the newest `ARC-Message-Signature` (body hash, expiration and
+    /// signature) and every `ARC-Seal`, newest first, are verified. One DNS
+    /// TXT lookup of the key at `<s>._domainkey.<d>` is performed for the
+    /// newest `ARC-Message-Signature` and for each `ARC-Seal`.
+    ///
+    /// The [`ArcResult`](crate::ArcResult) of the returned [`ArcOutput`] is:
+    ///
+    /// - `None`: the message has no `ARC-Message-Signature` header; other ARC
+    ///   headers are not examined in that case.
+    /// - `Pass`: the chain validated.
+    /// - `Fail`: the chain is broken (more than 50 sets, differing header
+    ///   counts, wrong instance sequence, invalid `cv=`), or a signature or
+    ///   seal failed cryptographic verification.
+    /// - `Neutral`: an ARC header could not be parsed, or the newest
+    ///   `ARC-Message-Signature` has expired or its body hash does not match.
+    /// - `PermError`: a key record is missing or invalid.
+    /// - `TempError`: a key lookup failed with a transient DNS error.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{AuthenticatedMessage, ArcResult, MessageAuthenticator};
+    ///
+    /// # async fn run(authenticator: &MessageAuthenticator, raw_message: &[u8]) {
+    /// let message = AuthenticatedMessage::parse(raw_message).unwrap();
+    /// let output = authenticator.verify_arc(&message).await;
+    /// match output.result() {
+    ///     ArcResult::Pass => println!("chain of {} sets validated", output.chain().len()),
+    ///     ArcResult::None => println!("no ARC chain"),
+    ///     other => println!("arc={other}"),
+    /// }
+    /// # }
+    /// ```
+    pub async fn verify_arc<'x, C>(
         &self,
-        params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
+        params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, C>>,
     ) -> ArcOutput<'x>
     where
-        TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
-        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
-        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
-        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
+        C: DnsCache + 'x,
     {
         let params = params.into();
-        let message = params.params;
+        let message = params.input;
         if message.has_arc_errors {
             let err = message
                 .errors
@@ -67,7 +97,6 @@ impl MessageAuthenticator {
             set: Vec::with_capacity(message.aar_headers.len() / 3),
         };
 
-        // Group ARC headers in sets
         for (pos, ((seal_, signature_), results_)) in message
             .as_headers
             .iter()
@@ -89,11 +118,9 @@ impl MessageAuthenticator {
                 } else if (pos == 0 && seal.cv != ChainValidation::None)
                     || (pos > 0 && seal.cv != ChainValidation::Pass)
                 {
-                    output.result = DkimResult::Fail(Error::Arc(ArcError::InvalidCV));
+                    output.result = DkimResult::Fail(Error::Arc(ArcError::InvalidChainValidation));
                 } else if pos == arc_headers - 1 {
-                    // Validate last signature in the chain
                     if signature.x == 0 || (signature.x > signature.t && signature.x > now) {
-                        // Validate body hash
                         let ha = HashAlgorithm::from(signature.a);
                         let bh = &message
                             .body_hashes
@@ -105,7 +132,7 @@ impl MessageAuthenticator {
                             .3;
                         if bh != &signature.bh {
                             output.result =
-                                DkimResult::Neutral(Error::Arc(ArcError::FailedBodyHashMatch));
+                                DkimResult::Neutral(Error::Arc(ArcError::BodyHashMismatch));
                         }
                     } else {
                         output.result = DkimResult::Neutral(Error::Arc(ArcError::SignatureExpired));
@@ -113,7 +140,7 @@ impl MessageAuthenticator {
                 }
             }
 
-            output.set.push(Set {
+            output.set.push(ChainLink {
                 signature: Header::new(signature_.name, signature_.value, signature),
                 seal: Header::new(seal_.name, seal_.value, seal),
                 results: Header::new(results_.name, results_.value, results),
@@ -124,18 +151,15 @@ impl MessageAuthenticator {
             return output;
         }
 
-        // Validate ARC Set
         let arc_set = output.set.last().unwrap();
         let header = &arc_set.signature;
         let signature = &header.header;
 
-        // Hash headers
         let dkim_hdr_value = header.value.strip_signature();
         let mut headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
-        // Obtain record
         let record = match self
-            .txt_lookup::<DomainKey>(signature.domain_key(), params.cache_txt)
+            .txt_lookup::<DomainKey>(signature.domain_key(), params.txt_cache())
             .await
         {
             Ok(record) => record,
@@ -144,18 +168,15 @@ impl MessageAuthenticator {
             }
         };
 
-        // Verify signature
         if let Err(err) = record.verify(&mut headers, *signature, signature.ch) {
             return output.with_result(DkimResult::Fail(err));
         }
 
-        // Validate ARC Seals
         for (pos, set) in output.set.iter().enumerate().rev() {
-            // Obtain record
             let header = &set.seal;
             let seal = &header.header;
             let record = match self
-                .txt_lookup::<DomainKey>(seal.domain_key(), params.cache_txt)
+                .txt_lookup::<DomainKey>(seal.domain_key(), params.txt_cache())
                 .await
             {
                 Ok(record) => record,
@@ -164,7 +185,6 @@ impl MessageAuthenticator {
                 }
             };
 
-            // Build Seal headers
             let seal_signature = header.value.strip_signature();
             let mut headers = output
                 .set
@@ -183,13 +203,11 @@ impl MessageAuthenticator {
                     (set.seal.name, &seal_signature),
                 ]);
 
-            // Verify ARC Seal
             if let Err(err) = record.verify(&mut headers, *seal, Canonicalization::Relaxed) {
                 return output.with_result(DkimResult::Fail(err));
             }
         }
 
-        // ARC Validation successful
         output.with_result(DkimResult::Pass)
     }
 }
@@ -206,9 +224,8 @@ mod test {
     use mail_parser::MessageParser;
 
     use crate::{
-        AuthenticatedMessage, DkimResult, MessageAuthenticator,
-        common::{cache::test::DummyCaches, parse::TxtRecordParser, verify::DomainKey},
-        dkim::verify::test::new_cache,
+        AuthenticatedMessage, DkimResult, MessageAuthenticator, dkim::DomainKey,
+        dkim::verify::test::new_cache, dns::cache::test::DummyCaches, parse::TxtRecordParser,
     };
 
     #[tokio::test]
@@ -220,9 +237,6 @@ mod test {
 
         for file_name in fs::read_dir(&test_dir).unwrap() {
             let file_name = file_name.unwrap().path();
-            /*if !file_name.to_str().unwrap().contains("002") {
-                continue;
-            }*/
             println!("file {}", file_name.to_str().unwrap());
 
             let test = String::from_utf8(fs::read(&file_name).unwrap()).unwrap();

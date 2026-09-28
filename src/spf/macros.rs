@@ -6,13 +6,20 @@
 
 use super::{Macro, Variable, Variables};
 use crate::SystemTime;
-use crate::common::resolver::{decimal_u8, hex_nibble};
+use crate::dns::{decimal_u8, hex_nibble};
 use std::{borrow::Cow, net::IpAddr};
 
 const DEFAULT_DELIMITERS: u64 = 1u64 << (b'.' - b'+');
 const LAST_DELIMITER: u8 = b'_' - b'+';
 
 impl Macro {
+    /// Expands the macro string using `vars` (RFC 7208, Section 7.3).
+    ///
+    /// Returns `default` for [`Macro::None`]. When `fqdn` is `true`, a
+    /// trailing `.` is appended to a list expansion, and to a variable
+    /// expansion that applies a transformer, unless it already ends in one.
+    /// Literals, and variables expanded verbatim, are returned unchanged.
+    /// Invalid UTF-8 expands to an empty string.
     pub fn eval<'z, 'x: 'z>(
         &'z self,
         vars: &'x Variables<'x>,
@@ -77,6 +84,8 @@ impl Macro {
         }
     }
 
+    /// Returns `true` when the macro string references the `p` macro letter
+    /// ([`Variable::ValidatedDomain`]).
     pub fn needs_ptr(&self) -> bool {
         match self {
             Macro::Variable { letter, .. } => *letter == Variable::ValidatedDomain,
@@ -87,6 +96,9 @@ impl Macro {
 }
 
 impl<'x> Variables<'x> {
+    /// Creates an empty set of variables. The `t` macro
+    /// ([`Variable::CurrentTime`]) expands to the current time unless it is
+    /// set explicitly.
     pub fn new() -> Self {
         Variables {
             current_time_on_demand: true,
@@ -94,6 +106,7 @@ impl<'x> Variables<'x> {
         }
     }
 
+    /// Sets the `i`, `v` and `c` macros from the client IP address.
     pub fn set_ip(&mut self, value: &IpAddr) {
         let (v, i, c): (&'static [u8], Vec<u8>, Vec<u8>) = match value {
             IpAddr::V4(ip) => {
@@ -125,6 +138,8 @@ impl<'x> Variables<'x> {
         self.vars[Variable::SmtpIp as usize] = c.into();
     }
 
+    /// Sets the `s` macro and, when the value contains `@`, the `l` (local
+    /// part) and `o` (domain) macros.
     pub fn set_sender(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         let value = value.into();
         for (pos, ch) in value.iter().enumerate() {
@@ -146,22 +161,35 @@ impl<'x> Variables<'x> {
         self.vars[Variable::Sender as usize] = value;
     }
 
+    /// Sets the `h` macro (HELO or EHLO domain).
     pub fn set_helo_domain(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         self.vars[Variable::HeloDomain as usize] = value.into();
     }
 
+    /// Sets the `r` macro (domain name of the host performing the check).
     pub fn set_host_domain(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         self.vars[Variable::HostDomain as usize] = value.into();
     }
 
+    /// Sets the `p` macro (validated domain name of the client IP).
     pub fn set_validated_domain(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         self.vars[Variable::ValidatedDomain as usize] = value.into();
     }
 
+    /// Sets the `d` macro (the domain being evaluated).
     pub fn set_domain(&mut self, value: impl Into<Cow<'x, [u8]>>) {
         self.vars[Variable::Domain as usize] = value.into();
     }
 
+    /// Returns the value of the variable `name` after applying the macro
+    /// transformers (RFC 7208, Section 7.3).
+    ///
+    /// The value is split on the characters in the `delimiters` bitmask (bit
+    /// `n` stands for the byte `b'+' + n`), reversed when `reverse` is set,
+    /// truncated to the `num_parts` right-hand parts (`0` keeps all), joined
+    /// with `.` and URL-encoded when `escape` is set. When `fqdn` is `true`
+    /// and at least one transformer applies, a trailing `.` is added; a value
+    /// without transformers is returned verbatim.
     pub fn get(
         &self,
         name: Variable,

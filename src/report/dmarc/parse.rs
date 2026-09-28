@@ -4,11 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::report::{
-    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Discovery, Disposition,
-    DkimResult, DmarcResult, Error, Extension, Identifier, PolicyEvaluated, PolicyOverride,
-    PolicyOverrideReason, PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult,
-    SPFDomainScope, SpfResult, read_capped,
+//! Parsing of DMARC aggregate reports from XML documents and from report
+//! email messages.
+
+use crate::{
+    dmarc::{Alignment, Policy},
+    report::{
+        ReportError,
+        dmarc::{
+            AggregateReport, AuthResults, DateRange, Discovery, Disposition, DkimAuthResult,
+            DkimStatus, DmarcStatus, Extension, Identifiers, PolicyEvaluated, PolicyOverride,
+            PolicyOverrideReason, PolicyPublished, Record, ReportMetadata, ReportVersion, Row,
+            SpfAuthResult, SpfScope, SpfStatus,
+        },
+        read_capped,
+    },
 };
 use flate2::read::GzDecoder;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
@@ -20,12 +30,29 @@ use std::io::{BufRead, Cursor};
 use std::net::IpAddr;
 use std::str::FromStr;
 
-impl Report {
-    pub fn parse_rfc5322(report: &[u8], max_size: usize) -> Result<Self, Error> {
+impl AggregateReport {
+    /// Extracts and parses the aggregate report attached to an RFC 5322
+    /// message.
+    ///
+    /// Parts are tried in order: text parts with an `xml` subtype or `.xml`
+    /// file name, and binary parts whose subtype (`gzip`, `zip`, `xml`) or,
+    /// failing that, file extension (`.gz`, `.zip`, `.xml`) identifies the
+    /// report. The first part that parses is returned. `max_size` caps the
+    /// decompressed size of each gzip stream or zip member.
+    ///
+    /// # Errors
+    ///
+    /// - [`ReportError::MailParse`] if `report` is not a parseable message.
+    /// - [`ReportError::TooLarge`] if a decompressed report exceeds `max_size`.
+    /// - [`ReportError::Decompress`] if a gzip or zip attachment is corrupt.
+    /// - [`ReportError::Parse`] if every candidate part failed to parse; the
+    ///   error of the last one is returned.
+    /// - [`ReportError::NotFound`] if the message has no candidate part.
+    pub fn parse_rfc5322(report: &[u8], max_size: usize) -> Result<Self, ReportError> {
         let message = MessageParser::new()
             .parse(report)
-            .ok_or(Error::MailParseError)?;
-        let mut error = Error::NoReportsFound;
+            .ok_or(ReportError::MailParse)?;
+        let mut error = ReportError::NotFound;
 
         for part in &message.parts {
             match &part.body {
@@ -39,10 +66,10 @@ impl Report {
                             .and_then(|n| n.rsplit_once('.'))
                             .is_some_and(|(_, e)| e.eq_ignore_ascii_case("xml")) =>
                 {
-                    match Report::parse_xml(report.as_bytes()) {
+                    match AggregateReport::parse_xml(report.as_bytes()) {
                         Ok(feedback) => return Ok(feedback),
                         Err(err) => {
-                            error = err.into();
+                            error = err;
                         }
                     }
                 }
@@ -83,38 +110,38 @@ impl Report {
                             let report: &[u8] = report.as_ref();
                             let buf = read_capped(GzDecoder::new(report), 0, max_size)?;
 
-                            match Report::parse_xml(&buf) {
+                            match AggregateReport::parse_xml(&buf) {
                                 Ok(feedback) => return Ok(feedback),
                                 Err(err) => {
-                                    error = err.into();
+                                    error = err;
                                 }
                             }
                         }
                         ReportType::Zip => {
                             let mut archive = zip::ZipArchive::new(Cursor::new(report))
-                                .map_err(|err| Error::UncompressError(err.to_string()))?;
+                                .map_err(|err| ReportError::Decompress(err.to_string()))?;
                             for i in 0..archive.len() {
                                 match archive.by_index(i) {
                                     Ok(mut file) => {
                                         let size_hint = file.size();
                                         let buf = read_capped(&mut file, size_hint, max_size)?;
-                                        match Report::parse_xml(&buf) {
+                                        match AggregateReport::parse_xml(&buf) {
                                             Ok(feedback) => return Ok(feedback),
                                             Err(err) => {
-                                                error = err.into();
+                                                error = err;
                                             }
                                         }
                                     }
                                     Err(err) => {
-                                        error = Error::UncompressError(err.to_string());
+                                        error = ReportError::Decompress(err.to_string());
                                     }
                                 }
                             }
                         }
-                        ReportType::Xml => match Report::parse_xml(report) {
+                        ReportType::Xml => match AggregateReport::parse_xml(report) {
                             Ok(feedback) => return Ok(feedback),
                             Err(err) => {
-                                error = err.into();
+                                error = err;
                             }
                         },
                     }
@@ -126,11 +153,27 @@ impl Report {
         Err(error)
     }
 
-    pub fn parse_xml(report: &[u8]) -> Result<Self, String> {
-        let mut version: f32 = 0.0;
+    /// Parses an aggregate report XML document.
+    ///
+    /// Accepts RFC 9990 reports and legacy RFC 7489 Appendix C reports, with
+    /// or without a default namespace. Unknown elements are skipped.
+    /// Unrecognized values map to the fallback documented on each field or
+    /// type, such as an `Unspecified` or `Other` variant or `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReportError::Parse`] if the XML is malformed, the root
+    /// element is not `feedback`, or `report_metadata` or `policy_published`
+    /// is missing.
+    pub fn parse_xml(report: &[u8]) -> Result<Self, ReportError> {
+        Self::parse_xml_document(report).map_err(ReportError::Parse)
+    }
+
+    fn parse_xml_document(report: &[u8]) -> Result<Self, String> {
+        let mut version = None;
         let mut report_metadata = None;
         let mut policy_published = None;
-        let mut record = Vec::new();
+        let mut records = Vec::new();
         let mut extensions = Vec::new();
 
         let mut reader = Reader::from_reader(report);
@@ -144,7 +187,7 @@ impl Report {
             if found_feedback {
                 hashify::fnc_map!(name.as_ref().as_bytes(),
                     b"version" => {
-                        version = reader.next_value(&mut buf)?.unwrap_or(0.0);
+                        version = reader.next_value::<ReportVersion>(&mut buf)?;
                     },
                     b"report_metadata" => {
                         report_metadata = ReportMetadata::parse(&mut reader, &mut buf)?.into();
@@ -153,12 +196,15 @@ impl Report {
                         policy_published = PolicyPublished::parse(&mut reader, &mut buf)?.into();
                     },
                     b"record" => {
-                        record.push(Record::parse(&mut reader, &mut buf)?);
+                        records.push(Record::parse(&mut reader, &mut buf)?);
                     },
                     b"extensions" => {
                         Extension::parse(&mut reader, &mut buf, &mut extensions)?;
                     },
-                    _ => ()
+                    b"" => (),
+                    _ => {
+                        reader.skip_tag(&mut buf)?;
+                    }
                 );
             } else if name.as_ref() == "feedback" {
                 found_feedback = true;
@@ -171,11 +217,11 @@ impl Report {
             }
         }
 
-        Ok(Report {
+        Ok(AggregateReport {
             version,
             report_metadata: report_metadata.ok_or("Missing feedback/report_metadata tag.")?,
             policy_published: policy_published.ok_or("Missing feedback/policy_published tag.")?,
-            record,
+            records,
             extensions,
         })
     }
@@ -208,7 +254,7 @@ impl ReportMetadata {
                 },
                 b"error" => {
                     if let Some(err) = reader.next_value::<String>(buf)? {
-                        rm.error.push(err);
+                        rm.errors.push(err);
                     }
                 },
                 b"generator" => {
@@ -269,19 +315,19 @@ impl PolicyPublished {
                     p.version_published = reader.next_value(buf)?;
                 },
                 b"adkim" => {
-                    p.adkim = reader.next_value(buf)?.unwrap_or_default();
+                    p.adkim = reader.next_value::<String>(buf)?.and_then(|v| parse_alignment(&v));
                 },
                 b"aspf" => {
-                    p.aspf = reader.next_value(buf)?.unwrap_or_default();
+                    p.aspf = reader.next_value::<String>(buf)?.and_then(|v| parse_alignment(&v));
                 },
                 b"p" => {
-                    p.p = reader.next_value(buf)?.unwrap_or_default();
+                    p.p = reader.next_value::<String>(buf)?.map_or(Policy::Unspecified, |v| parse_policy(&v));
                 },
                 b"sp" => {
-                    p.sp = reader.next_value(buf)?.unwrap_or_default();
+                    p.sp = reader.next_value::<String>(buf)?.map_or(Policy::Unspecified, |v| parse_policy(&v));
                 },
                 b"np" => {
-                    p.np = reader.next_value(buf)?.unwrap_or_default();
+                    p.np = reader.next_value::<String>(buf)?.map_or(Policy::Unspecified, |v| parse_policy(&v));
                 },
                 b"discovery_method" => {
                     p.discovery_method = reader.next_value(buf)?.unwrap_or_default();
@@ -354,10 +400,10 @@ impl Record {
                     r.row = Row::parse(reader, buf)?;
                 },
                 b"identifiers" => {
-                    r.identifiers = Identifier::parse(reader, buf)?;
+                    r.identifiers = Identifiers::parse(reader, buf)?;
                 },
                 b"auth_results" => {
-                    r.auth_results = AuthResult::parse(reader, buf)?;
+                    r.auth_results = AuthResults::parse(reader, buf)?;
                 },
                 b"extensions" => {
                     Extension::parse(reader, buf, &mut r.extensions)?;
@@ -449,7 +495,7 @@ impl PolicyOverrideReason {
             let name = tag.name();
             hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"type" => {
-                    por.type_ = reader.next_value(buf)?.unwrap_or_default();
+                    por.kind = reader.next_value(buf)?.unwrap_or_default();
                 },
                 b"comment" => {
                     por.comment = reader.next_value(buf)?;
@@ -465,12 +511,12 @@ impl PolicyOverrideReason {
     }
 }
 
-impl Identifier {
+impl Identifiers {
     pub(crate) fn parse<R: BufRead>(
         reader: &mut Reader<R>,
         buf: &mut Vec<u8>,
     ) -> Result<Self, String> {
-        let mut i = Identifier::default();
+        let mut i = Identifiers::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
@@ -495,21 +541,21 @@ impl Identifier {
     }
 }
 
-impl AuthResult {
+impl AuthResults {
     pub(crate) fn parse<R: BufRead>(
         reader: &mut Reader<R>,
         buf: &mut Vec<u8>,
     ) -> Result<Self, String> {
-        let mut ar = AuthResult::default();
+        let mut ar = AuthResults::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
             hashify::fnc_map!(name.as_ref().as_bytes(),
                 b"dkim" => {
-                    ar.dkim.push(DKIMAuthResult::parse(reader, buf)?);
+                    ar.dkim.push(DkimAuthResult::parse(reader, buf)?);
                 },
                 b"spf" => {
-                    ar.spf.push(SPFAuthResult::parse(reader, buf)?);
+                    ar.spf.push(SpfAuthResult::parse(reader, buf)?);
                 },
                 b"" => (),
                 _ => {
@@ -522,12 +568,12 @@ impl AuthResult {
     }
 }
 
-impl DKIMAuthResult {
+impl DkimAuthResult {
     pub(crate) fn parse<R: BufRead>(
         reader: &mut Reader<R>,
         buf: &mut Vec<u8>,
     ) -> Result<Self, String> {
-        let mut dar = DKIMAuthResult::default();
+        let mut dar = DkimAuthResult::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
@@ -555,12 +601,12 @@ impl DKIMAuthResult {
     }
 }
 
-impl SPFAuthResult {
+impl SpfAuthResult {
     pub(crate) fn parse<R: BufRead>(
         reader: &mut Reader<R>,
         buf: &mut Vec<u8>,
     ) -> Result<Self, String> {
-        let mut sar = SPFAuthResult::default();
+        let mut sar = SpfAuthResult::default();
 
         while let Some(tag) = reader.next_tag(buf)? {
             let name = tag.name();
@@ -616,80 +662,65 @@ impl FromStr for Discovery {
     }
 }
 
-impl FromStr for DmarcResult {
+impl FromStr for DmarcStatus {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(hashify::map!(s.as_bytes(), DmarcResult,
-            b"pass" => DmarcResult::Pass,
-            b"fail" => DmarcResult::Fail,
+        Ok(hashify::map!(s.as_bytes(), DmarcStatus,
+            b"pass" => DmarcStatus::Pass,
+            b"fail" => DmarcStatus::Fail,
         )
         .copied()
-        .unwrap_or(DmarcResult::Unspecified))
+        .unwrap_or(DmarcStatus::Unspecified))
     }
 }
 
-impl FromStr for DkimResult {
+impl FromStr for DkimStatus {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(hashify::map!(s.as_bytes(), DkimResult,
-            b"none" => DkimResult::None,
-            b"pass" => DkimResult::Pass,
-            b"fail" => DkimResult::Fail,
-            b"policy" => DkimResult::Policy,
-            b"neutral" => DkimResult::Neutral,
-            b"temperror" => DkimResult::TempError,
-            b"permerror" => DkimResult::PermError,
+        Ok(hashify::map!(s.as_bytes(), DkimStatus,
+            b"none" => DkimStatus::None,
+            b"pass" => DkimStatus::Pass,
+            b"fail" => DkimStatus::Fail,
+            b"policy" => DkimStatus::Policy,
+            b"neutral" => DkimStatus::Neutral,
+            b"temperror" => DkimStatus::TempError,
+            b"permerror" => DkimStatus::PermError,
         )
         .copied()
-        .unwrap_or(DkimResult::None))
+        .unwrap_or(DkimStatus::None))
     }
 }
 
-impl FromStr for SpfResult {
+impl FromStr for SpfStatus {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(hashify::map!(s.as_bytes(), SpfResult,
-            b"none" => SpfResult::None,
-            b"pass" => SpfResult::Pass,
-            b"fail" => SpfResult::Fail,
-            b"softfail" => SpfResult::SoftFail,
-            b"neutral" => SpfResult::Neutral,
-            b"temperror" => SpfResult::TempError,
-            b"permerror" => SpfResult::PermError,
+        Ok(hashify::map!(s.as_bytes(), SpfStatus,
+            b"none" => SpfStatus::None,
+            b"pass" => SpfStatus::Pass,
+            b"fail" => SpfStatus::Fail,
+            b"softfail" => SpfStatus::SoftFail,
+            b"neutral" => SpfStatus::Neutral,
+            b"temperror" => SpfStatus::TempError,
+            b"permerror" => SpfStatus::PermError,
         )
         .copied()
-        .unwrap_or(SpfResult::None))
+        .unwrap_or(SpfStatus::None))
     }
 }
 
-impl FromStr for SPFDomainScope {
+impl FromStr for SpfScope {
     type Err = ();
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(hashify::map!(s.as_bytes(), SPFDomainScope,
-            b"helo" => SPFDomainScope::Helo,
-            b"mfrom" => SPFDomainScope::MailFrom,
+        Ok(hashify::map!(s.as_bytes(), SpfScope,
+            b"helo" => SpfScope::Helo,
+            b"mfrom" => SpfScope::MailFrom,
         )
         .copied()
-        .unwrap_or(SPFDomainScope::Unspecified))
-    }
-}
-
-impl FromStr for ActionDisposition {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(hashify::map!(s.as_bytes(), ActionDisposition,
-            b"none" => ActionDisposition::None,
-            b"pass" => ActionDisposition::Pass,
-            b"quarantine" => ActionDisposition::Quarantine,
-            b"reject" => ActionDisposition::Reject,
-        )
-        .copied()
-        .unwrap_or(ActionDisposition::Unspecified))
+        .unwrap_or(SpfScope::Unspecified))
     }
 }
 
@@ -699,6 +730,7 @@ impl FromStr for Disposition {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Ok(hashify::map!(s.as_bytes(), Disposition,
             b"none" => Disposition::None,
+            b"pass" => Disposition::Pass,
             b"quarantine" => Disposition::Quarantine,
             b"reject" => Disposition::Reject,
         )
@@ -707,15 +739,21 @@ impl FromStr for Disposition {
     }
 }
 
-impl FromStr for Alignment {
-    type Err = ();
+fn parse_policy(value: &str) -> Policy {
+    hashify::map!(value.as_bytes(), Policy,
+        b"none" => Policy::None,
+        b"quarantine" => Policy::Quarantine,
+        b"reject" => Policy::Reject,
+    )
+    .copied()
+    .unwrap_or(Policy::Unspecified)
+}
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.as_bytes().first() {
-            Some(b'r') => Alignment::Relaxed,
-            Some(b's') => Alignment::Strict,
-            _ => Alignment::Unspecified,
-        })
+fn parse_alignment(value: &str) -> Option<Alignment> {
+    match value.as_bytes().first() {
+        Some(b'r') => Some(Alignment::Relaxed),
+        Some(b's') => Some(Alignment::Strict),
+        _ => None,
     }
 }
 
@@ -827,189 +865,4 @@ impl<R: BufRead> ReaderHelper for Reader<R> {
 }
 
 #[cfg(test)]
-mod test {
-    use crate::report::{
-        Discovery, Disposition, Error, PolicyOverride, Report, SPFDomainScope,
-        test_util::{gzip, message_with_attachment, zip},
-    };
-    use std::{fs, path::PathBuf};
-    const MAX_REPORT_SIZE: usize = 25 * 1024 * 1024;
-
-    fn resource(name: &str) -> Vec<u8> {
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("resources");
-        path.push("dmarc-feedback");
-        path.push(name);
-        fs::read(path).unwrap()
-    }
-
-    const REPORT: &str = concat!(
-        r#"<?xml version="1.0" encoding="UTF-8"?><feedback><report_metadata>"#,
-        r#"<org_name>Example</org_name><email>dmarc@example.org</email>"#,
-        r#"<report_id>1</report_id><date_range><begin>1</begin><end>2</end></date_range>"#,
-        r#"</report_metadata><policy_published><domain>example.org</domain>"#,
-        r#"</policy_published></feedback>"#
-    );
-
-    #[test]
-    fn dmarc_report_rfc9990_sample() {
-        // RFC 9990 Appendix B sample, exercising the dmarc-2.0 namespace and
-        // the new generator/np/discovery_method/testing elements.
-        let report = Report::parse_xml(&resource("004.xml")).unwrap();
-        assert_eq!(report.domain(), "example.com");
-        assert_eq!(report.np(), Disposition::None);
-        assert_eq!(report.discovery_method(), Discovery::Treewalk);
-        assert_eq!(
-            report.generator(),
-            Some("Example DMARC Aggregate Reporter v1.2")
-        );
-        assert!(!report.testing());
-
-        // The new fields survive a serialize/parse round-trip.
-        let reparsed = Report::parse_xml(report.to_xml().as_bytes()).unwrap();
-        assert_eq!(report, reparsed);
-    }
-
-    #[test]
-    fn dmarc_report_rfc7489_backwards_compat() {
-        // Legacy report: no namespace, "pct", "scope=helo" and the now-removed
-        // "sampled_out" override type must still parse.
-        let report = Report::parse_xml(&resource("005.xml")).unwrap();
-        assert_eq!(report.domain(), "example.com");
-        assert_eq!(report.p(), Disposition::Reject);
-        assert_eq!(report.np(), Disposition::Unspecified);
-        assert_eq!(report.discovery_method(), Discovery::Unspecified);
-        assert_eq!(report.generator(), None);
-
-        let record = &report.records()[0];
-        assert_eq!(
-            record.policy_override_reason()[0].policy_override(),
-            PolicyOverride::Other
-        );
-        assert_eq!(record.spf_auth_result()[0].scope(), SPFDomainScope::Helo);
-    }
-
-    #[test]
-    fn dmarc_report_parse() {
-        let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        test_dir.push("resources");
-        test_dir.push("dmarc-feedback");
-
-        for file_name in fs::read_dir(&test_dir).unwrap() {
-            let mut file_name = file_name.unwrap().path();
-            if !file_name.extension().unwrap().to_str().unwrap().eq("xml") {
-                continue;
-            }
-            println!("Parsing DMARC feedback {}", file_name.to_str().unwrap());
-
-            let feedback = Report::parse_xml(&fs::read(&file_name).unwrap()).unwrap();
-
-            file_name.set_extension("json");
-
-            let expected_feedback =
-                serde_json::from_slice::<Report>(&fs::read(&file_name).unwrap()).unwrap();
-
-            assert_eq!(expected_feedback, feedback);
-
-            /*fs::write(
-                &file_name,
-                serde_json::to_string_pretty(&feedback).unwrap().as_bytes(),
-            )
-            .unwrap();*/
-        }
-    }
-
-    #[test]
-    fn dmarc_report_eml_parse() {
-        let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        test_dir.push("resources");
-        test_dir.push("dmarc-feedback");
-
-        for file_name in fs::read_dir(&test_dir).unwrap() {
-            let mut file_name = file_name.unwrap().path();
-            if !file_name.extension().unwrap().to_str().unwrap().eq("eml") {
-                continue;
-            }
-            println!("Parsing DMARC feedback {}", file_name.to_str().unwrap());
-
-            let feedback =
-                Report::parse_rfc5322(&fs::read(&file_name).unwrap(), MAX_REPORT_SIZE).unwrap();
-
-            file_name.set_extension("json");
-
-            let expected_feedback =
-                serde_json::from_slice::<Report>(&fs::read(&file_name).unwrap()).unwrap();
-
-            assert_eq!(expected_feedback, feedback);
-
-            /*fs::write(
-                &file_name,
-                serde_json::to_string_pretty(&feedback).unwrap().as_bytes(),
-            )
-            .unwrap();*/
-        }
-    }
-
-    #[test]
-    fn dmarc_report_zip_forged_size() {
-        let archive = zip("report.xml", REPORT.as_bytes(), None, Some(u32::MAX));
-        let message = message_with_attachment("application/zip", "report.zip", &archive);
-
-        assert_eq!(
-            Report::parse_rfc5322(&message, MAX_REPORT_SIZE),
-            Err(Error::ReportTooLarge)
-        );
-    }
-
-    #[test]
-    fn dmarc_report_zip_forged_compressed_size() {
-        let archive = zip("report.xml", REPORT.as_bytes(), Some(u32::MAX), None);
-        let message = message_with_attachment("application/zip", "report.zip", &archive);
-
-        assert!(Report::parse_rfc5322(&message, MAX_REPORT_SIZE).is_err());
-    }
-
-    #[test]
-    fn dmarc_report_zip_within_limit() {
-        let archive = zip("report.xml", REPORT.as_bytes(), None, None);
-        let message = message_with_attachment("application/zip", "report.zip", &archive);
-
-        assert_eq!(
-            Report::parse_rfc5322(&message, MAX_REPORT_SIZE),
-            Ok(Report::parse_xml(REPORT.as_bytes()).unwrap())
-        );
-        assert_eq!(
-            Report::parse_rfc5322(&message, REPORT.len() - 1),
-            Err(Error::ReportTooLarge)
-        );
-    }
-
-    #[test]
-    fn dmarc_report_gzip_bomb() {
-        let bomb = gzip(&vec![b' '; 1024 * 1024]);
-        let message = message_with_attachment("application/gzip", "report.xml.gz", &bomb);
-
-        assert_eq!(
-            Report::parse_rfc5322(&message, 64 * 1024),
-            Err(Error::ReportTooLarge)
-        );
-    }
-
-    #[test]
-    fn dmarc_report_gzip_within_limit() {
-        let message = message_with_attachment(
-            "application/gzip",
-            "report.xml.gz",
-            &gzip(REPORT.as_bytes()),
-        );
-
-        assert_eq!(
-            Report::parse_rfc5322(&message, MAX_REPORT_SIZE),
-            Ok(Report::parse_xml(REPORT.as_bytes()).unwrap())
-        );
-        assert_eq!(
-            Report::parse_rfc5322(&message, REPORT.len() - 1),
-            Err(Error::ReportTooLarge)
-        );
-    }
-}
+mod tests;

@@ -4,17 +4,31 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{ArcError, ChainValidation, Results, Seal, Signature};
-use crate::common::parse::*;
+use super::{ArcAuthResults, ArcError, ChainValidation, Seal, Signature};
+use crate::parse::*;
 use crate::{
     Error,
-    common::{crypto::Algorithm, parse::TagParser},
+    crypto::Algorithm,
     dkim::{Canonicalization, parse::SignatureParser},
+    parse::TagParser,
 };
 
 pub(crate) const CV: u64 = (b'c' as u64) | ((b'v' as u64) << 8);
 
 impl Signature {
+    /// Parses the value of an `ARC-Message-Signature` header.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Arc`] with [`ArcError::InvalidInstance`] when `i=` is
+    /// present and outside 1 to 50 (a missing `i=` parses as 0 and is
+    /// rejected by `verify_arc`), [`Error::Base64`] when `b=` or `bh=` is not valid
+    /// base64, [`Error::MissingParameters`] when `d=`, `s=`, `b=`, `bh=` or
+    /// `h=` is missing, and [`Error::Dkim`] with
+    /// [`DkimError::UnsupportedAlgorithm`](crate::dkim::DkimError::UnsupportedAlgorithm)
+    /// or
+    /// [`DkimError::UnsupportedCanonicalization`](crate::dkim::DkimError::UnsupportedCanonicalization)
+    /// for an unknown `a=` or `c=` value.
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut signature = Signature {
@@ -77,6 +91,18 @@ impl Signature {
 }
 
 impl Seal {
+    /// Parses the value of an `ARC-Seal` header.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Arc`] with [`ArcError::InvalidInstance`] when `i=` is
+    /// outside 1 to 50, [`ArcError::InvalidChainValidation`] when `cv=` is
+    /// missing or not `none`, `fail` or `pass`, and [`ArcError::HasHeaderTag`]
+    /// when an `h=` tag is present; [`Error::Base64`] when `b=` is not valid
+    /// base64, [`Error::MissingParameters`] when `d=`, `s=` or `b=` is
+    /// missing, and [`Error::Dkim`] with
+    /// [`DkimError::UnsupportedAlgorithm`](crate::dkim::DkimError::UnsupportedAlgorithm)
+    /// for an unknown `a=` value.
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
         let mut seal = Seal {
@@ -114,10 +140,10 @@ impl Seal {
                         b'p' | b'P' if header.match_bytes(b"ass") => {
                             cv = ChainValidation::Pass.into();
                         }
-                        _ => return Err(Error::Arc(ArcError::InvalidCV)),
+                        _ => return Err(Error::Arc(ArcError::InvalidChainValidation)),
                     }
                     if !header.seek_tag_end() {
-                        return Err(Error::Arc(ArcError::InvalidCV));
+                        return Err(Error::Arc(ArcError::InvalidChainValidation));
                     }
                 }
                 H => {
@@ -126,7 +152,7 @@ impl Seal {
                 _ => header.ignore(),
             }
         }
-        seal.cv = cv.ok_or(Error::Arc(ArcError::InvalidCV))?;
+        seal.cv = cv.ok_or(Error::Arc(ArcError::InvalidChainValidation))?;
 
         if !(1..=50).contains(&seal.i) {
             Err(Error::Arc(ArcError::InvalidInstance(seal.i)))
@@ -138,10 +164,17 @@ impl Seal {
     }
 }
 
-impl Results {
+impl ArcAuthResults {
+    /// Parses the value of an `ARC-Authentication-Results` header, reading
+    /// only its `i=` tag.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Arc`] with [`ArcError::InvalidInstance`] when `i=` is
+    /// missing or outside 1 to 50.
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &'_ [u8]) -> crate::Result<Self> {
-        let mut results = Results { i: 0 };
+        let mut results = ArcAuthResults { i: 0 };
         let mut header = header.iter();
 
         while let Some(key) = header.key() {

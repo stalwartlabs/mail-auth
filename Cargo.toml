@@ -36,6 +36,7 @@ quick-xml = { version = "0.42", optional = true }
 hashify =  { version = "0.3" }
 idna = "1.1"
 memchr = "2.7"
+simdutf8 = "0.1.5"
 aws-lc-rs = { version = "1", optional = true }
 ring = { version = "0.17", optional = true }
 rsa = { version = "0.9.8", optional = true, features = ["getrandom"] }
@@ -77,6 +78,24 @@ required-features = ["arc"]
 name = "arc_verify"
 required-features = ["arc"]
 
+[[example]]
+name = "report_arf_generate"
+required-features = ["report"]
+
+[[example]]
+name = "report_arf_parse"
+required-features = ["report"]
+
+[[example]]
+name = "report_dmarc_generate"
+required-features = ["report"]
+
+[[example]]
+name = "report_dmarc_parse"
+required-features = ["report"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
 [patch.crates-io]
 mail-builder = { path = "../mail-builder" }
-encodify = { path = "../encodify" }

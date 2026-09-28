@@ -4,30 +4,38 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! Streaming DKIM signing API for reduced memory usage with large emails.
+//! Streaming DKIM1 signing: the message is fed in chunks and only the header
+//! section is buffered, which keeps memory usage low for large messages.
 
-use super::{DkimSigner, Done, Signature, canonicalize::BodyHasher, sign::SignableMessage};
+use super::{DkimSigner, Signature, canonicalize::BodyHasher, sign::SignableMessage};
 use crate::SystemTime;
+use crate::signer::Ready;
 use crate::{
     Error,
-    common::{
-        crypto::{HashContext, HashImpl, SigningKey},
-        headers::HeaderIterator,
-    },
+    crypto::{HashContext, HashImpl, SigningKey},
+    headers::HeaderIterator,
 };
 use memchr::memmem;
 
-/// A streaming DKIM signer that allows signing messages in chunks.
+/// A streaming DKIM1 signer, created by
+/// [`DkimSigner::sign_streaming`].
 ///
-/// This is useful when you want to avoid loading the entire message into
-/// memory before signing. Headers are buffered internally until the
-/// header/body boundary is detected, then body content is streamed through
-/// the hasher.
+/// Avoids loading the entire message into memory before signing. Headers are
+/// buffered until the header/body boundary (`\r\n\r\n`) is found; body
+/// content is then canonicalized and hashed as it arrives. The resulting
+/// [`Signature`] is identical to the one [`DkimSigner::sign`] produces for
+/// the same message and signing time, except that streaming fails with
+/// [`Error::NoHeadersFound`] when none of the
+/// listed headers is present, where `sign` signs them as empty.
 ///
 /// # Example
 ///
-/// ```ignore
-/// let signer = DkimSigner::from_key(key)
+/// ```rust,no_run
+/// use mail_auth::{crypto::Ed25519Key, dkim::DkimSigner, headers::HeaderWriter};
+///
+/// # fn main() -> mail_auth::Result<()> {
+/// # let pkcs8_der: Vec<u8> = Vec::new();
+/// let signer = DkimSigner::from_key(Ed25519Key::from_pkcs8_der(&pkcs8_der)?)
 ///     .domain("example.com")
 ///     .selector("default")
 ///     .headers(["From", "To", "Subject"]);
@@ -40,6 +48,9 @@ use memchr::memmem;
 /// stream.write(b"Body content here...");
 ///
 /// let signature = stream.finish()?;
+/// let header = signature.to_header();
+/// # Ok(())
+/// # }
 /// ```
 pub struct DkimSigningStream<'a, T: SigningKey> {
     template: Signature,
@@ -59,24 +70,36 @@ enum SigningState<H> {
     Done,
 }
 
-impl<T: SigningKey> DkimSigner<T, Done> {
-    /// Creates a streaming DKIM signer.
+impl<T: SigningKey> DkimSigner<T, Ready> {
+    /// Creates a streaming signer that borrows this signer's key and copies
+    /// its settings.
     ///
-    /// Feed raw message data via [`DkimSigningStream::write`], then call
-    /// [`DkimSigningStream::finish`] to get the signature.
+    /// Feed raw message data with [`DkimSigningStream::write`], then call
+    /// [`DkimSigningStream::finish`] to obtain the signature.
     ///
-    /// Headers are buffered internally until the header/body boundary (`\r\n\r\n`)
-    /// is detected. After that, body content is streamed through the hasher
+    /// Headers are buffered until the header/body boundary (`\r\n\r\n`) is
+    /// detected. After that, body content is streamed through the hasher
     /// without additional buffering.
     ///
     /// # Example
     ///
-    /// ```ignore
+    /// ```rust,no_run
+    /// use mail_auth::{crypto::Ed25519Key, dkim::DkimSigner};
+    ///
+    /// # fn main() -> mail_auth::Result<()> {
+    /// # let pkcs8_der: Vec<u8> = Vec::new();
+    /// # let message_chunks: Vec<&[u8]> = Vec::new();
+    /// let signer = DkimSigner::from_key(Ed25519Key::from_pkcs8_der(&pkcs8_der)?)
+    ///     .domain("example.com")
+    ///     .selector("default")
+    ///     .headers(["From", "To", "Subject"]);
     /// let mut stream = signer.sign_streaming();
     /// for chunk in message_chunks {
     ///     stream.write(chunk);
     /// }
     /// let signature = stream.finish()?;
+    /// # Ok(())
+    /// # }
     /// ```
     pub fn sign_streaming(&self) -> DkimSigningStream<'_, T> {
         DkimSigningStream {
@@ -91,19 +114,19 @@ impl<T: SigningKey> DkimSigner<T, Done> {
 }
 
 impl<T: SigningKey> DkimSigningStream<'_, T> {
-    /// Feed a chunk of raw message data to the signer.
+    /// Feeds the next chunk of raw message data to the signer.
     ///
-    /// Data should be provided in order, starting with headers. The header/body
-    /// boundary (`\r\n\r\n`) is automatically detected.
+    /// Data must be provided in order, starting with the headers. Chunks may
+    /// split lines, and the header/body boundary (`\r\n\r\n`), anywhere.
     ///
-    /// While reading headers, all data is buffered. Once the header/body boundary
-    /// is detected, subsequent body data is streamed directly to the hasher.
+    /// While reading headers, all data is buffered. Once the header/body
+    /// boundary is detected, subsequent body data is streamed directly to the
+    /// hasher.
     pub fn write(&mut self, chunk: &[u8]) {
         match &mut self.state {
             SigningState::ReadingHeaders { buffer, scanned } => {
                 buffer.extend_from_slice(chunk);
 
-                // Check for header/body boundary
                 let Some(boundary_pos) =
                     find_header_boundary(&buffer[*scanned..]).map(|pos| *scanned + pos)
                 else {
@@ -119,7 +142,6 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
                     if self.template.l > 0 { u64::MAX } else { 0 },
                 );
 
-                // Hash any body data that was in the buffer
                 body_hasher.write(&header_section[boundary_pos..]);
                 header_section.truncate(boundary_pos - 2);
 
@@ -131,24 +153,22 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
             SigningState::HashingBody { body_hasher, .. } => {
                 body_hasher.write(chunk);
             }
-            SigningState::Done => {
-                // Ignore writes after finish
-            }
+            SigningState::Done => {}
         }
     }
 
-    /// Finalize the signature.
+    /// Consumes the stream and returns the DKIM signature.
     ///
-    /// Consumes the stream and returns the DKIM signature. The current system
-    /// time is used for the `t=` timestamp.
+    /// The current system time is used for `t=` (and as the base of `x=`
+    /// when an expiration is set). A stream that never saw the header/body
+    /// boundary is treated as a message with headers only and an empty body.
     ///
     /// # Errors
     ///
-    /// Returns an error if:
-    /// - No headers matching the signer's header list were found
-    /// - The cryptographic signing operation fails
-    /// - `finish()` was already called
-    pub fn finish(mut self) -> crate::Result<Signature>
+    /// Returns [`Error::NoHeadersFound`] when none of the signer's listed
+    /// headers was found, or [`Error::Crypto`] when the
+    /// signing operation fails.
+    pub fn finish(self) -> crate::Result<Signature>
     where
         <<T as SigningKey>::Hasher as HashImpl>::Context: HashContext,
     {
@@ -156,25 +176,27 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
+        self.finish_at(now)
+    }
 
+    pub(crate) fn finish_at(mut self, now: u64) -> crate::Result<Signature>
+    where
+        <<T as SigningKey>::Hasher as HashImpl>::Context: HashContext,
+    {
         match std::mem::replace(&mut self.state, SigningState::Done) {
             SigningState::ReadingHeaders { mut buffer, .. } => {
-                // Hash the body (may be empty)
                 let mut body_hasher = BodyHasher::new(
                     <T::Hasher as HashImpl>::hasher(),
                     self.template.cb,
                     if self.template.l > 0 { u64::MAX } else { 0 },
                 );
 
-                // Never saw body boundary - check if we have any headers at all
-                // This handles the edge case of a message with no body
                 let header_len = match find_header_boundary(&buffer) {
                     Some(boundary_pos) => {
                         body_hasher.write(&buffer[boundary_pos..]);
                         boundary_pos - 2
                     }
                     None => {
-                        // No boundary found - treat entire buffer as headers with empty body
                         buffer.extend_from_slice(b"\r\n");
                         buffer.len()
                     }
@@ -200,11 +222,10 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
     fn finish_with_parsed_data(
         &self,
         header_section: &[u8],
-        body_hash: crate::common::crypto::HashOutput,
+        body_hash: crate::crypto::HashOutput,
         body_len: u64,
         now: u64,
     ) -> crate::Result<Signature> {
-        // Filter headers to only those in template.h and build signed_headers list
         let mut headers = Vec::with_capacity(self.template.h.len());
         let mut found_headers = vec![false; self.template.h.len()];
         let mut signed_headers = Vec::with_capacity(self.template.h.len());
@@ -226,7 +247,6 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
             return Err(Error::NoHeadersFound);
         }
 
-        // Add any missing headers (in reverse order as per DKIM spec)
         signed_headers.reverse();
         for (header, found) in self.template.h.iter().zip(found_headers) {
             if !found {
@@ -234,15 +254,13 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
             }
         }
 
-        // Build canonical headers
         let canonical_headers = self.template.ch.canonical_headers(headers);
 
-        // Create Signature
         let mut signature = self.template.clone();
         signature.bh = body_hash.as_ref().to_vec();
         signature.t = now;
         signature.x = if signature.x > 0 {
-            now + signature.x
+            now.saturating_add(signature.x)
         } else {
             0
         };
@@ -251,7 +269,6 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
             signature.l = body_len;
         }
 
-        // Sign
         signature.b = self.key.sign(SignableMessage {
             headers: canonical_headers,
             signature: &signature,
@@ -270,17 +287,18 @@ pub(crate) fn find_header_boundary(data: &[u8]) -> Option<usize> {
 #[allow(unused)]
 mod test {
     use crate::{
-        common::crypto::{RsaKey, Sha256},
+        crypto::{RsaKey, Sha256},
         dkim::{Canonicalization, DkimSigner},
+        headers::HeaderIterator,
     };
 
     use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
 
     const RSA_PRIVATE_KEY: &str = include_str!("../../resources/rsa-private.pem");
+    const TIMESTAMP: u64 = 1740000000;
 
     #[test]
     fn streaming_sign_matches_regular_sign() {
-        // Test that sign_streaming() produces same body hash as sign()
         let message = concat!(
             "From: bill@example.com\r\n",
             "To: jdoe@example.com\r\n",
@@ -300,19 +318,16 @@ mod test {
             .selector("default")
             .headers(["From", "To", "Subject"]);
 
-        // Regular sign
-        let sig1 = signer.sign(message.as_bytes()).unwrap();
+        let sig1 = signer
+            .sign_stream(HeaderIterator::new(message.as_bytes()), TIMESTAMP)
+            .unwrap();
 
-        // Streaming sign - single chunk
         let mut stream = signer.sign_streaming();
         stream.write(message.as_bytes());
-        let sig2 = stream.finish().unwrap();
+        let sig2 = stream.finish_at(TIMESTAMP).unwrap();
 
-        // Body hashes should match
         assert_eq!(sig1.bh, sig2.bh, "Body hashes should match");
-        // Signed headers should match
         assert_eq!(sig1.h, sig2.h, "Signed headers should match");
-        // Signature should match (same key, same content, same body hash = same signature)
         assert_eq!(sig1.b, sig2.b, "Signatures should match");
     }
 
@@ -331,11 +346,9 @@ mod test {
             .selector("default")
             .headers(["From", "To", "Subject"]);
 
-        // Reference: single chunk
         let full_message = format!("{}{}", header, body);
         let reference_sig = signer.sign(full_message.as_bytes()).unwrap();
 
-        // Streaming: multiple chunks
         let mut stream = signer.sign_streaming();
         stream.write(header.as_bytes());
         stream.write(body.as_bytes());
@@ -368,10 +381,8 @@ mod test {
             .selector("default")
             .headers(["From", "Subject"]);
 
-        // Reference
         let reference_sig = signer.sign(message.as_bytes()).unwrap();
 
-        // Chunked at various sizes
         for chunk_size in [1, 2, 5, 10, 20] {
             let mut stream = signer.sign_streaming();
             for chunk in message.as_bytes().chunks(chunk_size) {
@@ -389,7 +400,6 @@ mod test {
 
     #[test]
     fn streaming_sign_split_header_boundary() {
-        // Test where \r\n\r\n is split across chunks
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -400,15 +410,13 @@ mod test {
             .selector("default")
             .headers(["From", "Subject"]);
 
-        // Reference
         let message = "From: test@example.com\r\nSubject: Test\r\n\r\nBody";
         let reference_sig = signer.sign(message.as_bytes()).unwrap();
 
-        // Split right at the boundary
         let mut stream = signer.sign_streaming();
         stream.write(b"From: test@example.com\r\n");
         stream.write(b"Subject: Test\r\n");
-        stream.write(b"\r\n"); // The second \r\n completing the boundary
+        stream.write(b"\r\n");
         stream.write(b"Body");
         let streamed_sig = stream.finish().unwrap();
 
@@ -458,11 +466,13 @@ mod test {
             .header_canonicalization(Canonicalization::Simple)
             .body_canonicalization(Canonicalization::Simple);
 
-        let reference_sig = signer.sign(message.as_bytes()).unwrap();
+        let reference_sig = signer
+            .sign_stream(HeaderIterator::new(message.as_bytes()), TIMESTAMP)
+            .unwrap();
 
         let mut stream = signer.sign_streaming();
         stream.write(message.as_bytes());
-        let streamed_sig = stream.finish().unwrap();
+        let streamed_sig = stream.finish_at(TIMESTAMP).unwrap();
 
         assert_eq!(reference_sig.bh, streamed_sig.bh);
         assert_eq!(reference_sig.b, streamed_sig.b);
@@ -470,7 +480,6 @@ mod test {
 
     #[test]
     fn streaming_sign_folded_headers() {
-        // Test with folded (multi-line) headers
         let message = concat!(
             "From: test@example.com\r\n",
             "Subject: This is a very long subject line that\r\n",
@@ -509,7 +518,7 @@ mod test {
         let signer = DkimSigner::from_key(pk_rsa)
             .domain("example.com")
             .selector("default")
-            .headers(["From", "Subject"]); // These headers don't exist in message
+            .headers(["From", "Subject"]);
 
         let mut stream = signer.sign_streaming();
         stream.write(message.as_bytes());

@@ -8,10 +8,10 @@
   "original_envelope_id": "o3F52gxO029144",
   "original_mail_from": "anexample.reply@a.sender.example",
   "original_rcpt_to": null,
-  "reported_domain": [
+  "reported_domains": [
     "a.sender.example"
   ],
-  "reported_uri": [
+  "reported_uris": [
     "http://www.sender.example/"
   ],
   "reporting_mta": null,

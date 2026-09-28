@@ -4,38 +4,80 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! DKIM1 signature verification (RFC 6376, Section 6), including RFC 6541
+//! ATPS checks and RFC 6651 failure report address discovery.
+
 use crate::SystemTime;
+use crate::dns::DnsCache;
 use crate::{
-    AuthenticatedMessage, DkimOutput, DkimResult, Error, MX, MessageAuthenticator, Parameters,
-    RecordSet, ResolverCache, Txt,
-    common::{
-        cache::NoCache,
-        verify::{DomainKey, VerifySignature},
-    },
-    is_within_pct,
+    AuthenticatedMessage, DkimOutput, DkimResult, Error, MessageAuthenticator, Parameters,
+    dkim::{DomainKey, VerifySignature},
+    dns::cache::NoCache,
+    sampling::is_within_pct,
 };
-use crate::{DnsError, common::crypto::CryptoError};
+use crate::{DnsError, crypto::CryptoError};
 use encodify::base32;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use super::{
-    Atps, DkimError, DomainKeyReport, Flag, HashAlgorithm, RR_DNS, RR_EXPIRATION, RR_OTHER,
+    AtpsRecord, DkimError, DkimReportRecord, HashAlgorithm, RR_DNS, RR_EXPIRATION, RR_OTHER,
     RR_SIGNATURE, RR_VERIFICATION, Signature,
 };
 
 impl MessageAuthenticator {
-    /// Verifies DKIM headers of an RFC5322 message.
+    /// Verifies every `DKIM-Signature` header of a parsed RFC 5322 message
+    /// (RFC 6376, Section 6).
+    ///
+    /// `params` is an [`AuthenticatedMessage`], or [`Parameters`] wrapping one
+    /// together with a DNS cache. Returns one [`DkimOutput`] per signature:
+    /// first a `neutral` output for each header rejected with a DKIM error
+    /// (see [`DkimOutput`]), then one per parsed signature in header order. A
+    /// message without signatures yields an empty vector; this function never
+    /// fails.
+    ///
+    /// For each well formed, unexpired signature whose body hash matches, it
+    /// looks up the key record, a TXT record at `<s>._domainkey.<d>`
+    /// ([`DomainKey`]). When the signature verifies and carries `atps=` equal
+    /// to the domain of a `From` address, it also looks up the RFC 6541 ATPS
+    /// record at `<d or base32(hash(d))>._atps.<atps>` ([`AtpsRecord`]); the
+    /// result of that lookup becomes the result of the signature and
+    /// [`DkimOutput::is_atps`] is set. Finally, for every signature with `r=y`
+    /// that did not pass, it looks up the RFC 6651 report record at
+    /// `_report._domainkey.<d>` ([`DkimReportRecord`]) to fill
+    /// [`DkimOutput::report_address`].
+    ///
+    /// Result variants:
+    ///
+    /// - [`DkimResult::Pass`]: the signature verified.
+    /// - [`DkimResult::Neutral`]: the header is malformed or unsupported, was
+    ///   ignored because of `l=` in strict mode, has expired, or its body hash
+    ///   does not match.
+    /// - [`DkimResult::Fail`]: the cryptographic check failed, or the `i=`
+    ///   domain does not match `d=` (honouring `t=s`).
+    /// - [`DkimResult::PermError`]: the key record is missing, invalid,
+    ///   revoked or of an unsupported type (also for a missing ATPS record).
+    /// - [`DkimResult::TempError`]: a DNS resolver error occurred.
+    /// - [`DkimResult::None`]: never returned by this function.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{AuthenticatedMessage, DkimResult, MessageAuthenticator};
+    ///
+    /// # async fn run(raw_message: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    /// let authenticator = MessageAuthenticator::new_system_conf()?;
+    /// let message = AuthenticatedMessage::parse(raw_message).ok_or("invalid message")?;
+    /// let results = authenticator.verify_dkim(&message).await;
+    /// let all_pass = results.iter().all(|output| output.result() == &DkimResult::Pass);
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline(always)]
-    pub async fn verify_dkim<'x, TXT, MXX, IPV4, IPV6, PTR>(
+    pub async fn verify_dkim<'x, C>(
         &self,
-        params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
+        params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, C>>,
     ) -> Vec<DkimOutput<'x>>
     where
-        TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
-        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
-        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
-        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
+        C: DnsCache + 'x,
     {
         self.verify_dkim_(
             params.into(),
@@ -46,30 +88,24 @@ impl MessageAuthenticator {
         .await
     }
 
-    pub(crate) async fn verify_dkim_<'x, TXT, MXX, IPV4, IPV6, PTR>(
+    pub(crate) async fn verify_dkim_<'x, C>(
         &self,
-        params: Parameters<'x, &'x AuthenticatedMessage<'x>, TXT, MXX, IPV4, IPV6, PTR>,
+        params: Parameters<'x, &'x AuthenticatedMessage<'x>, C>,
         now: u64,
     ) -> Vec<DkimOutput<'x>>
     where
-        TXT: ResolverCache<Box<str>, Txt>,
-        MXX: ResolverCache<Box<str>, RecordSet<MX>>,
-        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>>,
-        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>>,
-        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>>,
+        C: DnsCache,
     {
-        let message = params.params;
+        let message = params.input;
         let mut output = Vec::with_capacity(message.dkim_headers.len() + message.errors.len());
         let mut report_requested = false;
 
-        // Surface malformed DKIM signatures
         for header in &message.errors {
             if let Error::Dkim(_) = &header.header {
                 output.push(DkimOutput::neutral(header.header.clone()));
             }
         }
 
-        // Validate DKIM headers
         for header in &message.dkim_headers {
             let signature = &header.header;
             if signature.r {
@@ -84,7 +120,6 @@ impl MessageAuthenticator {
                 continue;
             }
 
-            // Validate body hash
             let ha = HashAlgorithm::from(signature.a);
             let bh = &message
                 .body_hashes
@@ -95,15 +130,14 @@ impl MessageAuthenticator {
 
             if bh != &signature.bh {
                 output.push(
-                    DkimOutput::neutral(Error::Dkim(DkimError::FailedBodyHashMatch))
+                    DkimOutput::neutral(Error::Dkim(DkimError::BodyHashMismatch))
                         .with_signature(signature),
                 );
                 continue;
             }
 
-            // Obtain ._domainkey TXT record
             let record = match self
-                .txt_lookup::<DomainKey>(signature.domain_key(), params.cache_txt)
+                .txt_lookup::<DomainKey>(signature.domain_key(), params.txt_cache())
                 .await
             {
                 Ok(record) => record,
@@ -113,29 +147,24 @@ impl MessageAuthenticator {
                 }
             };
 
-            // Enforce t=s flag
             if !signature.validate_auid(&record) {
                 output.push(
-                    DkimOutput::fail(Error::Dkim(DkimError::FailedAuidMatch))
+                    DkimOutput::fail(Error::Dkim(DkimError::AuidMismatch))
                         .with_signature(signature),
                 );
                 continue;
             }
 
-            // Hash headers
             let dkim_hdr_value = header.value.strip_signature();
             let mut headers = message.signed_headers(&signature.h, header.name, &dkim_hdr_value);
 
-            // Verify signature
             if let Err(err) = record.verify(&mut headers, signature, signature.ch) {
                 output.push(DkimOutput::fail(err).with_signature(signature));
                 continue;
             }
 
-            // Verify third-party signature, if any.
             if let Some(atps) = &signature.atps {
                 let mut found = false;
-                // RFC5322.From has to match atps=
                 for from in &message.from {
                     if let Some((_, domain)) = from.rsplit_once('@')
                         && domain.eq(atps)
@@ -157,11 +186,10 @@ impl MessageAuthenticator {
                     query_domain.push('.');
 
                     match self
-                        .txt_lookup::<Atps>(query_domain, params.cache_txt)
+                        .txt_lookup::<AtpsRecord>(query_domain, params.txt_cache())
                         .await
                     {
                         Ok(_) => {
-                            // ATPS Verification successful
                             output.push(DkimOutput::pass().with_atps().with_signature(signature));
                         }
                         Err(err) => {
@@ -176,14 +204,11 @@ impl MessageAuthenticator {
                 }
             }
 
-            // Verification successful
             output.push(DkimOutput::pass().with_signature(signature));
         }
 
-        // Handle reports
         if report_requested {
             for dkim in &mut output {
-                // Process signatures with errors that requested reports
                 let signature = if let Some(signature) = &dkim.signature {
                     if signature.r && dkim.result != DkimResult::Pass {
                         signature
@@ -194,11 +219,10 @@ impl MessageAuthenticator {
                     continue;
                 };
 
-                // Obtain ._domainkey TXT record
                 let record = if let Ok(record) = self
-                    .txt_lookup::<DomainKeyReport>(
+                    .txt_lookup::<DkimReportRecord>(
                         format!("_report._domainkey.{}.", signature.d),
-                        params.cache_txt,
+                        params.txt_cache(),
                     )
                     .await
                 {
@@ -211,7 +235,6 @@ impl MessageAuthenticator {
                     continue;
                 };
 
-                // Set report address
                 dkim.report = match &dkim.result() {
                     DkimResult::Neutral(err)
                     | DkimResult::Fail(err)
@@ -221,8 +244,8 @@ impl MessageAuthenticator {
                             Error::Crypto(CryptoError::Library(_))
                             | Error::Io(_)
                             | Error::Crypto(CryptoError::FailedVerification)
-                            | Error::Dkim(DkimError::FailedBodyHashMatch)
-                            | Error::Dkim(DkimError::FailedAuidMatch) => {
+                            | Error::Dkim(DkimError::BodyHashMismatch)
+                            | Error::Dkim(DkimError::AuidMismatch) => {
                                 (record.rr & RR_VERIFICATION) != 0
                             }
                             Error::Base64
@@ -239,13 +262,13 @@ impl MessageAuthenticator {
                             Error::Dns(DnsError::Resolver(_))
                             | Error::Dns(DnsError::RecordNotFound(_))
                             | Error::Dns(DnsError::InvalidRecordType)
-                            | Error::ParseError
-                            | Error::Dkim(DkimError::RevokedPublicKey) => (record.rr & RR_DNS) != 0,
+                            | Error::Parse
+                            | Error::Dkim(DkimError::PublicKeyRevoked) => (record.rr & RR_DNS) != 0,
                             #[cfg(feature = "arc")]
                             Error::Arc(_) => (record.rr & RR_OTHER) != 0,
                             Error::MissingParameters
                             | Error::NoHeadersFound
-                            | Error::Dkim(DkimError::SignatureLength)
+                            | Error::Dkim(DkimError::BodyLengthTag)
                             | Error::NotAligned
                             | Error::Dkim2(_) => (record.rr & RR_OTHER) != 0,
                         };
@@ -266,29 +289,28 @@ impl MessageAuthenticator {
 }
 
 impl<'x> AuthenticatedMessage<'x> {
-    pub async fn get_canonicalized_header(&self) -> Result<Vec<u8>, Error> {
-        // Based on verify_dkim_ function
-        // Iterate through possible DKIM headers
+    /// Returns the canonicalized signed header fields of the first
+    /// `DKIM-Signature` whose `x=` tag is absent or later than its `t=` tag.
+    ///
+    /// The output is the header hash input of RFC 6376, Section 3.7: the
+    /// headers listed in `h=`, followed by the `DKIM-Signature` header itself
+    /// with an empty `b=` value, canonicalized with the signature's header
+    /// canonicalization. The current time is not checked. Returns `None`
+    /// when the message has no such signature.
+    pub fn canonicalized_dkim_headers(&self) -> Option<Vec<u8>> {
+        let header = self
+            .dkim_headers
+            .iter()
+            .find(|header| header.header.x == 0 || header.header.x > header.header.t)?;
+        let signature = &header.header;
+        let dkim_hdr_value = header.value.strip_signature();
+        let headers = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
         let mut data = Vec::with_capacity(256);
-        for header in &self.dkim_headers {
-            // Ensure signature is not obviously invalid
-            let signature = &header.header;
-            if !(signature.x == 0 || (signature.x > signature.t)) {
-                continue;
-            }
-
-            // Get pre-hashed but canonically ordered headers, who's hash is signed
-            let dkim_hdr_value = header.value.strip_signature();
-            let headers = self.signed_headers(&signature.h, header.name, &dkim_hdr_value);
-            signature.ch.canonicalize_headers(headers, &mut data);
-
-            return Ok(data);
-        }
-        // Return not ok
-        Err(Error::Dkim(DkimError::FailedBodyHashMatch))
+        signature.ch.canonicalize_headers(headers, &mut data);
+        Some(data)
     }
 
-    pub fn signed_headers<'z: 'x>(
+    pub(crate) fn signed_headers<'z: 'x>(
         &'z self,
         headers: &'x [String],
         dkim_hdr_name: &'x [u8],
@@ -349,7 +371,7 @@ impl Signature {
             .and_then(|split| auid_domain.split_at_checked(split))
         {
             Some((parent, suffix)) if suffix.eq_ignore_ascii_case(domain) => {
-                parent.is_empty() || (!record.has_flag(Flag::MatchDomain) && parent.ends_with(b"."))
+                parent.is_empty() || (!record.requires_strict_identity() && parent.ends_with(b"."))
             }
             _ => false,
         }
@@ -493,15 +515,7 @@ impl Verifier for &[u8] {
 }
 
 impl<'x> From<&'x AuthenticatedMessage<'x>>
-    for Parameters<
-        'x,
-        &'x AuthenticatedMessage<'x>,
-        NoCache<Box<str>, Txt>,
-        NoCache<Box<str>, RecordSet<MX>>,
-        NoCache<Box<str>, RecordSet<Ipv4Addr>>,
-        NoCache<Box<str>, RecordSet<Ipv6Addr>>,
-        NoCache<IpAddr, RecordSet<Box<str>>>,
-    >
+    for Parameters<'x, &'x AuthenticatedMessage<'x>, NoCache>
 {
     fn from(params: &'x AuthenticatedMessage<'x>) -> Self {
         Parameters::new(params)
@@ -510,7 +524,7 @@ impl<'x> From<&'x AuthenticatedMessage<'x>>
 
 #[cfg(test)]
 #[allow(unused)]
-pub mod test {
+pub(crate) mod test {
     use std::{
         fs,
         path::PathBuf,
@@ -522,8 +536,10 @@ pub mod test {
 
     use crate::{
         AuthenticatedMessage, DkimResult, MessageAuthenticator,
-        common::{cache::test::DummyCaches, parse::TxtRecordParser, verify::DomainKey},
+        dkim::DomainKey,
         dkim::{HashAlgorithm, Signature, verify::Verifier},
+        dns::cache::test::DummyCaches,
+        parse::TxtRecordParser,
     };
 
     #[test]
@@ -565,6 +581,34 @@ pub mod test {
                 "{auid:?}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn dkim_retain_signatures_reports_rejected() {
+        let raw = concat!(
+            "DKIM-Signature: v=1; a=rsa-sha256; d=example.com; s=s; h=From; ",
+            "bh=YWJj; b=YWJj\r\n",
+            "From: a@example.com\r\n\r\nbody\r\n"
+        );
+        let mut message = AuthenticatedMessage::parse(raw.as_bytes()).unwrap();
+        assert_eq!(message.dkim_signatures().len(), 1);
+        assert!(!message.has_dkim_errors());
+
+        message.retain_dkim_signatures(|_| Err(crate::dkim::DkimError::UnsupportedAlgorithm));
+        assert!(message.dkim_signatures().is_empty());
+        assert!(message.has_dkim_errors());
+
+        let outputs = MessageAuthenticator::new_system_conf()
+            .unwrap()
+            .verify_dkim(&message)
+            .await;
+        assert_eq!(outputs.len(), 1);
+        assert_eq!(
+            outputs[0].result(),
+            &DkimResult::Neutral(crate::Error::Dkim(
+                crate::dkim::DkimError::UnsupportedAlgorithm
+            ))
+        );
     }
 
     #[tokio::test]

@@ -4,23 +4,37 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::common::crypto::CryptoError;
-use crate::{Error, common::crypto::Ed25519Key};
+//! DKIM1 key pair generation (feature `generate`).
+
+use crate::crypto::CryptoError;
+use crate::{Error, crypto::Ed25519Key};
 use encodify::base64;
 use rsa::{
     RsaPrivateKey, RsaPublicKey,
     pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey},
 };
 
+/// A freshly generated DKIM1 signing key pair.
+///
+/// The private key is loaded into a signing key such as
+/// [`RsaKey`](crate::crypto::RsaKey) or [`Ed25519Key`]; the public key is
+/// published, base64 encoded, in the `p=` tag of the
+/// `<selector>._domainkey.<domain>` TXT record (RFC 6376, Section 3.6.1).
 pub struct DkimKeyPair {
     private_key: Vec<u8>,
     public_key: Vec<u8>,
 }
 
 impl DkimKeyPair {
-    /// Generates a new RSA key pair encoded in PKCS#1 DER format with the given number of bits
+    /// Generates an RSA key pair of `bits` bits; both keys are encoded as
+    /// PKCS#1 DER.
+    ///
+    /// RFC 8301, Section 3.2 requires at least 1024 bits and recommends 2048.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Crypto`] when key generation or encoding fails.
     pub fn generate_rsa(bits: usize) -> crate::Result<Self> {
-        //TODO: Use `ring` once it supports RSA key generation
         let priv_key = RsaPrivateKey::new(&mut rsa::rand_core::OsRng, bits)
             .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
         let pub_key = RsaPublicKey::from(&priv_key);
@@ -39,7 +53,12 @@ impl DkimKeyPair {
         })
     }
 
-    /// Generates a new Ed25519 key pair encoded in PKCS#8 DER format
+    /// Generates an Ed25519 key pair (RFC 8463). The private key is encoded
+    /// as PKCS#8 DER; the public key is the raw 32 byte key.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Crypto`] when key generation fails.
     pub fn generate_ed25519() -> crate::Result<Self> {
         let pkcs8_der = Ed25519Key::generate_pkcs8()
             .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
@@ -51,18 +70,23 @@ impl DkimKeyPair {
         })
     }
 
+    /// Returns the public key: PKCS#1 DER for RSA, raw 32 bytes for Ed25519.
     pub fn public_key(&self) -> &[u8] {
         &self.public_key
     }
 
+    /// Returns the private key: PKCS#1 DER for RSA, PKCS#8 DER for Ed25519.
     pub fn private_key(&self) -> &[u8] {
         &self.private_key
     }
 
+    /// Consumes the pair and returns `(private_key, public_key)`.
     pub fn into_inner(self) -> (Vec<u8>, Vec<u8>) {
         (self.private_key, self.public_key)
     }
 
+    /// Returns the public key base64 encoded, ready for the `p=` tag of the
+    /// key record.
     pub fn encoded_public_key(&self) -> String {
         base64::STANDARD.encode(&self.public_key)
     }
@@ -76,13 +100,11 @@ mod test {
 
     use crate::{
         MessageAuthenticator,
-        common::{
-            cache::test::DummyCaches,
-            crypto::{Ed25519Key, RsaKey, Sha256},
-            parse::TxtRecordParser,
-            verify::DomainKey,
-        },
-        dkim::{DkimSigner, DomainKeyReport, generate::DkimKeyPair},
+        crypto::{Ed25519Key, RsaKey, Sha256},
+        dkim::DomainKey,
+        dkim::{DkimReportRecord, DkimSigner, generate::DkimKeyPair},
+        dns::cache::test::DummyCaches,
+        parse::TxtRecordParser,
     };
 
     #[tokio::test]
@@ -99,7 +121,6 @@ mod test {
         ))
         .unwrap();
 
-        // Create resolver
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
         let caches = DummyCaches::new();
         caches.txt_add(
@@ -114,7 +135,7 @@ mod test {
         );
         caches.txt_add(
             "_report._domainkey.example.com.".to_string(),
-            DomainKeyReport::parse("ra=dkim-failures; rp=100; rr=x".as_bytes()).unwrap(),
+            DkimReportRecord::parse("ra=dkim-failures; rp=100; rr=x".as_bytes()).unwrap(),
             Instant::now() + Duration::new(3600, 0),
         );
 
@@ -135,7 +156,7 @@ mod test {
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
-                .agent_user_identifier("\"John Doe\"@example.com")
+                .identity("\"John Doe\"@example.com")
                 .sign(message.as_bytes())
                 .unwrap(),
             message,

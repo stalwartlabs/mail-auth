@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{ArcSet, ChainValidation, Seal, Signature};
+use super::{ChainValidation, Seal, SealedSet, Signature};
 use crate::{
     AuthenticationResults,
-    common::{
-        crypto::Algorithm,
-        headers::{HeaderWriter, IntegerBuffer, Writer, write_integer},
-    },
+    crypto::Algorithm,
     dkim::Canonicalization,
+    headers::{HeaderWriter, IntegerBuffer, Writer, write_integer},
 };
 use encodify::{Fold, base64};
 
@@ -189,7 +187,7 @@ impl AuthenticationResults<'_> {
     }
 }
 
-impl HeaderWriter for ArcSet<'_> {
+impl HeaderWriter for SealedSet<'_> {
     fn write_header(&self, writer: &mut impl Writer) {
         self.seal.write(writer, true);
         self.signature.write(writer, true);

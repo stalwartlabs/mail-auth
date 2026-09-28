@@ -13,7 +13,7 @@ async fn main() {
 
     // Verify HELO identity
     let result = authenticator
-        .verify_spf(SpfParameters::verify_ehlo(
+        .verify_spf(SpfParameters::helo(
             "127.0.0.1".parse().unwrap(),
             "gmail.com",
             "my-local-domain.org",
@@ -23,7 +23,7 @@ async fn main() {
 
     // Verify MAIL-FROM identity
     let result = authenticator
-        .verify_spf(SpfParameters::verify_mail_from(
+        .verify_spf(SpfParameters::mail_from(
             "::1".parse().unwrap(),
             "gmail.com",
             "my-local-domain.org",

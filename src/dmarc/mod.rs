@@ -4,26 +4,65 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::DnsError;
-use crate::{DmarcOutput, DmarcResult, Error, Version};
-use serde::{Deserialize, Serialize};
-use std::{fmt::Display, sync::Arc};
+//! Domain-based Message Authentication, Reporting, and Conformance (DMARC).
+//!
+//! Implements DMARC policy discovery and evaluation as specified in
+//! [RFC 9989](https://datatracker.ietf.org/doc/html/rfc9989), including the
+//! DNS Tree Walk, Public Suffix Domain (`psd=`) handling and the external
+//! reporting destination check. Reports themselves are covered by
+//! [RFC 9990](https://datatracker.ietf.org/doc/html/rfc9990) (aggregate) and
+//! [RFC 9991](https://datatracker.ietf.org/doc/html/rfc9991) (failure); see
+//! the `report` module. Indirect mail flows are discussed in
+//! [RFC 7960](https://datatracker.ietf.org/doc/html/rfc7960).
+//!
+//! The entry point is
+//! [`MessageAuthenticator::verify_dmarc`](crate::MessageAuthenticator::verify_dmarc),
+//! which takes the results of DKIM (and optionally DKIM2) and SPF
+//! verification in [`DmarcParameters`](verify::DmarcParameters) and returns
+//! a [`DmarcOutput`].
 
+use serde::{Deserialize, Serialize};
+use std::fmt::Display;
+
+/// Verification result types: [`DmarcOutput`] and [`DmarcResult`].
+pub mod output;
+/// Parser for `v=DMARC1` TXT records.
 pub mod parse;
+/// DMARC evaluation (RFC 9989, Section 4.10) and reporting address
+/// authorization.
 pub mod verify;
 
+pub use output::{DmarcOutput, DmarcResult};
+
+/// A DMARC Policy Record (RFC 9989, Section 4.7).
+///
+/// Parsed from a `v=DMARC1` DNS TXT record published at `_dmarc.<domain>`
+/// and found by the DNS Tree Walk of
+/// [`MessageAuthenticator::verify_dmarc`](crate::MessageAuthenticator::verify_dmarc),
+/// which exposes the applied record through [`DmarcOutput::record`]. Each
+/// field is named after its tag.
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
-pub struct Dmarc {
-    pub v: Version,
+pub struct DmarcRecord {
+    /// `adkim=`: DKIM identifier alignment mode (default relaxed).
     pub adkim: Alignment,
+    /// `aspf=`: SPF identifier alignment mode (default relaxed).
     pub aspf: Alignment,
-    pub fo: Report,
+    /// `fo=`: failure reporting options (default `0`, [`FailureOptions::All`]).
+    pub fo: FailureOptions,
+    /// `np=`: policy for non-existent subdomains; defaults to `sp`.
     pub np: Policy,
+    /// `p=`: policy for the domain itself; [`Policy::Unspecified`] when the
+    /// tag is missing.
     pub p: Policy,
+    /// `psd=`: whether the domain is a Public Suffix Domain.
     pub psd: Psd,
-    pub rua: Vec<URI>,
-    pub ruf: Vec<URI>,
+    /// `rua=`: destinations for aggregate reports (RFC 9990).
+    pub rua: Vec<Uri>,
+    /// `ruf=`: destinations for failure reports (RFC 9991).
+    pub ruf: Vec<Uri>,
+    /// `sp=`: policy for existing subdomains; defaults to `p`.
     pub sp: Policy,
+    /// `t=`: test mode (`t=y`); the policy is applied one level less strictly.
     pub t: bool,
 }
 
@@ -32,201 +71,124 @@ pub struct Dmarc {
     feature = "rkyv",
     derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
 )]
-#[allow(clippy::upper_case_acronyms)]
-pub struct URI {
+/// A reporting destination from the `rua=` or `ruf=` tag of a DMARC record.
+///
+/// Only `mailto:` URIs are kept; the scheme is stripped and the address is
+/// lowercased.
+pub struct Uri {
+    /// The destination email address, without the `mailto:` prefix.
     pub uri: String,
+    /// Maximum report size in bytes from the `!size` suffix (`k`, `m`, `g`
+    /// and `t` units are expanded); `0` when no limit was given.
     pub max_size: usize,
 }
 
-#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+/// Identifier alignment mode, the `adkim=` and `aspf=` tags (checked as
+/// described in RFC 9989, Section 4.10.2). Displays as `r` or `s`.
 pub enum Alignment {
+    /// `r`: the identifier's Organizational Domain must match the Author
+    /// Domain's.
     Relaxed,
+    /// `s`: the identifier must match the Author Domain exactly.
     Strict,
 }
 
+/// The `psd=` tag of a DMARC record (RFC 9989, Section 4.7).
+///
+/// Both `Yes` and `No` stop the DNS Tree Walk and fix the Organizational
+/// Domain.
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
 pub enum Psd {
+    /// `psd=y`: the domain is a Public Suffix Domain; the Organizational
+    /// Domain is one label below it.
     Yes,
+    /// `psd=n`: the domain is not a PSD; it is the Organizational Domain.
     No,
+    /// `psd=u` or no tag: determined by the Tree Walk.
     Default,
 }
 
+/// The `fo=` tag of a DMARC record: when to generate failure reports
+/// (RFC 9991).
 #[derive(Debug, Hash, Clone, PartialEq, Eq)]
-pub enum Report {
+pub enum FailureOptions {
+    /// `0`: report when all mechanisms fail to produce an aligned pass
+    /// (default).
     All,
+    /// `1`: report when any mechanism fails to produce an aligned pass.
     Any,
+    /// `d`: report when DKIM does not produce an aligned pass.
     Dkim,
+    /// `s`: report when SPF does not produce an aligned pass.
     Spf,
+    /// `d:s`: report when either DKIM or SPF does not produce an aligned
+    /// pass.
     DkimSpf,
 }
 
-#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[cfg_attr(
+    feature = "rkyv",
+    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
+)]
+/// A requested handling policy, the `p=`, `sp=` and `np=` tags (RFC 9989,
+/// Section 4.7). Displays as `none`, `quarantine` or `reject`.
 pub enum Policy {
+    /// `none`: no specific action requested.
     None,
+    /// `quarantine`: treat failing mail as suspicious.
     Quarantine,
+    /// `reject`: reject failing mail.
     Reject,
+    /// The tag is absent. Displays as `none`.
+    #[default]
     Unspecified,
 }
 
-impl URI {
+impl Uri {
+    /// Creates a destination (test helper).
     #[cfg(test)]
     pub fn new(uri: impl Into<String>, max_size: usize) -> Self {
-        URI {
+        Uri {
             uri: uri.into(),
             max_size,
         }
     }
 
+    /// Returns the destination email address.
     pub fn uri(&self) -> &str {
         &self.uri
     }
 
+    /// Returns the maximum report size in bytes, or `0` for no limit.
     pub fn max_size(&self) -> usize {
         self.max_size
     }
 }
 
-impl From<Error> for DmarcResult {
-    fn from(err: Error) -> Self {
-        if matches!(&err, Error::Dns(DnsError::Resolver(_))) {
-            DmarcResult::TempError(err)
-        } else {
-            DmarcResult::PermError(err)
-        }
-    }
-}
-
-impl Default for DmarcOutput {
-    fn default() -> Self {
-        Self {
-            domain: String::new(),
-            policy: Policy::None,
-            record: None,
-            spf_result: DmarcResult::None,
-            dkim_result: DmarcResult::None,
-        }
-    }
-}
-
-impl DmarcOutput {
-    pub fn new(domain: String) -> Self {
-        DmarcOutput {
-            domain,
-            ..Default::default()
-        }
-    }
-
-    pub fn with_domain(mut self, domain: &str) -> Self {
-        self.domain = domain.to_string();
-        self
-    }
-
-    pub fn with_spf_result(mut self, result: DmarcResult) -> Self {
-        self.spf_result = result;
-        self
-    }
-
-    pub fn with_dkim_result(mut self, result: DmarcResult) -> Self {
-        self.dkim_result = result;
-        self
-    }
-
-    pub fn with_record(mut self, record: Arc<Dmarc>) -> Self {
-        self.record = record.into();
-        self
-    }
-
-    pub fn domain(&self) -> &str {
-        &self.domain
-    }
-
-    pub fn into_domain(self) -> String {
-        self.domain
-    }
-
-    pub fn policy(&self) -> Policy {
-        self.policy
-    }
-
-    pub fn dkim_result(&self) -> &DmarcResult {
-        &self.dkim_result
-    }
-
-    pub fn spf_result(&self) -> &DmarcResult {
-        &self.spf_result
-    }
-
-    pub fn result(&self) -> DmarcResult {
-        match self.mechanism_result() {
-            Some(result) => result.clone(),
-            None if self.record.is_some() => DmarcResult::Fail(Error::NotAligned),
-            None => DmarcResult::None,
-        }
-    }
-
-    pub(crate) fn mechanism_result(&self) -> Option<&DmarcResult> {
-        [&self.spf_result, &self.dkim_result]
-            .into_iter()
-            .filter_map(|result| {
-                let rank = match result {
-                    DmarcResult::Pass => 0,
-                    DmarcResult::TempError(_) => 1,
-                    DmarcResult::PermError(_) => 2,
-                    DmarcResult::Fail(_) => 3,
-                    DmarcResult::None => return None,
-                };
-                Some((rank, result))
-            })
-            .min_by_key(|(rank, _)| *rank)
-            .map(|(_, result)| result)
-    }
-
-    pub fn dmarc_record(&self) -> Option<&Dmarc> {
-        self.record.as_deref()
-    }
-
-    pub fn dmarc_record_cloned(&self) -> Option<Arc<Dmarc>> {
-        self.record.clone()
-    }
-
-    pub fn requested_reports(&self) -> bool {
-        self.record
-            .as_ref()
-            .is_some_and(|r| !r.rua.is_empty() || !r.ruf.is_empty())
-    }
-
-    /// Returns the failure reporting options
-    pub fn failure_report(&self) -> Option<Report> {
-        // Send failure reports
-        match &self.record {
-            Some(record)
-                if !record.ruf.is_empty()
-                    && !matches!(self.mechanism_result(), Some(DmarcResult::TempError(_)))
-                    && ((self.dkim_result != DmarcResult::Pass
-                        && matches!(record.fo, Report::Any | Report::Dkim | Report::DkimSpf))
-                        || (self.spf_result != DmarcResult::Pass
-                            && matches!(
-                                record.fo,
-                                Report::Any | Report::Spf | Report::DkimSpf
-                            ))
-                        || (self.dkim_result != DmarcResult::Pass
-                            && self.spf_result != DmarcResult::Pass
-                            && record.fo == Report::All)) =>
-            {
-                Some(record.fo.clone())
-            }
-            _ => None,
-        }
-    }
-}
-
-impl Dmarc {
-    pub fn ruf(&self) -> &[URI] {
+impl DmarcRecord {
+    /// Returns the failure report destinations (`ruf=`).
+    pub fn ruf(&self) -> &[Uri] {
         &self.ruf
     }
 
-    pub fn rua(&self) -> &[URI] {
+    /// Returns the aggregate report destinations (`rua=`).
+    pub fn rua(&self) -> &[Uri] {
         &self.rua
+    }
+}
+
+impl Display for Alignment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Alignment::Relaxed => "r",
+            Alignment::Strict => "s",
+        })
     }
 }
 
@@ -240,7 +202,7 @@ impl Display for Policy {
     }
 }
 
-impl AsRef<str> for URI {
+impl AsRef<str> for Uri {
     fn as_ref(&self) -> &str {
         &self.uri
     }

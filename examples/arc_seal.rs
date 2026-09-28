@@ -7,10 +7,8 @@
 use mail_auth::{
     AuthenticatedMessage, AuthenticationResults, MessageAuthenticator,
     arc::ArcSealer,
-    common::{
-        crypto::{RsaKey, Sha256},
-        headers::HeaderWriter,
-    },
+    crypto::{RsaKey, Sha256},
+    headers::HeaderWriter,
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
 

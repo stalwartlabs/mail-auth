@@ -8,10 +8,10 @@
   "original_envelope_id": "8BE2660E72",
   "original_mail_from": "info@interpublication.org",
   "original_rcpt_to": null,
-  "reported_domain": [
+  "reported_domains": [
     "interpublication.org"
   ],
-  "reported_uri": [],
+  "reported_uris": [],
   "reporting_mta": null,
   "source_ip": "148.163.85.135",
   "user_agent": "OpenDMARC-Filter/1.3.2",

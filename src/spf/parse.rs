@@ -6,12 +6,12 @@
 
 use super::{
     Directive, Macro, Mechanism, Qualifier, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
-    RR_TEMP_PERM_ERROR, Spf, Variable,
+    RR_TEMP_PERM_ERROR, SpfRecord, Variable,
 };
 use crate::DnsError;
 use crate::{
-    Error, Version,
-    common::parse::{TagParser, TxtRecordParser, V},
+    Error,
+    parse::{TagParser, TxtRecordParser, V},
     scan::{find_ascii_whitespace, find_le_space_or2},
 };
 use std::{
@@ -19,8 +19,8 @@ use std::{
     slice::Iter,
 };
 
-impl TxtRecordParser for Spf {
-    fn parse(bytes: &[u8]) -> crate::Result<Spf> {
+impl TxtRecordParser for SpfRecord {
+    fn parse(bytes: &[u8]) -> crate::Result<SpfRecord> {
         let mut record = bytes.iter();
         if !matches!(record.key(), Some(k) if k == V)
             || !record.match_bytes(b"spf1")
@@ -53,7 +53,7 @@ impl TxtRecordParser for Spf {
                                 ip4_cidr_length = l1;
                                 ip6_cidr_length = l2;
                             } else if stop_char != b' ' {
-                                return Err(Error::ParseError);
+                                return Err(Error::Parse);
                             }
                         }
                         b'/' => {
@@ -61,7 +61,7 @@ impl TxtRecordParser for Spf {
                             ip4_cidr_length = l1;
                             ip6_cidr_length = l2;
                         }
-                        _ => return Err(Error::ParseError),
+                        _ => return Err(Error::Parse),
                     }
 
                     directives.push(Directive::new(
@@ -85,12 +85,12 @@ impl TxtRecordParser for Spf {
                     if stop_char == b' ' {
                         directives.push(Directive::new(qualifier, Mechanism::All))
                     } else {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                 }
                 INCLUDE | EXISTS => {
                     if stop_char != b':' {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     let (macro_string, stop_char) = record.macro_string(false)?;
                     if stop_char == b' ' {
@@ -103,19 +103,19 @@ impl TxtRecordParser for Spf {
                             },
                         ));
                     } else {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                 }
                 IP4 => {
                     if stop_char != b':' {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     let mut cidr_length = 32;
                     let (addr, stop_char) = record.ip4()?;
                     if stop_char == b'/' {
                         cidr_length = std::cmp::min(cidr_length, record.cidr_length()?);
                     } else if stop_char != b' ' {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     directives.push(Directive::new(
                         qualifier,
@@ -127,14 +127,14 @@ impl TxtRecordParser for Spf {
                 }
                 IP6 => {
                     if stop_char != b':' {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     let mut cidr_length = 128;
                     let (addr, stop_char) = record.ip6()?;
                     if stop_char == b'/' {
                         cidr_length = std::cmp::min(cidr_length, record.cidr_length()?);
                     } else if stop_char != b' ' {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     directives.push(Directive::new(
                         qualifier,
@@ -155,27 +155,27 @@ impl TxtRecordParser for Spf {
                     if stop_char == b' ' {
                         directives.push(Directive::new(qualifier, Mechanism::Ptr { macro_string }));
                     } else {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                 }
                 EXP | REDIRECT => {
                     if stop_char != b'=' {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     let (macro_string, stop_char) = record.macro_string(false)?;
                     if stop_char != b' ' {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     if term == REDIRECT {
                         if redirect.is_none() {
                             redirect = macro_string.into()
                         } else {
-                            return Err(Error::ParseError);
+                            return Err(Error::Parse);
                         }
                     } else if exp.is_none() {
                         exp = macro_string.into()
                     } else {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     };
                 }
                 RA => {
@@ -193,14 +193,13 @@ impl TxtRecordParser for Spf {
                 _ => {
                     let (_, stop_char) = record.macro_string(false)?;
                     if stop_char != b' ' {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                 }
             }
         }
 
-        Ok(Spf {
-            version: Version::V1,
+        Ok(SpfRecord {
             directives: directives.into_boxed_slice(),
             redirect,
             exp,
@@ -416,7 +415,7 @@ impl SPFParser for Iter<'_, u8> {
             let [a, b, c, _] = ip;
             Ok((Ipv4Addr::new(a, b, c, octet), stop_char))
         } else {
-            Err(Error::ParseError)
+            Err(Error::Parse)
         }
     }
 
@@ -441,7 +440,7 @@ impl SPFParser for Iter<'_, u8> {
                 _ => {
                     if !ch.is_ascii_whitespace() {
                         *self = input.get(pos..).unwrap_or_default().iter();
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     break;
                 }
@@ -480,13 +479,13 @@ impl SPFParser for Iter<'_, u8> {
                         in_ip6 = true;
                     } else if ip6_length != u8::MAX {
                         *self = input.get(pos..).unwrap_or_default().iter();
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                 }
                 _ => {
                     if !ch.is_ascii_whitespace() {
                         *self = input.get(pos..).unwrap_or_default().iter();
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                     break;
                 }
@@ -536,7 +535,7 @@ impl SPFParser for Iter<'_, u8> {
                     if ch.is_ascii_whitespace() {
                         break;
                     } else if !ch.is_ascii_alphanumeric() {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     }
                 }
             }
@@ -568,7 +567,7 @@ fn parse_ip6(input: &[u8]) -> (crate::Result<(Ipv6Addr, u8)>, usize) {
         match ch {
             b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => {
                 if !part.push(ch) {
-                    return (Err(Error::ParseError), pos);
+                    return (Err(Error::Parse), pos);
                 }
             }
             b':' => {
@@ -579,16 +578,16 @@ fn parse_ip6(input: &[u8]) -> (crate::Result<(Ipv6Addr, u8)>, usize) {
                     } else if zero_group_pos == usize::MAX {
                         zero_group_pos = ip_pos;
                     } else if zero_group_pos != ip_pos {
-                        return (Err(Error::ParseError), pos);
+                        return (Err(Error::Parse), pos);
                     }
                 } else {
-                    return (Err(Error::ParseError), pos);
+                    return (Err(Error::Parse), pos);
                 }
             }
             b'.' => {
                 if ip_pos < 8 && !part.is_empty() {
                     let Some(qnum) = part.take_octet() else {
-                        return (Err(Error::ParseError), pos);
+                        return (Err(Error::Parse), pos);
                     };
                     if ip4_pos % 2 == 1 {
                         ip[ip_pos] = (ip[ip_pos] << 8) | qnum;
@@ -598,7 +597,7 @@ fn parse_ip6(input: &[u8]) -> (crate::Result<(Ipv6Addr, u8)>, usize) {
                     }
                     ip4_pos += 1;
                 } else {
-                    return (Err(Error::ParseError), pos);
+                    return (Err(Error::Parse), pos);
                 }
             }
             _ => {
@@ -615,15 +614,15 @@ fn parse_ip6(input: &[u8]) -> (crate::Result<(Ipv6Addr, u8)>, usize) {
             } else if ip4_pos == 3 {
                 match part.take_octet() {
                     Some(qnum) => (ip[ip_pos] << 8) | qnum,
-                    None => return (Err(Error::ParseError), pos),
+                    None => return (Err(Error::Parse), pos),
                 }
             } else {
-                return (Err(Error::ParseError), pos);
+                return (Err(Error::Parse), pos);
             };
 
             ip_pos += 1;
         } else {
-            return (Err(Error::ParseError), pos);
+            return (Err(Error::Parse), pos);
         }
     }
     if zero_group_pos != usize::MAX && zero_group_pos < ip_pos {
@@ -631,7 +630,7 @@ fn parse_ip6(input: &[u8]) -> (crate::Result<(Ipv6Addr, u8)>, usize) {
             ip.copy_within(zero_group_pos..ip_pos, zero_group_pos + 8 - ip_pos);
             ip[zero_group_pos..zero_group_pos + 8 - ip_pos].fill(0);
         } else {
-            return (Err(Error::ParseError), pos);
+            return (Err(Error::Parse), pos);
         }
     }
 
@@ -639,7 +638,7 @@ fn parse_ip6(input: &[u8]) -> (crate::Result<(Ipv6Addr, u8)>, usize) {
         let [a, b, c, d, e, f, g, h] = ip;
         (Ok((Ipv6Addr::new(a, b, c, d, e, f, g, h), stop_char)), pos)
     } else {
-        (Err(Error::ParseError), pos)
+        (Err(Error::Parse), pos)
     }
 }
 
@@ -716,7 +715,7 @@ const HEX_NIBBLE: [u8; 256] = {
 #[inline(always)]
 fn literal_macro(literal: &[u8], stop_char: u8) -> crate::Result<(Macro, u8)> {
     if literal.is_empty() {
-        Err(Error::ParseError)
+        Err(Error::Parse)
     } else {
         Ok((Macro::Literal(literal.into()), stop_char))
     }
@@ -767,7 +766,7 @@ impl SPFMacroParser for Iter<'_, u8> {
                                 Variable::parse_exp(l)
                             }
                         })
-                        .ok_or(Error::ParseError)?;
+                        .ok_or(Error::Parse)?;
                     let mut num_parts: u32 = 0;
                     let mut reverse = false;
                     let mut delimiters = 0;
@@ -789,7 +788,7 @@ impl SPFMacroParser for Iter<'_, u8> {
                                 delimiters |= 1u64 << (ch - b'+');
                             }
                             _ => {
-                                return Err(Error::ParseError);
+                                return Err(Error::Parse);
                             }
                         }
                     }
@@ -812,7 +811,7 @@ impl SPFMacroParser for Iter<'_, u8> {
                 }
                 _ => {
                     if last_is_pct {
-                        return Err(Error::ParseError);
+                        return Err(Error::Parse);
                     } else if !ch.is_ascii_whitespace() || is_exp {
                         literal.push(ch);
                     } else {
@@ -832,8 +831,8 @@ impl SPFMacroParser for Iter<'_, u8> {
             1 => macro_string
                 .pop()
                 .map(|m| (m, stop_char))
-                .ok_or(Error::ParseError),
-            0 => Err(Error::ParseError),
+                .ok_or(Error::Parse),
+            0 => Err(Error::Parse),
             _ => Ok((Macro::List(macro_string.into_boxed_slice()), stop_char)),
         }
     }
@@ -902,822 +901,4 @@ impl TxtRecordParser for Macro {
 }
 
 #[cfg(test)]
-mod test {
-    use std::net::{Ipv4Addr, Ipv6Addr};
-
-    use crate::{
-        common::parse::TxtRecordParser,
-        spf::{
-            Directive, Macro, Mechanism, Qualifier, RR_FAIL, RR_NEUTRAL_NONE, RR_SOFTFAIL,
-            RR_TEMP_PERM_ERROR, Spf, Variable, Version,
-        },
-    };
-
-    use super::SPFParser;
-
-    #[test]
-    fn parse_spf() {
-        for (record, expected_result) in [
-            (
-                "v=spf1 +mx a:colo.example.com/28 -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::A {
-                                macro_string: Macro::Literal(b"colo.example.com".as_slice().into()),
-                                ip4_mask: u32::MAX << (32 - 28),
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 a:A.EXAMPLE.COM -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::A {
-                                macro_string: Macro::Literal(b"A.EXAMPLE.COM".as_slice().into()),
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 +mx -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 +mx redirect=_spf.example.com",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    redirect: Macro::Literal(b"_spf.example.com".as_slice().into()).into(),
-                    exp: None,
-                    directives: Box::new([Directive::new(
-                        Qualifier::Pass,
-                        Mechanism::Mx {
-                            macro_string: Macro::None,
-                            ip4_mask: u32::MAX,
-                            ip6_mask: u128::MAX,
-                        },
-                    )]),
-                },
-            ),
-            (
-                "v=spf1 a mx -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::A {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 include:example.com include:example.org -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Include {
-                                macro_string: Macro::Literal(b"example.com".as_slice().into()),
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Include {
-                                macro_string: Macro::Literal(b"example.org".as_slice().into()),
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 exists:%{ir}.%{l1r+-}._spf.%{d} -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Exists {
-                                macro_string: Macro::List(Box::new([
-                                    Macro::Variable {
-                                        letter: Variable::Ip,
-                                        num_parts: 0,
-                                        reverse: true,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                    Macro::Literal(b".".as_slice().into()),
-                                    Macro::Variable {
-                                        letter: Variable::SenderLocalPart,
-                                        num_parts: 1,
-                                        reverse: true,
-                                        escape: false,
-                                        delimiters: (1u64 << (b'+' - b'+'))
-                                            | (1u64 << (b'-' - b'+')),
-                                    },
-                                    Macro::Literal(b"._spf.".as_slice().into()),
-                                    Macro::Variable {
-                                        letter: Variable::Domain,
-                                        num_parts: 0,
-                                        reverse: false,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                ])),
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 mx -all exp=explain._spf.%{d}",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: Macro::List(Box::new([
-                        Macro::Literal(b"explain._spf.".as_slice().into()),
-                        Macro::Variable {
-                            letter: Variable::Domain,
-                            num_parts: 0,
-                            reverse: false,
-                            escape: false,
-                            delimiters: 1u64 << (b'.' - b'+'),
-                        },
-                    ]))
-                    .into(),
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 ip4:192.0.2.1 ip4:192.0.2.129 -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Ip4 {
-                                addr: "192.0.2.1".parse().unwrap(),
-                                mask: u32::MAX,
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Ip4 {
-                                addr: "192.0.2.129".parse().unwrap(),
-                                mask: u32::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 ip4:192.0.2.0/24 mx -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Ip4 {
-                                addr: "192.0.2.0".parse().unwrap(),
-                                mask: u32::MAX << (32 - 24),
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 mx/30 mx:example.org/30 -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX << (32 - 30),
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::Literal(b"example.org".as_slice().into()),
-                                ip4_mask: u32::MAX << (32 - 30),
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 ptr -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Ptr {
-                                macro_string: Macro::None,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 exists:%{l1r+}.%{d}",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([Directive::new(
-                        Qualifier::Pass,
-                        Mechanism::Exists {
-                            macro_string: Macro::List(Box::new([
-                                Macro::Variable {
-                                    letter: Variable::SenderLocalPart,
-                                    num_parts: 1,
-                                    reverse: true,
-                                    escape: false,
-                                    delimiters: 1u64 << (b'+' - b'+'),
-                                },
-                                Macro::Literal(b".".as_slice().into()),
-                                Macro::Variable {
-                                    letter: Variable::Domain,
-                                    num_parts: 0,
-                                    reverse: false,
-                                    escape: false,
-                                    delimiters: 1u64 << (b'.' - b'+'),
-                                },
-                            ])),
-                        },
-                    )]),
-                },
-            ),
-            (
-                "v=spf1 exists:%{ir}.%{l1r+}.%{d}",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([Directive::new(
-                        Qualifier::Pass,
-                        Mechanism::Exists {
-                            macro_string: Macro::List(Box::new([
-                                Macro::Variable {
-                                    letter: Variable::Ip,
-                                    num_parts: 0,
-                                    reverse: true,
-                                    escape: false,
-                                    delimiters: 1u64 << (b'.' - b'+'),
-                                },
-                                Macro::Literal(b".".as_slice().into()),
-                                Macro::Variable {
-                                    letter: Variable::SenderLocalPart,
-                                    num_parts: 1,
-                                    reverse: true,
-                                    escape: false,
-                                    delimiters: 1u64 << (b'+' - b'+'),
-                                },
-                                Macro::Literal(b".".as_slice().into()),
-                                Macro::Variable {
-                                    letter: Variable::Domain,
-                                    num_parts: 0,
-                                    reverse: false,
-                                    escape: false,
-                                    delimiters: 1u64 << (b'.' - b'+'),
-                                },
-                            ])),
-                        },
-                    )]),
-                },
-            ),
-            (
-                "v=spf1 exists:_h.%{h}._l.%{l}._o.%{o}._i.%{i}._spf.%{d} ?all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Exists {
-                                macro_string: Macro::List(Box::new([
-                                    Macro::Literal(b"_h.".as_slice().into()),
-                                    Macro::Variable {
-                                        letter: Variable::HeloDomain,
-                                        num_parts: 0,
-                                        reverse: false,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                    Macro::Literal(b"._l.".as_slice().into()),
-                                    Macro::Variable {
-                                        letter: Variable::SenderLocalPart,
-                                        num_parts: 0,
-                                        reverse: false,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                    Macro::Literal(b"._o.".as_slice().into()),
-                                    Macro::Variable {
-                                        letter: Variable::SenderDomainPart,
-                                        num_parts: 0,
-                                        reverse: false,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                    Macro::Literal(b"._i.".as_slice().into()),
-                                    Macro::Variable {
-                                        letter: Variable::Ip,
-                                        num_parts: 0,
-                                        reverse: false,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                    Macro::Literal(b"._spf.".as_slice().into()),
-                                    Macro::Variable {
-                                        letter: Variable::Domain,
-                                        num_parts: 0,
-                                        reverse: false,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                ])),
-                            },
-                        ),
-                        Directive::new(Qualifier::Neutral, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 mx ?exists:%{ir}.whitelist.example.org -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Neutral,
-                            Mechanism::Exists {
-                                macro_string: Macro::List(Box::new([
-                                    Macro::Variable {
-                                        letter: Variable::Ip,
-                                        num_parts: 0,
-                                        reverse: true,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                    Macro::Literal(b".whitelist.example.org".as_slice().into()),
-                                ])),
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 mx exists:%{l}._%-spf_%_verify%%.%{d} -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Exists {
-                                macro_string: Macro::List(Box::new([
-                                    Macro::Variable {
-                                        letter: Variable::SenderLocalPart,
-                                        num_parts: 0,
-                                        reverse: false,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                    Macro::Literal(b"._%20spf_ verify%.".as_slice().into()),
-                                    Macro::Variable {
-                                        letter: Variable::Domain,
-                                        num_parts: 0,
-                                        reverse: false,
-                                        escape: false,
-                                        delimiters: 1u64 << (b'.' - b'+'),
-                                    },
-                                ])),
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 mx redirect=%{l1r+}._at_.%{o,=_/}._spf.%{d}",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: Macro::List(Box::new([
-                        Macro::Variable {
-                            letter: Variable::SenderLocalPart,
-                            num_parts: 1,
-                            reverse: true,
-                            escape: false,
-                            delimiters: 1u64 << (b'+' - b'+'),
-                        },
-                        Macro::Literal(b"._at_.".as_slice().into()),
-                        Macro::Variable {
-                            letter: Variable::SenderDomainPart,
-                            num_parts: 0,
-                            reverse: false,
-                            escape: false,
-                            delimiters: (1u64 << (b',' - b'+'))
-                                | (1u64 << (b'=' - b'+'))
-                                | (1u64 << (b'_' - b'+'))
-                                | (1u64 << (b'/' - b'+')),
-                        },
-                        Macro::Literal(b"._spf.".as_slice().into()),
-                        Macro::Variable {
-                            letter: Variable::Domain,
-                            num_parts: 0,
-                            reverse: false,
-                            escape: false,
-                            delimiters: 1u64 << (b'.' - b'+'),
-                        },
-                    ]))
-                    .into(),
-                    directives: Box::new([Directive::new(
-                        Qualifier::Pass,
-                        Mechanism::Mx {
-                            macro_string: Macro::None,
-                            ip4_mask: u32::MAX,
-                            ip6_mask: u128::MAX,
-                        },
-                    )]),
-                },
-            ),
-            (
-                "v=spf1 -ip4:192.0.2.0/24 a//96 +all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Fail,
-                            Mechanism::Ip4 {
-                                addr: "192.0.2.0".parse().unwrap(),
-                                mask: u32::MAX << (32 - 24),
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::A {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX << (128 - 96),
-                            },
-                        ),
-                        Directive::new(Qualifier::Pass, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                concat!(
-                    "v=spf1 +mx/11//100 ~a:domain.com/12/123 ?ip6:::1 ",
-                    "-ip6:a::b/111 ip6:1080::8:800:68.0.3.1/96 "
-                ),
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::None,
-                                ip4_mask: u32::MAX << (32 - 11),
-                                ip6_mask: u128::MAX << (128 - 100),
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::SoftFail,
-                            Mechanism::A {
-                                macro_string: Macro::Literal(b"domain.com".as_slice().into()),
-                                ip4_mask: u32::MAX << (32 - 12),
-                                ip6_mask: u128::MAX << (128 - 123),
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Neutral,
-                            Mechanism::Ip6 {
-                                addr: "::1".parse().unwrap(),
-                                mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Fail,
-                            Mechanism::Ip6 {
-                                addr: "a::b".parse().unwrap(),
-                                mask: u128::MAX << (128 - 111),
-                            },
-                        ),
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Ip6 {
-                                addr: "1080::8:800:68.0.3.1".parse().unwrap(),
-                                mask: u128::MAX << (128 - 96),
-                            },
-                        ),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 mx:example.org -all ra=postmaster rp=15 rr=e:f:s:n",
-                Spf {
-                    version: Version::V1,
-                    ra: Some(b"postmaster".as_slice().into()),
-                    rp: 15,
-                    rr: RR_FAIL | RR_NEUTRAL_NONE | RR_SOFTFAIL | RR_TEMP_PERM_ERROR,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Mx {
-                                macro_string: Macro::Literal(b"example.org".as_slice().into()),
-                                ip4_mask: u32::MAX,
-                                ip6_mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-            (
-                "v=spf1 ip6:fe80:0000:0000::0000:0000:0000:1 -all",
-                Spf {
-                    version: Version::V1,
-                    ra: None,
-                    rp: 100,
-                    rr: u8::MAX,
-                    exp: None,
-                    redirect: None,
-                    directives: Box::new([
-                        Directive::new(
-                            Qualifier::Pass,
-                            Mechanism::Ip6 {
-                                addr: "fe80:0000:0000::0000:0000:0000:1".parse().unwrap(),
-                                mask: u128::MAX,
-                            },
-                        ),
-                        Directive::new(Qualifier::Fail, Mechanism::All),
-                    ]),
-                },
-            ),
-        ] {
-            assert_eq!(
-                Spf::parse(record.as_bytes()).unwrap_or_else(|err| panic!("{record:?} : {err:?}")),
-                expected_result,
-                "{record}"
-            );
-        }
-    }
-
-    #[test]
-    fn parse_ip6() {
-        for test in [
-            "ABCD:EF01:2345:6789:ABCD:EF01:2345:6789",
-            "2001:DB8:0:0:8:800:200C:417A",
-            "FF01:0:0:0:0:0:0:101",
-            "0:0:0:0:0:0:0:1",
-            "0:0:0:0:0:0:0:0",
-            "2001:DB8::8:800:200C:417A",
-            "2001:DB8:0:0:8:800:200C::",
-            "FF01::101",
-            "1234::",
-            "::1",
-            "::",
-            "a:b::c:d",
-            "a::c:d",
-            "a:b:c::d",
-            "::c:d",
-            "0:0:0:0:0:0:13.1.68.3",
-            "0:0:0:0:0:FFFF:129.144.52.38",
-            "::13.1.68.3",
-            "::FFFF:129.144.52.38",
-            "fe80::1",
-            "fe80::0000:1",
-            "fe80:0000::0000:1",
-            "fe80:0000:0000:0000::1",
-            "fe80:0000:0000:0000::0000:1",
-            "fe80:0000:0000::0000:0000:0000:1",
-            "fe80::0000:0000:0000:0000:0000:1",
-            "fe80:0000:0000:0000:0000:0000:0000:1",
-        ] {
-            for test in [test.to_string(), format!("{test} ")] {
-                let (ip, stop_char) = test
-                    .as_bytes()
-                    .iter()
-                    .ip6()
-                    .unwrap_or_else(|err| panic!("{test:?} : {err:?}"));
-                assert_eq!(stop_char, b' ', "{test}");
-                assert_eq!(ip, test.trim_end().parse::<Ipv6Addr>().unwrap())
-            }
-        }
-
-        for invalid_test in [
-            "0:0:0:0:0:0:0:1:1",
-            "0:0:0:0:0:0:13.1.68.3.4",
-            "::0:0:0:0:0:0:0:0",
-            "0:0:0:0::0:0:0:0",
-            " ",
-            "",
-        ] {
-            assert!(
-                invalid_test.as_bytes().iter().ip6().is_err(),
-                "{}",
-                invalid_test
-            );
-        }
-    }
-
-    #[test]
-    fn parse_ip4() {
-        for test in ["0.0.0.0", "255.255.255.255", "13.1.68.3", "129.144.52.38"] {
-            for test in [test.to_string(), format!("{test} ")] {
-                let (ip, stop_char) = test
-                    .as_bytes()
-                    .iter()
-                    .ip4()
-                    .unwrap_or_else(|err| panic!("{test:?} : {err:?}"));
-                assert_eq!(stop_char, b' ', "{test}");
-                assert_eq!(ip, test.trim_end().parse::<Ipv4Addr>().unwrap());
-            }
-        }
-    }
-}
+mod tests;

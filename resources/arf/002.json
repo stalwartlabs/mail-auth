@@ -8,10 +8,10 @@
   "original_envelope_id": null,
   "original_mail_from": "<somespammer@example.net>",
   "original_rcpt_to": "<user@example.com>",
-  "reported_domain": [
+  "reported_domains": [
     "example.net"
   ],
-  "reported_uri": [
+  "reported_uris": [
     "http://example.net/earn_money.html",
     "mailto:user@example.com"
   ],

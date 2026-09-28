@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! DKIM1 header and body canonicalization (RFC 6376, Section 3.4).
+
 use super::{Canonicalization, Signature};
-use crate::common::{
+use crate::{
     crypto::HashContext,
     headers::{HeaderStream, Writable, Writer},
 };
@@ -14,7 +16,7 @@ use crate::common::{
 ///
 /// This struct allows body content to be fed in chunks while maintaining
 /// the canonicalization state between calls.
-pub struct BodyHasher<H> {
+pub(crate) struct BodyHasher<H> {
     hasher: H,
     canonicalization: Canonicalization,
     body_length_limit: u64,
@@ -50,7 +52,6 @@ impl<H: Writer> BodyHasher<H> {
             return;
         }
 
-        // Apply body length limit if set
         let chunk = if self.body_length_limit > 0 {
             let remaining = self.body_length_limit.saturating_sub(self.bytes_hashed);
             if remaining == 0 {
@@ -299,7 +300,7 @@ impl CanonicalState {
     }
 }
 
-pub struct CanonicalBody<'a> {
+pub(crate) struct CanonicalBody<'a> {
     canonicalization: Canonicalization,
     body: &'a [u8],
 }
@@ -313,7 +314,7 @@ impl Writable for CanonicalBody<'_> {
 }
 
 impl Canonicalization {
-    pub fn canonicalize_headers<'a>(
+    pub(crate) fn canonicalize_headers<'a>(
         &self,
         headers: impl Iterator<Item = (&'a [u8], &'a [u8])>,
         hasher: &mut impl Writer,
@@ -335,7 +336,7 @@ impl Canonicalization {
         }
     }
 
-    pub fn canonical_headers<'a>(
+    pub(crate) fn canonical_headers<'a>(
         &self,
         headers: Vec<(&'a [u8], &'a [u8])>,
     ) -> CanonicalHeaders<'a> {
@@ -345,7 +346,7 @@ impl Canonicalization {
         }
     }
 
-    pub fn canonical_body<'a>(&self, body: &'a [u8], l: u64) -> CanonicalBody<'a> {
+    pub(crate) fn canonical_body<'a>(&self, body: &'a [u8], l: u64) -> CanonicalBody<'a> {
         CanonicalBody {
             canonicalization: *self,
             body: if l == 0 {
@@ -356,7 +357,7 @@ impl Canonicalization {
         }
     }
 
-    pub fn serialize_name(&self, writer: &mut impl Writer) {
+    pub(crate) fn serialize_name(&self, writer: &mut impl Writer) {
         writer.write(match self {
             Canonicalization::Relaxed => b"relaxed",
             Canonicalization::Simple => b"simple",
@@ -365,7 +366,7 @@ impl Canonicalization {
 }
 
 impl Signature {
-    pub fn canonicalize<'x>(
+    pub(crate) fn canonicalize<'x>(
         &self,
         mut message: impl HeaderStream<'x>,
     ) -> (usize, CanonicalHeaders<'x>, Vec<String>, CanonicalBody<'x>) {
@@ -390,7 +391,6 @@ impl Signature {
         let canonical_headers = self.ch.canonical_headers(headers);
         let canonical_body = self.cb.canonical_body(body, u64::MAX);
 
-        // Add any missing headers
         signed_headers.reverse();
         for (pos, header) in self.h.iter().enumerate() {
             if !found_headers.contains(pos) {
@@ -402,7 +402,7 @@ impl Signature {
     }
 }
 
-pub struct CanonicalHeaders<'a> {
+pub(crate) struct CanonicalHeaders<'a> {
     canonicalization: Canonicalization,
     headers: Vec<(&'a [u8], &'a [u8])>,
 }
@@ -574,11 +574,9 @@ impl FoundHeaders {
 mod test {
     use super::{BodyHasher, CanonicalBody, CanonicalHeaders};
     use crate::{
-        common::{
-            crypto::{HashContext, HashImpl, Sha256},
-            headers::{HeaderIterator, Writable},
-        },
+        crypto::{HashContext, HashImpl, Sha256},
         dkim::Canonicalization,
+        headers::{HeaderIterator, Writable},
     };
     use encodify::base64;
 
@@ -666,7 +664,6 @@ mod test {
             }
         }
 
-        // Test empty body hashes
         for (canonicalization, hash) in [
             (
                 Canonicalization::Relaxed,
@@ -692,7 +689,6 @@ mod test {
 
     #[test]
     fn body_hasher_matches_canonical_body() {
-        // Test that BodyHasher produces identical results to CanonicalBody
         for (body, canonicalization) in [
             (" C \r\nD \t E\r\n", Canonicalization::Relaxed),
             (" C \r\nD \t E\r\n", Canonicalization::Simple),
@@ -707,7 +703,6 @@ mod test {
             ("hello world\r\n", Canonicalization::Relaxed),
             ("hello world\r\n", Canonicalization::Simple),
         ] {
-            // Hash using CanonicalBody
             let mut expected_hasher = Sha256::hasher();
             CanonicalBody {
                 canonicalization,
@@ -716,7 +711,6 @@ mod test {
             .write(&mut expected_hasher);
             let expected_hash = expected_hasher.complete();
 
-            // Hash using BodyHasher (single chunk)
             let mut body_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
             body_hasher.write(body.as_bytes());
             let (actual_hasher, _) = body_hasher.finish();
@@ -734,17 +728,14 @@ mod test {
 
     #[test]
     fn body_hasher_chunked_matches_single() {
-        // Test that chunked input produces same result as single input
         let body = " C \r\nD \t E\r\nMore content here\r\n\r\n";
 
         for canonicalization in [Canonicalization::Relaxed, Canonicalization::Simple] {
-            // Single chunk
             let mut single_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
             single_hasher.write(body.as_bytes());
             let (single_result, single_len) = single_hasher.finish();
             let single_hash = single_result.complete();
 
-            // Multiple chunks - split at various points
             for chunk_size in [1, 2, 3, 5, 7, 10] {
                 let mut chunked_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
                 for chunk in body.as_bytes().chunks(chunk_size) {
@@ -770,13 +761,11 @@ mod test {
         let body = "Hello World! This is a test body.\r\n";
 
         for canonicalization in [Canonicalization::Relaxed, Canonicalization::Simple] {
-            // Hash with limit of 10 bytes
             let mut limited_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 10);
             limited_hasher.write(body.as_bytes());
             let (limited_result, limited_len) = limited_hasher.finish();
             let limited_hash = limited_result.complete();
 
-            // Hash the first 10 bytes using CanonicalBody
             let mut expected_hasher = Sha256::hasher();
             CanonicalBody {
                 canonicalization,
@@ -797,17 +786,14 @@ mod test {
 
     #[test]
     fn body_hasher_split_crlf() {
-        // Test that CRLF split across chunks is handled correctly
         let body = "Line1\r\nLine2\r\n";
 
         for canonicalization in [Canonicalization::Relaxed, Canonicalization::Simple] {
-            // Single chunk reference
             let mut single_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
             single_hasher.write(body.as_bytes());
             let (single_result, _) = single_hasher.finish();
             let single_hash = single_result.complete();
 
-            // Split right in the middle of \r\n
             let mut split_hasher = BodyHasher::new(Sha256::hasher(), canonicalization, 0);
             split_hasher.write(b"Line1\r");
             split_hasher.write(b"\nLine2\r");

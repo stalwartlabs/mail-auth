@@ -4,21 +4,22 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! DKIM2 message hashes (§6) and header field canonicalization for the
+//! signature input (§9.6).
+
 use crate::{
-    common::{
-        crypto::{HashContext, HashImpl, HashOutput, Sha1, Sha256},
-        headers::Writer,
-    },
+    crypto::{HashContext, HashImpl, HashOutput, Sha1, Sha256},
     dkim::{
         Canonicalization,
         canonicalize::{SpacedTokens, write_relaxed_name},
     },
+    headers::Writer,
 };
 use std::cmp::Ordering;
 
-impl crate::common::crypto::HashAlgorithm {
-    /// Computes the DKIM2 header-fields hash
-    pub fn headers_hash<'x>(
+impl crate::crypto::HashAlgorithm {
+    /// Computes the DKIM2 header fields hash (§6.2).
+    pub(crate) fn headers_hash<'x>(
         &self,
         headers: impl IntoIterator<Item = (&'x [u8], &'x [u8])>,
     ) -> HashOutput {
@@ -42,8 +43,8 @@ impl crate::common::crypto::HashAlgorithm {
         }
     }
 
-    /// Computes the DKIM2 body hash
-    pub fn body_hash(&self, body: &[u8]) -> HashOutput {
+    /// Computes the DKIM2 body hash (§6.1).
+    pub(crate) fn body_hash(&self, body: &[u8]) -> HashOutput {
         self.hash(Canonicalization::Simple.canonical_body(body, u64::MAX))
     }
 }
@@ -108,7 +109,7 @@ pub(super) fn is_non_signed_header(name: &[u8]) -> bool {
 #[cfg(test)]
 mod test {
     use super::is_non_signed_header;
-    use crate::common::crypto::HashAlgorithm;
+    use crate::crypto::HashAlgorithm;
 
     #[test]
     fn excluded_headers_are_classified() {

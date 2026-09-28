@@ -9,7 +9,7 @@
       "begin": 100,
       "end": 200
     },
-    "error": [],
+    "errors": [],
     "generator": null
   },
   "policy_published": {
@@ -24,7 +24,7 @@
     "discovery_method": "Unspecified",
     "fo": null
   },
-  "record": [
+  "records": [
     {
       "row": {
         "source_ip": "192.0.2.1",
@@ -35,7 +35,7 @@
           "spf": "Pass",
           "reason": [
             {
-              "type_": "Other",
+              "kind": "Other",
               "comment": "legacy sampling"
             }
           ]

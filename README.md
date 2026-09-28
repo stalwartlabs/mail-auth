@@ -72,7 +72,7 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
 ```rust
     // Sign a message with both RSA-SHA256 and Ed25519-SHA256 under different
     // selectors (algorithmic dexterity).
-    let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+    let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap()).unwrap();
     let pk_ed = Ed25519Key::from_pkcs8_der(&ED25519_PKCS8).unwrap();
 
     let signed = Dkim2Signer::from_key(pk_rsa)
@@ -81,10 +81,7 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
         .additional_key(pk_ed, "ed-sel")
         .sign(
             RFC5322_MESSAGE.as_bytes(),
-            &Hop::Real(Envelope {
-                mail_from: "sender@example.com",
-                rcpt_to: &["recipient@example.org"],
-            }),
+            Hop::real("sender@example.com", ["recipient@example.org"]),
         )
         .unwrap();
 
@@ -102,14 +99,11 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
     let authenticated_message = AuthenticatedMessage::parse(RFC5322_MESSAGE.as_bytes()).unwrap();
 
     // DKIM2 binds the SMTP envelope, so verification needs the MAIL FROM and RCPT TO
-    let envelope = Envelope {
-        mail_from: "sender@example.com",
-        rcpt_to: &["recipient@example.org"],
-    };
+    let envelope = Envelope::new("sender@example.com", ["recipient@example.org"]);
 
     // Validate the DKIM2 signature chain
     let result = authenticator
-        .verify_dkim2(&authenticated_message, &envelope)
+        .verify_dkim2(&authenticated_message, envelope)
         .await;
 
     // Make sure the chain passed verification
@@ -136,7 +130,7 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
 
 ```rust
     // Sign an e-mail message using RSA-SHA256
-    let pk_rsa =  RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
+    let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap()).unwrap();
     let signature_rsa = DkimSigner::from_key(pk_rsa)
         .domain("example.com")
         .selector("default")
@@ -145,9 +139,9 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
         .unwrap();
 
     // Sign an e-mail message using ED25519-SHA256
-    let pk_ed = Ed25519Key::from_bytes(
-        &base64::LENIENT.decode(ED25519_PUBLIC_KEY).unwrap(),
+    let pk_ed = Ed25519Key::from_seed_and_public_key(
         &base64::LENIENT.decode(ED25519_PRIVATE_KEY).unwrap(),
+        &base64::LENIENT.decode(ED25519_PUBLIC_KEY).unwrap(),
     )
     .unwrap();
     let signature_ed = DkimSigner::from_key(pk_ed)
@@ -155,7 +149,7 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
         .selector("default-ed")
         .headers(["From", "To", "Subject"])
         .sign(RFC5322_MESSAGE.as_bytes())
-        .unwrap();    
+        .unwrap();
 
     // Print the message including both signatures to stdout
     println!(
@@ -174,7 +168,7 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
 
     // Verify HELO identity
     let result = authenticator
-        .verify_spf(SpfParameters::verify_ehlo(
+        .verify_spf(SpfParameters::helo(
             "127.0.0.1".parse().unwrap(),
             "gmail.com",
             "my-local-domain.org",
@@ -184,7 +178,7 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
 
     // Verify MAIL-FROM identity
     let result = authenticator
-        .verify_spf(SpfParameters::verify_mail_from(
+        .verify_spf(SpfParameters::mail_from(
             "::1".parse().unwrap(),
             "gmail.com",
             "my-local-domain.org",
@@ -206,7 +200,7 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
 
     // Verify SPF MAIL-FROM identity
     let spf_result = authenticator
-        .verify_spf(SpfParameters::verify_mail_from(
+        .verify_spf(SpfParameters::mail_from(
             "::1".parse().unwrap(),
             "example.org",
             "my-host-domain.org",
@@ -225,9 +219,56 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
         .await;
     assert_eq!(dmarc_result.dkim_result(), &DmarcResult::Pass);
     assert_eq!(dmarc_result.spf_result(), &DmarcResult::Pass);
+
+    // Build the Authentication-Results and Received-SPF headers
+    let spf_params = SpfParameters::mail_from(
+        "::1".parse().unwrap(),
+        "example.org",
+        "my-host-domain.org",
+        "sender@example.org",
+    );
+    let auth_results = AuthenticationResults::new("my-host-domain.org")
+        .with_dkim_results(&dkim_result, authenticated_message.first_from_address())
+        .with_spf_result(&spf_result, &spf_params)
+        .with_dmarc_result(&dmarc_result);
+    let received_spf = ReceivedSpf::new(&spf_result, &spf_params);
 ```
 
-More examples available under the [examples](examples) directory.
+### DNS Caching
+
+Every verifier accepts either its input alone or a `Parameters` value that also
+carries a DNS cache. Implement `DnsCache` once on the type that owns your
+per-record-type caches:
+
+```rust
+    struct Caches {
+        txt: MyCache<Box<str>, TxtRecord>,
+        mx: MyCache<Box<str>, RecordSet<Mx>>,
+        ipv4: MyCache<Box<str>, RecordSet<Ipv4Addr>>,
+        ipv6: MyCache<Box<str>, RecordSet<Ipv6Addr>>,
+        ptr: MyCache<IpAddr, RecordSet<Box<str>>>,
+    }
+
+    impl DnsCache for Caches {
+        type Txt = MyCache<Box<str>, TxtRecord>;
+        type Mx = MyCache<Box<str>, RecordSet<Mx>>;
+        type Ipv4 = MyCache<Box<str>, RecordSet<Ipv4Addr>>;
+        type Ipv6 = MyCache<Box<str>, RecordSet<Ipv6Addr>>;
+        type Ptr = MyCache<IpAddr, RecordSet<Box<str>>>;
+
+        fn txt(&self) -> Option<&Self::Txt> { Some(&self.txt) }
+        fn mx(&self) -> Option<&Self::Mx> { Some(&self.mx) }
+        fn ipv4(&self) -> Option<&Self::Ipv4> { Some(&self.ipv4) }
+        fn ipv6(&self) -> Option<&Self::Ipv6> { Some(&self.ipv6) }
+        fn ptr(&self) -> Option<&Self::Ptr> { Some(&self.ptr) }
+    }
+
+    let result = authenticator
+        .verify_dkim(Parameters::new(&authenticated_message).with_cache(&caches))
+        .await;
+```
+
+More examples available under the [examples](https://github.com/stalwartlabs/mail-auth/tree/main/examples) directory.
 
 ### ARC Chain Verification
 
@@ -244,7 +285,7 @@ ARC has been [reclassified as Historic](https://datatracker.ietf.org/doc/draft-i
     let result = authenticator.verify_arc(&authenticated_message).await;
 
     // Make sure ARC passed verification
-    assert_eq!(result.result(), &DkimResult::Pass);
+    assert_eq!(result.result(), &ArcResult::Pass);
 ```
 
 ### ARC Chain Sealing
@@ -262,14 +303,14 @@ ARC has been [reclassified as Historic](https://datatracker.ietf.org/doc/draft-i
 
     // Build Authenticated-Results header
     let auth_results = AuthenticationResults::new("mx.mydomain.org")
-        .with_dkim_result(&dkim_result, "sender@example.org")
+        .with_dkim_results(&dkim_result, "sender@example.org")
         .with_arc_result(&arc_result, "127.0.0.1".parse().unwrap());
 
     // Seal message
     if arc_result.can_be_sealed() {
         // Seal the e-mail message using RSA-SHA256
-        let pk_rsa = RsaKey::<Sha256>::from_pkcs1_pem(RSA_PRIVATE_KEY).unwrap();
-        let arc_set = ArcSealer::from_key(pk_rsa)
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap()).unwrap();
+        let sealed_set = ArcSealer::from_key(pk_rsa)
             .domain("example.org")
             .selector("default")
             .headers(["From", "To", "Subject", "DKIM-Signature"])
@@ -277,7 +318,7 @@ ARC has been [reclassified as Historic](https://datatracker.ietf.org/doc/draft-i
             .unwrap();
 
         // Print the sealed message to stdout
-        println!("{}{}", arc_set.to_header(), RFC5322_MESSAGE)
+        println!("{}{}", sealed_set.to_header(), RFC5322_MESSAGE)
     } else {
         eprintln!("The message could not be sealed, probably an ARC chain with cv=fail was found.")
     }
@@ -342,8 +383,8 @@ To fuzz the library with `cargo-fuzz`:
 
 Licensed under either of
 
- * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
- * MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+ * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+ * MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
 
 at your option.
 

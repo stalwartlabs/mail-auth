@@ -13,12 +13,12 @@
 */
 
 use crate::{load_key, normalize_eol};
+use encodify::base64;
 use mail_auth::{
-    common::headers::HeaderWriter,
     dkim::DkimSigner,
     dkim2::{BodyRecipe, Dkim2Signed, Dkim2Signer, Hop, MessageInstance, Recipe, Step},
+    headers::HeaderWriter,
 };
-use encodify::base64;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 

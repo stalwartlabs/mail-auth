@@ -1,5 +1,5 @@
 {
-  "version": 2.0,
+  "version": null,
   "report_metadata": {
     "org_name": "Sample Reporter",
     "email": "report_sender@example-reporter.com",
@@ -9,19 +9,22 @@
       "begin": 161212415,
       "end": 161221511
     },
-    "error": []
+    "errors": [],
+    "generator": null
   },
   "policy_published": {
     "domain": "example.com",
     "version_published": null,
-    "adkim": "Unspecified",
-    "aspf": "Unspecified",
+    "adkim": null,
+    "aspf": null,
     "p": "Quarantine",
     "sp": "None",
+    "np": "Unspecified",
     "testing": false,
+    "discovery_method": "Unspecified",
     "fo": null
   },
-  "record": [
+  "records": [
     {
       "row": {
         "source_ip": "192.168.4.4",

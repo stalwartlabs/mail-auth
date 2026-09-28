@@ -11,8 +11,8 @@
 //! ```
 
 use mail_auth::{
-    AuthenticatedMessage, DkimOutput, DmarcResult, MessageAuthenticator, SpfOutput, SpfResult,
-    dkim::Signature, dmarc::verify::DmarcParameters,
+    AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, MessageAuthenticator, SpfOutput,
+    SpfResult, dkim::Signature, dmarc::verify::DmarcParameters,
 };
 
 async fn discover(from: &str) -> mail_auth::DmarcOutput {
@@ -28,10 +28,9 @@ async fn discover(from: &str) -> mail_auth::DmarcOutput {
 #[tokio::test]
 #[ignore = "requires live DNS"]
 async fn live_policy_at_author_domain() {
-    // google.com publishes a DMARC record directly at "_dmarc.google.com".
     let result = discover("google.com").await;
     assert!(
-        result.dmarc_record().is_some(),
+        result.record().is_some(),
         "expected a DMARC record for google.com, got {result:?}"
     );
 }
@@ -48,7 +47,7 @@ async fn live_dmarc_pass_with_alignment() {
             s: "selector".to_string(),
             ..Default::default()
         };
-        let dkim = DkimOutput::pass().with_signature(&signature);
+        let dkim = DkimOutput::from(DkimResult::Pass).with_signature(&signature);
         let spf = SpfOutput::new(domain.to_string()).with_result(SpfResult::Pass);
 
         let result = authenticator
@@ -67,7 +66,7 @@ async fn live_dmarc_pass_with_alignment() {
             result.spf_result()
         );
         assert!(
-            result.dmarc_record().is_some(),
+            result.record().is_some(),
             "{domain}: expected a DMARC record"
         );
         assert_eq!(
@@ -88,7 +87,7 @@ async fn live_dmarc_pass_with_alignment() {
 async fn live_tree_walk_climbs_to_org_domain() {
     let result = discover("this-subdomain-does-not-exist.google.com").await;
     assert!(
-        result.dmarc_record().is_some(),
+        result.record().is_some(),
         "expected the tree walk to discover google.com's policy, got {result:?}"
     );
 }

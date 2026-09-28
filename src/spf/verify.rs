@@ -4,16 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{Macro, Mechanism, Qualifier, Spf, Variables};
+use super::{Macro, Mechanism, Qualifier, SpfIdentity, SpfRecord, Variables};
 use crate::DnsError;
 use crate::Instant;
+use crate::dns::{DnsCache, has_valid_labels};
 use crate::{
-    Error, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult,
-    Txt, common::cache::NoCache,
+    Error, MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult,
+    dns::cache::NoCache,
 };
 use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+/// Input of an SPF check: the client IP, the identity to check and the
+/// values used for macro expansion.
+///
+/// Built with [`SpfParameters::helo`], [`SpfParameters::mail_from`],
+/// [`SpfParameters::helo_and_mail_from`] or [`SpfParameters::new`], and
+/// passed to [`MessageAuthenticator::verify_spf`] or
+/// [`MessageAuthenticator::check_host`], optionally wrapped in [`Parameters`]
+/// to supply a DNS cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpfParameters<'x> {
     ip: IpAddr,
     domain: &'x str,
@@ -22,43 +32,74 @@ pub struct SpfParameters<'x> {
     sender: Sender<'x>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Sender<'x> {
-    Ehlo(String),
+    Helo,
     MailFrom(&'x str),
     Full(&'x str),
 }
 
 #[allow(clippy::iter_skip_zero)]
 impl MessageAuthenticator {
-    /// Verifies the SPF record of a domain
-    pub async fn verify_spf<'x, TXT, MXX, IPV4, IPV6, PTR>(
+    /// Verifies the SPF identities of an SMTP session (RFC 7208).
+    ///
+    /// With parameters built by [`SpfParameters::helo_and_mail_from`] (or
+    /// [`SpfParameters::new`]), the HELO identity is checked first. Its output
+    /// is returned when the result is `fail` or the sender is empty;
+    /// otherwise the MAIL FROM identity is checked and its output returned.
+    /// With parameters built by [`SpfParameters::helo`] or
+    /// [`SpfParameters::mail_from`], a single [`check_host`] is run for that
+    /// identity.
+    ///
+    /// The DNS lookups performed are those of [`check_host`], once per
+    /// identity checked. See [`SpfResult`] for the meaning of each result.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{MessageAuthenticator, SpfResult, spf::verify::SpfParameters};
+    ///
+    /// # async fn run(authenticator: &MessageAuthenticator) {
+    /// let output = authenticator
+    ///     .verify_spf(SpfParameters::helo_and_mail_from(
+    ///         "192.0.2.1".parse().unwrap(),
+    ///         "mx.example.org",
+    ///         "mx.my-host.org",
+    ///         "sender@example.org",
+    ///     ))
+    ///     .await;
+    ///
+    /// if output.result() == SpfResult::Fail {
+    ///     println!("rejected: {:?}", output.explanation());
+    /// }
+    /// # }
+    /// ```
+    ///
+    /// [`check_host`]: MessageAuthenticator::check_host
+    pub async fn verify_spf<'x, C>(
         &self,
-        params: impl Into<Parameters<'x, SpfParameters<'x>, TXT, MXX, IPV4, IPV6, PTR>>,
+        params: impl Into<Parameters<'x, SpfParameters<'x>, C>>,
     ) -> SpfOutput
     where
-        TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
-        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
-        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
-        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
+        C: DnsCache + 'x,
     {
         let params = params.into();
-        match &params.params.sender {
+        match &params.input.sender {
             Sender::Full(sender) => {
                 let helo_output = self
-                    .check_host(params.clone_with(SpfParameters::verify_ehlo(
-                        params.params.ip,
-                        params.params.helo_domain,
-                        params.params.host_domain,
+                    .check_host(params.clone_with(SpfParameters::helo(
+                        params.input.ip,
+                        params.input.helo_domain,
+                        params.input.host_domain,
                     )))
                     .await;
                 if sender.is_empty() || helo_output.result() == SpfResult::Fail {
                     helo_output
                 } else {
-                    self.check_host(params.clone_with(SpfParameters::verify_mail_from(
-                        params.params.ip,
-                        params.params.helo_domain,
-                        params.params.host_domain,
+                    self.check_host(params.clone_with(SpfParameters::mail_from(
+                        params.input.ip,
+                        params.input.helo_domain,
+                        params.input.host_domain,
                         sender,
                     )))
                     .await
@@ -68,47 +109,97 @@ impl MessageAuthenticator {
         }
     }
 
+    /// Runs the `check_host()` function (RFC 7208, Section 4) for a single
+    /// identity.
+    ///
+    /// Evaluates the SPF record of the parameters' domain against the client
+    /// IP. The DNS lookups performed are:
+    ///
+    /// - TXT for the `v=spf1` record of the domain, and of every `include:`
+    ///   and `redirect=` target.
+    /// - A or AAAA (depending on the client IP family) for the `a`, `mx`,
+    ///   `ptr` and `exists` mechanisms.
+    /// - MX for the `mx` mechanism.
+    /// - PTR for the `ptr` mechanism and the `p` macro.
+    /// - TXT for the `exp=` explanation, only on a `fail` result.
+    ///
+    /// The number of DNS-querying mechanisms and modifiers is limited to 10
+    /// and the whole evaluation to 20 seconds; an `mx` mechanism may resolve
+    /// at most 10 exchanges. Exceeding a limit yields `permerror`.
+    ///
+    /// The returned [`SpfOutput`] holds one of:
+    ///
+    /// - [`SpfResult::None`]: the domain is not a valid name or publishes no
+    ///   SPF record.
+    /// - [`SpfResult::Pass`], [`SpfResult::Fail`], [`SpfResult::SoftFail`] or
+    ///   [`SpfResult::Neutral`]: the qualifier of the first matching
+    ///   directive, or `neutral` when none matches.
+    /// - [`SpfResult::TempError`]: a DNS lookup failed transiently.
+    /// - [`SpfResult::PermError`]: a record could not be parsed, an
+    ///   `include:` or `redirect=` target has no record, or a limit was
+    ///   exceeded.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{MessageAuthenticator, spf::verify::SpfParameters};
+    ///
+    /// # async fn run(authenticator: &MessageAuthenticator) {
+    /// let output = authenticator
+    ///     .check_host(SpfParameters::new(
+    ///         "192.0.2.1".parse().unwrap(),
+    ///         "example.org",
+    ///         "mx.example.org",
+    ///         "mx.my-host.org",
+    ///         "sender@example.org",
+    ///     ))
+    ///     .await;
+    /// println!("spf={} domain={}", output.result(), output.domain());
+    /// # }
+    /// ```
     #[allow(clippy::while_let_on_iterator)]
     #[allow(clippy::iter_skip_zero)]
-    pub async fn check_host<'x, TXT, MXX, IPV4, IPV6, PTR>(
+    pub async fn check_host<'x, C>(
         &self,
-        params: Parameters<'x, SpfParameters<'x>, TXT, MXX, IPV4, IPV6, PTR>,
+        params: impl Into<Parameters<'x, SpfParameters<'x>, C>>,
     ) -> SpfOutput
     where
-        TXT: ResolverCache<Box<str>, Txt>,
-        MXX: ResolverCache<Box<str>, RecordSet<MX>>,
-        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>>,
-        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>>,
-        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>>,
+        C: DnsCache + 'x,
     {
-        let domain = params.params.domain;
-        let ip = params.params.ip;
-        let helo_domain = params.params.helo_domain;
-        let host_domain = params.params.host_domain;
-        let sender = match &params.params.sender {
-            Sender::Ehlo(sender) => sender.as_str(),
-            Sender::MailFrom(sender) => sender,
-            Sender::Full(sender) => sender,
+        let params = params.into();
+        let domain = params.input.domain;
+        let ip = params.input.ip;
+        let helo_domain = params.input.helo_domain;
+        let host_domain = params.input.host_domain;
+        let (sender, identity) = match &params.input.sender {
+            Sender::Helo => ("", SpfIdentity::Helo),
+            Sender::MailFrom(sender) | Sender::Full(sender) => (*sender, SpfIdentity::MailFrom),
         };
 
-        let output = SpfOutput::new(domain.to_string());
-        if domain.is_empty() || domain.len() > 255 || !domain.has_valid_labels() {
+        let output = SpfOutput::new(domain.to_string()).with_identity(identity);
+        if domain.is_empty() || domain.len() > 255 || !has_valid_labels(domain) {
             return output.with_result(SpfResult::None);
         }
+        let postmaster;
+        let sender = if sender.is_empty() {
+            postmaster = postmaster_at(domain);
+            postmaster.as_str()
+        } else {
+            sender
+        };
         let mut vars = Variables::new();
         let mut has_p_var = false;
         vars.set_ip(&ip);
-        if !sender.is_empty() {
-            vars.set_sender(sender.as_bytes());
-        } else {
-            vars.set_sender(postmaster_at(domain).into_bytes());
-        }
+        vars.set_sender(sender.as_bytes());
         vars.set_domain(domain.as_bytes());
         vars.set_host_domain(host_domain.as_bytes());
         vars.set_helo_domain(helo_domain.as_bytes());
 
         let mut lookup_limit = LookupLimit::new();
-        let mut spf_record = match self.txt_lookup::<Spf>(domain, params.cache_txt).await {
+        let mut spf_record = match self
+            .txt_lookup::<SpfRecord>(domain, params.txt_cache())
+            .await
+        {
             Ok(spf_record) => spf_record,
             Err(err) => return output.with_result(err.into()),
         };
@@ -128,10 +219,10 @@ impl MessageAuthenticator {
                             .with_report(&spf_record);
                     }
                     if let Some(ptr) = self
-                        .ptr_lookup(ip, params.cache_ptr)
+                        .ptr_lookup(ip, params.ptr_cache())
                         .await
                         .ok()
-                        .and_then(|ptrs| ptrs.rrset.first().map(|ptr| ptr.as_bytes().to_vec()))
+                        .and_then(|ptrs| ptrs.records.first().map(|ptr| ptr.as_bytes().to_vec()))
                     {
                         vars.set_validated_domain(ptr);
                     }
@@ -158,8 +249,8 @@ impl MessageAuthenticator {
                                 ip,
                                 *ip4_mask,
                                 *ip6_mask,
-                                params.cache_ipv4,
-                                params.cache_ipv6,
+                                params.ipv4_cache(),
+                                params.ipv6_cache(),
                             )
                             .await
                         {
@@ -185,12 +276,12 @@ impl MessageAuthenticator {
 
                         let mut matches = false;
                         match self
-                            .mx_lookup(&*macro_string.eval(&vars, &domain, true), params.cache_mx)
+                            .mx_lookup(&*macro_string.eval(&vars, &domain, true), params.mx_cache())
                             .await
                         {
                             Ok(records) => {
                                 for (mx_num, exchange) in records
-                                    .rrset
+                                    .records
                                     .iter()
                                     .flat_map(|mx| mx.exchanges.iter())
                                     .enumerate()
@@ -207,8 +298,8 @@ impl MessageAuthenticator {
                                             ip,
                                             *ip4_mask,
                                             *ip6_mask,
-                                            params.cache_ipv4,
-                                            params.cache_ipv6,
+                                            params.ipv4_cache(),
+                                            params.ipv6_cache(),
                                         )
                                         .await
                                     {
@@ -244,7 +335,7 @@ impl MessageAuthenticator {
 
                         let target_name = macro_string.eval(&vars, &domain, true);
                         let included = self
-                            .txt_lookup::<Spf>(&*target_name, params.cache_txt)
+                            .txt_lookup::<SpfRecord>(&*target_name, params.txt_cache())
                             .await;
                         match included {
                             Ok(included_spf) => {
@@ -262,7 +353,7 @@ impl MessageAuthenticator {
                             Err(
                                 Error::Dns(DnsError::RecordNotFound(_))
                                 | Error::Dns(DnsError::InvalidRecordType)
-                                | Error::ParseError,
+                                | Error::Parse,
                             ) => {
                                 return output
                                     .with_result(SpfResult::PermError)
@@ -287,8 +378,8 @@ impl MessageAuthenticator {
                         let target_addr = target_addr.as_ref();
                         let mut matches = false;
 
-                        if let Ok(records) = self.ptr_lookup(ip, params.cache_ptr).await {
-                            for record in records.rrset.iter() {
+                        if let Ok(records) = self.ptr_lookup(ip, params.ptr_cache()).await {
+                            for record in records.records.iter() {
                                 if lookup_limit.can_lookup()
                                     && let Ok(true) = self
                                         .ip_matches(
@@ -296,8 +387,8 @@ impl MessageAuthenticator {
                                             ip,
                                             u32::MAX,
                                             u128::MAX,
-                                            params.cache_ipv4,
-                                            params.cache_ipv6,
+                                            params.ipv4_cache(),
+                                            params.ipv6_cache(),
                                         )
                                         .await
                                 {
@@ -325,8 +416,8 @@ impl MessageAuthenticator {
                         if let Ok(result) = self
                             .exists(
                                 &*macro_string.eval(&vars, &domain, true),
-                                params.cache_ipv4,
-                                params.cache_ipv6,
+                                params.ipv4_cache(),
+                                params.ipv6_cache(),
                             )
                             .await
                         {
@@ -345,7 +436,6 @@ impl MessageAuthenticator {
                 }
             }
 
-            // Follow redirect
             if let (Some(macro_string), None) = (&spf_record.redirect, &result) {
                 if !lookup_limit.can_lookup() {
                     return output
@@ -355,7 +445,7 @@ impl MessageAuthenticator {
 
                 let target_name = macro_string.eval(&vars, &domain, true);
                 let redirect = self
-                    .txt_lookup::<Spf>(&*target_name, params.cache_txt)
+                    .txt_lookup::<SpfRecord>(&*target_name, params.txt_cache())
                     .await;
                 match redirect {
                     Ok(redirect_spf) => {
@@ -369,7 +459,7 @@ impl MessageAuthenticator {
                     Err(
                         Error::Dns(DnsError::RecordNotFound(_))
                         | Error::Dns(DnsError::InvalidRecordType)
-                        | Error::ParseError,
+                        | Error::Parse,
                     ) => {
                         return output
                             .with_result(SpfResult::PermError)
@@ -403,10 +493,9 @@ impl MessageAuthenticator {
             }
         }
 
-        // Evaluate explain
         if let (Some(macro_string), Some(SpfResult::Fail)) = (&spf_record.exp, &result)
             && let Ok(macro_string) = self
-                .txt_lookup::<Macro>(macro_string.eval(&vars, &domain, true), params.cache_txt)
+                .txt_lookup::<Macro>(macro_string.eval(&vars, &domain, true), params.txt_cache())
                 .await
         {
             return output
@@ -433,13 +522,13 @@ impl MessageAuthenticator {
             IpAddr::V4(ip) => self
                 .ipv4_lookup(target_name, cache_ipv4)
                 .await?
-                .rrset
+                .records
                 .iter()
                 .any(|addr| ip.matches_ipv4_mask(addr, ip4_mask)),
             IpAddr::V6(ip) => self
                 .ipv6_lookup(target_name, cache_ipv6)
                 .await?
-                .rrset
+                .records
                 .iter()
                 .any(|addr| ip.matches_ipv6_mask(addr, ip6_mask)),
         })
@@ -467,23 +556,28 @@ fn to_lowercase(value: &str) -> Cow<'_, str> {
 }
 
 impl<'x> SpfParameters<'x> {
-    /// Verifies the SPF EHLO identity
-    pub fn verify_ehlo(
-        ip: IpAddr,
-        helo_domain: &'x str,
-        host_domain: &'x str,
-    ) -> SpfParameters<'x> {
+    /// Checks the HELO identity (RFC 7208, Section 2.3).
+    ///
+    /// The SPF record of `helo_domain` is evaluated with `<sender>` set to
+    /// `postmaster@<helo_domain>`. `host_domain` is the name of the host
+    /// performing the check (the `r` macro).
+    pub fn helo(ip: IpAddr, helo_domain: &'x str, host_domain: &'x str) -> SpfParameters<'x> {
         SpfParameters {
             ip,
             domain: helo_domain,
             helo_domain,
             host_domain,
-            sender: Sender::Ehlo(postmaster_at(helo_domain)),
+            sender: Sender::Helo,
         }
     }
 
-    /// Verifies the SPF MAIL FROM identity
-    pub fn verify_mail_from(
+    /// Checks the MAIL FROM identity (RFC 7208, Section 2.4).
+    ///
+    /// The SPF record of the domain of `sender` is evaluated; when `sender`
+    /// has no `@`, `helo_domain` is used instead. An empty `sender` (null
+    /// reverse-path) is replaced by `postmaster@<domain>`. `host_domain` is
+    /// the name of the host performing the check (the `r` macro).
+    pub fn mail_from(
         ip: IpAddr,
         helo_domain: &'x str,
         host_domain: &'x str,
@@ -498,8 +592,13 @@ impl<'x> SpfParameters<'x> {
         }
     }
 
-    /// Verifies both the SPF EHLO and MAIL FROM identities
-    pub fn verify(
+    /// Checks the HELO identity and then, unless it fails, the MAIL FROM
+    /// identity.
+    ///
+    /// Only [`MessageAuthenticator::verify_spf`] runs both checks; given to
+    /// [`MessageAuthenticator::check_host`], these parameters check the MAIL
+    /// FROM identity alone. Arguments are those of [`SpfParameters::mail_from`].
+    pub fn helo_and_mail_from(
         ip: IpAddr,
         helo_domain: &'x str,
         host_domain: &'x str,
@@ -514,6 +613,17 @@ impl<'x> SpfParameters<'x> {
         }
     }
 
+    /// Parameters for [`MessageAuthenticator::check_host`].
+    ///
+    /// - `ip`: the SMTP client IP address (`<ip>`).
+    /// - `domain`: the domain whose SPF record is evaluated (`<domain>`).
+    /// - `helo_domain`: the domain given in the HELO or EHLO command.
+    /// - `host_domain`: the name of the host performing the check (the `r` macro).
+    /// - `sender`: the MAIL FROM address (`<sender>`); an empty string is
+    ///   replaced by `postmaster@<domain>`.
+    ///
+    /// Given to [`MessageAuthenticator::verify_spf`], these parameters behave
+    /// like [`SpfParameters::helo_and_mail_from`] and `domain` is ignored.
     pub fn new(
         ip: IpAddr,
         domain: &'x str,
@@ -529,19 +639,28 @@ impl<'x> SpfParameters<'x> {
             sender: Sender::Full(sender),
         }
     }
+
+    pub(crate) fn ip(&self) -> IpAddr {
+        self.ip
+    }
+
+    pub(crate) fn helo_domain(&self) -> &'x str {
+        self.helo_domain
+    }
+
+    pub(crate) fn host_domain(&self) -> &'x str {
+        self.host_domain
+    }
+
+    pub(crate) fn mail_from_address(&self) -> Option<&'x str> {
+        match self.sender {
+            Sender::Helo => None,
+            Sender::MailFrom(sender) | Sender::Full(sender) => Some(sender),
+        }
+    }
 }
 
-impl<'x> From<SpfParameters<'x>>
-    for Parameters<
-        'x,
-        SpfParameters<'x>,
-        NoCache<Box<str>, Txt>,
-        NoCache<Box<str>, RecordSet<MX>>,
-        NoCache<Box<str>, RecordSet<Ipv4Addr>>,
-        NoCache<Box<str>, RecordSet<Ipv6Addr>>,
-        NoCache<IpAddr, RecordSet<Box<str>>>,
-    >
-{
+impl<'x> From<SpfParameters<'x>> for Parameters<'x, SpfParameters<'x>, NoCache> {
     fn from(params: SpfParameters<'x>) -> Self {
         Parameters::new(params)
     }
@@ -613,7 +732,7 @@ impl From<Error> for SpfResult {
             Error::Dns(DnsError::RecordNotFound(_)) | Error::Dns(DnsError::InvalidRecordType) => {
                 SpfResult::None
             }
-            Error::ParseError => SpfResult::PermError,
+            Error::Parse => SpfResult::PermError,
             _ => SpfResult::TempError,
         }
     }
@@ -643,36 +762,6 @@ impl LookupLimit {
     }
 }
 
-pub trait HasValidLabels {
-    fn has_valid_labels(&self) -> bool;
-}
-
-impl HasValidLabels for &str {
-    fn has_valid_labels(&self) -> bool {
-        let mut has_dots = false;
-        let mut has_chars = false;
-        let mut label_len = 0;
-        for ch in self.chars() {
-            label_len += 1;
-
-            if ch.is_alphanumeric() {
-                has_chars = true;
-            } else if ch == '.' {
-                has_dots = true;
-                label_len = 0;
-            }
-
-            if label_len > 63 {
-                return false;
-            }
-        }
-        if has_chars && has_dots {
-            return true;
-        }
-        false
-    }
-}
-
 #[cfg(test)]
 #[allow(unused)]
 mod test {
@@ -685,9 +774,10 @@ mod test {
     };
 
     use crate::{
-        MX, MessageAuthenticator, SpfResult,
-        common::{cache::test::DummyCaches, parse::TxtRecordParser},
-        spf::{Macro, Spf},
+        MessageAuthenticator, Mx, SpfResult,
+        dns::cache::test::DummyCaches,
+        parse::TxtRecordParser,
+        spf::{Macro, SpfRecord},
     };
 
     use super::SpfParameters;
@@ -728,7 +818,7 @@ mod test {
                         let (name, record) = record.trim().split_once(' ').unwrap();
                         caches.txt_add(
                             name.trim().to_string(),
-                            Spf::parse(record.as_bytes()),
+                            SpfRecord::parse(record.as_bytes()),
                             valid_until,
                         );
                     } else if let Some(record) = line.strip_prefix("exp:") {
@@ -782,7 +872,7 @@ mod test {
                                     caches.ipv6_add(mx_name.clone(), vec![ip], valid_until)
                                 }
                             }
-                            mxs.push(MX {
+                            mxs.push(Mx {
                                 exchanges: Box::new([mx_name.into_boxed_str()]),
                                 preference: (pos + 1) as u16,
                             });
@@ -798,12 +888,12 @@ mod test {
                         let value = value.trim();
                         let (result, exp): (SpfResult, &str) =
                             if let Some((result, exp)) = value.split_once(' ') {
-                                (result.trim().try_into().unwrap(), exp.trim())
+                                (result.trim().parse::<SpfResult>().unwrap(), exp.trim())
                             } else {
-                                (value.try_into().unwrap(), "")
+                                (value.parse::<SpfResult>().unwrap(), "")
                             };
                         let output = resolver
-                            .verify_spf(caches.parameters(SpfParameters::verify(
+                            .verify_spf(caches.parameters(SpfParameters::helo_and_mail_from(
                                 client_ip,
                                 helo,
                                 "localdomain.org",

@@ -4,12 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! Serialization of a DKIM1 [`Signature`] as a `DKIM-Signature` header.
+
 use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
-use crate::common::headers::{HEADER_CAPACITY, HeaderWriter, IntegerBuffer, Writer};
+use crate::{
+    headers::{HEADER_CAPACITY, HeaderWriter, IntegerBuffer, Writer},
+    utf8::to_str_lossy,
+};
 use encodify::{Fold, base64, qp};
 use std::fmt::{Display, Formatter};
 
 impl Signature {
+    /// Writes the signature as a `DKIM-Signature` header.
+    ///
+    /// With `as_header` set, writes `DKIM-Signature: <tags>;\r\n`, folded
+    /// with `\r\n\t`, ready to prepend to a message; this is what
+    /// [`HeaderWriter::write_header`] does. With `as_header` unset, writes the
+    /// form hashed during signing: no trailing CRLF and, under relaxed header
+    /// canonicalization, a lowercase `dkim-signature:` name folded with
+    /// single spaces. Tags with default values (`i=`, `t=`, `x=`, `l=`,
+    /// `r=`, `atps=`) are omitted.
     pub fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"dkim-signature:"[..], &b" "[..]),
@@ -121,6 +135,6 @@ impl Display for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::with_capacity(HEADER_CAPACITY);
         self.write(&mut buf, false);
-        f.write_str(&String::from_utf8_lossy(&buf))
+        f.write_str(&to_str_lossy(&buf))
     }
 }

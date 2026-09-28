@@ -9,7 +9,8 @@
       "begin": 1666483200,
       "end": 1666569600
     },
-    "error": []
+    "errors": [],
+    "generator": null
   },
   "policy_published": {
     "domain": "stalw.art",
@@ -18,10 +19,12 @@
     "aspf": "Relaxed",
     "p": "None",
     "sp": "None",
+    "np": "Unspecified",
     "testing": false,
+    "discovery_method": "Unspecified",
     "fo": "0"
   },
-  "record": [
+  "records": [
     {
       "row": {
         "source_ip": "50.223.129.194",

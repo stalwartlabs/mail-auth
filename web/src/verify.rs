@@ -108,7 +108,7 @@ pub async fn verify(opts: JsValue) -> Result<JsValue, String> {
         (true, Some(ip)) => Some(
             resolver
                 .verify_spf(params(
-                    SpfParameters::verify_mail_from(ip, &opts.ehlo, host_domain, &opts.mail_from),
+                    SpfParameters::mail_from(ip, &opts.ehlo, host_domain, &opts.mail_from),
                     &cache,
                 ))
                 .await,
@@ -159,16 +159,8 @@ pub async fn verify(opts: JsValue) -> Result<JsValue, String> {
     serde_wasm_bindgen::to_value(&results).map_err(|err| err.to_string())
 }
 
-type FullCache<'x, P> =
-    Parameters<'x, P, OfflineCache, OfflineCache, OfflineCache, OfflineCache, OfflineCache>;
-
-fn params<'x, P>(inner: P, cache: &'x OfflineCache) -> FullCache<'x, P> {
-    Parameters::new(inner)
-        .with_txt_cache(cache)
-        .with_mx_cache(cache)
-        .with_ipv4_cache(cache)
-        .with_ipv6_cache(cache)
-        .with_ptr_cache(cache)
+fn params<'x, P>(inner: P, cache: &'x OfflineCache) -> Parameters<'x, P, OfflineCache> {
+    Parameters::new(inner).with_cache(cache)
 }
 
 fn dkim_result_label(result: &DkimResult) -> (&'static str, String) {
@@ -218,8 +210,8 @@ fn dkim_check(outputs: &[DkimOutput]) -> CheckResult {
     CheckResult::new(status, lines.join("\n"))
 }
 
-fn algorithm_name(algorithm: mail_auth::common::crypto::Algorithm) -> &'static str {
-    use mail_auth::common::crypto::Algorithm;
+fn algorithm_name(algorithm: mail_auth::crypto::Algorithm) -> &'static str {
+    use mail_auth::crypto::Algorithm;
     match algorithm {
         Algorithm::RsaSha256 => "rsa-sha256",
         Algorithm::RsaSha1 => "rsa-sha1",
@@ -310,7 +302,7 @@ fn dmarc_check(output: &mail_auth::DmarcOutput) -> CheckResult {
     if !spf_err.is_empty() {
         detail.push_str(&format!(" ({spf_err})"));
     }
-    if output.dmarc_record().is_none() {
+    if output.record().is_none() {
         detail.push_str("\nNo DMARC record found for this domain");
     }
     if status == "FAIL" {

@@ -1,5 +1,5 @@
 {
-  "version": 0.0,
+  "version": null,
   "report_metadata": {
     "org_name": "google.com",
     "email": "noreply-dmarc-support@google.com",
@@ -9,7 +9,8 @@
       "begin": 1669507200,
       "end": 1669593599
     },
-    "error": []
+    "errors": [],
+    "generator": null
   },
   "policy_published": {
     "domain": "stalw.art",
@@ -18,10 +19,12 @@
     "aspf": "Relaxed",
     "p": "None",
     "sp": "None",
+    "np": "Unspecified",
     "testing": false,
+    "discovery_method": "Unspecified",
     "fo": null
   },
-  "record": [
+  "records": [
     {
       "row": {
         "source_ip": "2a01:4f9:c011:b43c::1",

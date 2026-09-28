@@ -4,16 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{Alignment, Dmarc, Policy, Psd, Report, URI};
+use super::{Alignment, DmarcRecord, FailureOptions, Policy, Psd, Uri};
 use crate::DnsError;
 use crate::{
-    Error, Version,
-    common::parse::{N, T, TagParser, TxtRecordParser, V, Y},
+    Error,
+    parse::{N, T, TagParser, TxtRecordParser, V, Y},
+    utf8::to_str_lossy,
 };
 use encodify::hex::decode_pair;
 use std::slice::Iter;
 
-impl TxtRecordParser for Dmarc {
+impl TxtRecordParser for DmarcRecord {
     fn parse(bytes: &[u8]) -> crate::Result<Self> {
         let mut record = bytes.iter();
         if record.key().unwrap_or(0) != V
@@ -23,16 +24,15 @@ impl TxtRecordParser for Dmarc {
             return Err(Error::Dns(DnsError::InvalidRecordType));
         }
 
-        let mut dmarc = Dmarc {
+        let mut dmarc = DmarcRecord {
             adkim: Alignment::Relaxed,
             aspf: Alignment::Relaxed,
-            fo: Report::All,
+            fo: FailureOptions::All,
             np: Policy::Unspecified,
             p: Policy::Unspecified,
             rua: vec![],
             ruf: vec![],
             sp: Policy::Unspecified,
-            v: Version::V1,
             psd: Psd::Default,
             t: false,
         };
@@ -92,9 +92,9 @@ impl TxtRecordParser for Dmarc {
 
 pub(crate) trait DMARCParser: Sized {
     fn alignment(&mut self) -> crate::Result<Alignment>;
-    fn report(&mut self) -> crate::Result<Report>;
+    fn report(&mut self) -> crate::Result<FailureOptions>;
     fn policy(&mut self) -> crate::Result<Policy>;
-    fn uris(&mut self) -> crate::Result<Vec<URI>>;
+    fn uris(&mut self) -> crate::Result<Vec<Uri>>;
 }
 
 impl DMARCParser for Iter<'_, u8> {
@@ -102,42 +102,42 @@ impl DMARCParser for Iter<'_, u8> {
         let a = match self.next_skip_whitespaces().unwrap_or(0) {
             b'r' | b'R' => Alignment::Relaxed,
             b's' | b'S' => Alignment::Strict,
-            _ => return Err(Error::ParseError),
+            _ => return Err(Error::Parse),
         };
         if self.seek_tag_end() {
             Ok(a)
         } else {
-            Err(Error::ParseError)
+            Err(Error::Parse)
         }
     }
 
-    fn report(&mut self) -> crate::Result<Report> {
-        let mut r = Report::All;
+    fn report(&mut self) -> crate::Result<FailureOptions> {
+        let mut r = FailureOptions::All;
 
         loop {
             r = match self.next_skip_whitespaces().unwrap_or(0) {
-                b'0' => Report::All,
-                b'1' => Report::Any,
+                b'0' => FailureOptions::All,
+                b'1' => FailureOptions::Any,
                 b'd' | b'D' => {
-                    if r == Report::Spf {
-                        Report::DkimSpf
+                    if r == FailureOptions::Spf {
+                        FailureOptions::DkimSpf
                     } else {
-                        Report::Dkim
+                        FailureOptions::Dkim
                     }
                 }
                 b's' | b'S' => {
-                    if r == Report::Dkim {
-                        Report::DkimSpf
+                    if r == FailureOptions::Dkim {
+                        FailureOptions::DkimSpf
                     } else {
-                        Report::Spf
+                        FailureOptions::Spf
                     }
                 }
-                _ => return Err(Error::ParseError),
+                _ => return Err(Error::Parse),
             };
             match self.next_skip_whitespaces().unwrap_or(0) {
                 b':' => (),
                 b';' | 0 => return Ok(r),
-                _ => return Err(Error::ParseError),
+                _ => return Err(Error::Parse),
             }
         }
     }
@@ -147,17 +147,17 @@ impl DMARCParser for Iter<'_, u8> {
             b'n' | b'N' if self.match_bytes(b"one") => Policy::None,
             b'q' | b'Q' if self.match_bytes(b"uarantine") => Policy::Quarantine,
             b'r' | b'R' if self.match_bytes(b"eject") => Policy::Reject,
-            _ => return Err(Error::ParseError),
+            _ => return Err(Error::Parse),
         };
         if self.seek_tag_end() {
             Ok(p)
         } else {
-            Err(Error::ParseError)
+            Err(Error::Parse)
         }
     }
 
     #[allow(clippy::while_let_on_iterator)]
-    fn uris(&mut self) -> crate::Result<Vec<URI>> {
+    fn uris(&mut self) -> crate::Result<Vec<Uri>> {
         let mut uris = Vec::new();
         let mut uri = Vec::with_capacity(16);
         let mut found_uri = false;
@@ -192,7 +192,7 @@ impl DMARCParser for Iter<'_, u8> {
                         } else if ch == b';' {
                             break 'outer;
                         } else if !ch.is_ascii_whitespace() {
-                            return Err(Error::ParseError);
+                            return Err(Error::Parse);
                         }
                     }
                 }
@@ -232,7 +232,7 @@ impl DMARCParser for Iter<'_, u8> {
                             b',' => {
                                 if !uri.is_empty() {
                                     if found_uri && found_at {
-                                        uris.push(URI {
+                                        uris.push(Uri {
                                             uri: lowercase_uri(&uri),
                                             max_size: size,
                                         });
@@ -246,7 +246,7 @@ impl DMARCParser for Iter<'_, u8> {
                             }
                             _ => {
                                 if !ch.is_ascii_whitespace() {
-                                    return Err(Error::ParseError);
+                                    return Err(Error::Parse);
                                 }
                             }
                         }
@@ -255,7 +255,7 @@ impl DMARCParser for Iter<'_, u8> {
                 b',' => {
                     if !uri.is_empty() {
                         if found_uri && found_at {
-                            uris.push(URI {
+                            uris.push(Uri {
                                 uri: lowercase_uri(&uri),
                                 max_size: size,
                             });
@@ -300,7 +300,7 @@ impl DMARCParser for Iter<'_, u8> {
         }
 
         if !uri.is_empty() && found_uri && found_at {
-            uris.push(URI {
+            uris.push(Uri {
                 uri: lowercase_uri(&uri),
                 max_size: size,
             })
@@ -327,7 +327,7 @@ const fn uri_stop_table(stop_colon: bool) -> [bool; 256] {
 }
 
 fn lowercase_uri(uri: &[u8]) -> String {
-    let mut value = String::from_utf8_lossy(uri).into_owned();
+    let mut value = to_str_lossy(uri).into_owned();
     if value.is_ascii() {
         value.make_ascii_lowercase();
         value
@@ -354,9 +354,8 @@ const PSD: u64 = (b'p' as u64) | ((b's' as u64) << 8) | ((b'd' as u64) << 16);
 #[cfg(test)]
 mod test {
     use crate::{
-        Version,
-        common::parse::TxtRecordParser,
-        dmarc::{Alignment, Dmarc, Policy, Psd, Report, URI},
+        dmarc::{Alignment, DmarcRecord, FailureOptions, Policy, Psd, Uri},
+        parse::TxtRecordParser,
     };
 
     #[test]
@@ -364,18 +363,17 @@ mod test {
         for (record, expected_result) in [
             (
                 "v=DMARC1; p=none; rua=mailto:dmarc-feedback@example.com",
-                Dmarc {
+                DmarcRecord {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
-                    fo: Report::All,
+                    fo: FailureOptions::All,
                     np: Policy::None,
                     p: Policy::None,
-                    rua: vec![URI::new("dmarc-feedback@example.com", 0)],
+                    rua: vec![Uri::new("dmarc-feedback@example.com", 0)],
                     ruf: vec![],
                     sp: Policy::None,
                     psd: Psd::Default,
                     t: false,
-                    v: Version::V1,
                 },
             ),
             (
@@ -383,18 +381,17 @@ mod test {
                     "v=DMARC1; p=none; rua=mailto:dmarc-feedback@example.com;",
                     "ruf=mailto:auth-reports@example.com"
                 ),
-                Dmarc {
+                DmarcRecord {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
-                    fo: Report::All,
+                    fo: FailureOptions::All,
                     np: Policy::None,
                     p: Policy::None,
-                    rua: vec![URI::new("dmarc-feedback@example.com", 0)],
-                    ruf: vec![URI::new("auth-reports@example.com", 0)],
+                    rua: vec![Uri::new("dmarc-feedback@example.com", 0)],
+                    ruf: vec![Uri::new("auth-reports@example.com", 0)],
                     sp: Policy::None,
                     psd: Psd::Default,
                     t: false,
-                    v: Version::V1,
                 },
             ),
             (
@@ -402,21 +399,20 @@ mod test {
                     "v=DMARC1; p=quarantine; rua=mailto:dmarc-feedback@example.com,",
                     "mailto:tld-test@thirdparty.example.net!10m; pct=25; fo=d:s"
                 ),
-                Dmarc {
+                DmarcRecord {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
-                    fo: Report::DkimSpf,
+                    fo: FailureOptions::DkimSpf,
                     np: Policy::Quarantine,
                     p: Policy::Quarantine,
                     ruf: vec![],
                     rua: vec![
-                        URI::new("dmarc-feedback@example.com", 0),
-                        URI::new("tld-test@thirdparty.example.net", 10 * 1024 * 1024),
+                        Uri::new("dmarc-feedback@example.com", 0),
+                        Uri::new("tld-test@thirdparty.example.net", 10 * 1024 * 1024),
                     ],
                     sp: Policy::Quarantine,
                     psd: Psd::Default,
                     t: false,
-                    v: Version::V1,
                 },
             ),
             (
@@ -424,18 +420,17 @@ mod test {
                     "v=DMARC1; p=reject; sp=quarantine; np=None; aspf=s; adkim=s; fo = 1;",
                     "rua=mailto:dmarc-feedback@example.com"
                 ),
-                Dmarc {
+                DmarcRecord {
                     adkim: Alignment::Strict,
                     aspf: Alignment::Strict,
-                    fo: Report::Any,
+                    fo: FailureOptions::Any,
                     np: Policy::None,
                     p: Policy::Reject,
-                    rua: vec![URI::new("dmarc-feedback@example.com", 0)],
+                    rua: vec![Uri::new("dmarc-feedback@example.com", 0)],
                     ruf: vec![],
                     sp: Policy::Quarantine,
                     psd: Psd::Default,
                     t: false,
-                    v: Version::V1,
                 },
             ),
             (
@@ -444,21 +439,20 @@ mod test {
                     "rua=mailto:dmarc-feedback@example.com!10 K , mailto:user%20@example.com ! 2G;",
                     "ignore_me= true; fo=s; rf = AfrF; ",
                 ),
-                Dmarc {
+                DmarcRecord {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
-                    fo: Report::Spf,
+                    fo: FailureOptions::Spf,
                     np: Policy::Reject,
                     p: Policy::Reject,
                     rua: vec![
-                        URI::new("dmarc-feedback@example.com", 10 * 1024),
-                        URI::new("user@example.com", 2 * 1024 * 1024 * 1024),
+                        Uri::new("dmarc-feedback@example.com", 10 * 1024),
+                        Uri::new("user@example.com", 2 * 1024 * 1024 * 1024),
                     ],
                     ruf: vec![],
                     sp: Policy::Reject,
                     psd: Psd::Default,
                     t: false,
-                    v: Version::V1,
                 },
             ),
             (
@@ -466,26 +460,25 @@ mod test {
                     "v=DMARC1; p=quarantine; rua=mailto:dmarc-feedback@example.com,",
                     "mailto:tld-test@thirdparty.example.net; fo=s:d; t=y; psd=y;;",
                 ),
-                Dmarc {
+                DmarcRecord {
                     adkim: Alignment::Relaxed,
                     aspf: Alignment::Relaxed,
-                    fo: Report::DkimSpf,
+                    fo: FailureOptions::DkimSpf,
                     np: Policy::Quarantine,
                     p: Policy::Quarantine,
                     rua: vec![
-                        URI::new("dmarc-feedback@example.com", 0),
-                        URI::new("tld-test@thirdparty.example.net", 0),
+                        Uri::new("dmarc-feedback@example.com", 0),
+                        Uri::new("tld-test@thirdparty.example.net", 0),
                     ],
                     ruf: vec![],
                     sp: Policy::Quarantine,
                     psd: Psd::Yes,
                     t: true,
-                    v: Version::V1,
                 },
             ),
         ] {
             assert_eq!(
-                Dmarc::parse(record.as_bytes())
+                DmarcRecord::parse(record.as_bytes())
                     .unwrap_or_else(|err| panic!("{record:?} : {err:?}")),
                 expected_result,
                 "{record}"

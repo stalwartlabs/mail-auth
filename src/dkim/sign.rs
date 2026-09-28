@@ -4,18 +4,52 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{DkimSigner, Done, Signature, canonicalize::CanonicalHeaders};
+//! One-shot DKIM1 signing of a message held in memory, as a single buffer or
+//! as a sequence of chunks.
+
+use super::{DkimSigner, Signature, canonicalize::CanonicalHeaders};
 use crate::SystemTime;
+use crate::signer::Ready;
 use crate::{
     Error,
-    common::{
-        crypto::SigningKey,
-        headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream, Writable, Writer},
-    },
+    crypto::SigningKey,
+    headers::{ChainedHeaderIterator, HeaderIterator, HeaderStream, Writable, Writer},
 };
 
-impl<T: SigningKey> DkimSigner<T, Done> {
-    /// Signs a message.
+impl<T: SigningKey> DkimSigner<T, Ready> {
+    /// Signs a complete RFC 5322 message (headers and body).
+    ///
+    /// Headers listed with [`headers`](DkimSigner::headers) are signed, the
+    /// body is hashed with the configured canonicalization, `t=` is set to
+    /// the current time and `x=` and `l=` are filled in when enabled. The
+    /// returned [`Signature`] is written in front of the message as a
+    /// `DKIM-Signature` header with
+    /// [`HeaderWriter`](crate::headers::HeaderWriter).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoHeadersFound`] when the list of headers to sign is
+    /// empty, or [`Error::Crypto`] when the signing operation fails. Listed
+    /// headers that are absent from the message are still signed (as empty),
+    /// which prevents them from being added later.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{crypto::Ed25519Key, dkim::DkimSigner, headers::HeaderWriter};
+    ///
+    /// # fn main() -> mail_auth::Result<()> {
+    /// # let pkcs8_der: Vec<u8> = Vec::new();
+    /// let message = "From: bill@example.com\r\nSubject: Hi\r\n\r\nHello.\r\n";
+    /// let signature = DkimSigner::from_key(Ed25519Key::from_pkcs8_der(&pkcs8_der)?)
+    ///     .domain("example.com")
+    ///     .selector("ed")
+    ///     .headers(["From", "Subject"])
+    ///     .sign(message.as_bytes())?;
+    /// println!("{}{}", signature.to_header(), message);
+    /// # Ok(())
+    /// # }
+    /// ```
     #[inline(always)]
     pub fn sign(&self, message: &[u8]) -> crate::Result<Signature> {
         self.sign_stream(
@@ -28,7 +62,18 @@ impl<T: SigningKey> DkimSigner<T, Done> {
     }
 
     #[inline(always)]
-    /// Signs a chained message.
+    /// Signs a message supplied as consecutive chunks, for example extra
+    /// headers prepended to a stored message.
+    ///
+    /// The chunks are read as if concatenated; otherwise identical to
+    /// [`sign`](DkimSigner::sign).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoHeadersFound`] when the list of headers to sign is
+    /// empty, or [`Error::Crypto`] when the signing operation fails. Listed
+    /// headers that are absent from the message are still signed (as empty),
+    /// which prevents them from being added later.
     pub fn sign_chained<'x>(
         &self,
         chunks: impl IntoIterator<Item = &'x [u8]>,
@@ -42,12 +87,11 @@ impl<T: SigningKey> DkimSigner<T, Done> {
         )
     }
 
-    fn sign_stream<'x>(
+    pub(crate) fn sign_stream<'x>(
         &self,
         message: impl HeaderStream<'x>,
         now: u64,
     ) -> crate::Result<Signature> {
-        // Canonicalize headers and body
         let (body_len, canonical_headers, signed_headers, canonical_body) =
             self.template.canonicalize(message);
 
@@ -55,12 +99,11 @@ impl<T: SigningKey> DkimSigner<T, Done> {
             return Err(Error::NoHeadersFound);
         }
 
-        // Create Signature
         let mut signature = self.template.clone();
         signature.bh = self.key.hash(canonical_body).as_ref().to_vec();
         signature.t = now;
         signature.x = if signature.x > 0 {
-            now + signature.x
+            now.saturating_add(signature.x)
         } else {
             0
         };
@@ -69,7 +112,6 @@ impl<T: SigningKey> DkimSigner<T, Done> {
             signature.l = body_len as u64;
         }
 
-        // Sign
         signature.b = self.key.sign(SignableMessage {
             headers: canonical_headers,
             signature: &signature,
@@ -93,17 +135,17 @@ impl Writable for SignableMessage<'_> {
 
 #[cfg(test)]
 #[allow(unused)]
-pub mod test {
+pub(crate) mod test {
     use crate::{
         AuthenticatedMessage, DkimOutput, DkimResult, MessageAuthenticator,
-        common::{
-            cache::test::DummyCaches,
-            crypto::{Ed25519Key, RsaKey, Sha256},
-            headers::HeaderIterator,
-            parse::TxtRecordParser,
-            verify::DomainKey,
+        crypto::{Ed25519Key, RsaKey, Sha256},
+        dkim::DomainKey,
+        dkim::{
+            AtpsRecord, Canonicalization, DkimReportRecord, DkimSigner, HashAlgorithm, Signature,
         },
-        dkim::{Atps, Canonicalization, DkimSigner, DomainKeyReport, HashAlgorithm, Signature},
+        dns::cache::test::DummyCaches,
+        headers::HeaderIterator,
+        parse::TxtRecordParser,
     };
     use core::str;
     use encodify::base64;
@@ -171,9 +213,33 @@ pub mod test {
         );
     }
 
+    #[test]
+    fn dkim_expiration_saturates_and_rounds_up() {
+        let message = "From: hello@stalw.art\r\n\r\nbody\r\n".as_bytes();
+        for (expiration, expected_x) in [
+            (Duration::MAX, u64::MAX),
+            (Duration::from_millis(500), 311923921),
+            (Duration::from_secs(60), 311923980),
+            (Duration::ZERO, 0),
+        ] {
+            let pk = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+                PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+            ))
+            .unwrap();
+            let signature = DkimSigner::from_key(pk)
+                .domain("stalw.art")
+                .selector("default")
+                .headers(["From"])
+                .expiration(expiration)
+                .sign_stream(HeaderIterator::new(message), 311923920)
+                .unwrap();
+            assert_eq!(signature.x, expected_x, "{expiration:?}");
+        }
+    }
+
     #[tokio::test]
     async fn dkim_sign_verify() {
-        use crate::common::cache::test::DummyCaches;
+        use crate::dns::cache::test::DummyCaches;
 
         let message = concat!(
             "From: bill@example.com\r\n",
@@ -204,7 +270,6 @@ pub mod test {
             "So, if you could do that, that'd be great.\r\n"
         );
 
-        // Create private keys
         let pk_ed = Ed25519Key::from_seed_and_public_key(
             &base64::LENIENT.decode(ED25519_PRIVATE_KEY).unwrap(),
             &base64::LENIENT
@@ -213,7 +278,6 @@ pub mod test {
         )
         .unwrap();
 
-        // Create resolver
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
         let caches = DummyCaches::new()
             .with_txt(
@@ -228,7 +292,7 @@ pub mod test {
             )
             .with_txt(
                 "_report._domainkey.example.com.".to_string(),
-                DomainKeyReport::parse("ra=dkim-failures; rp=100; rr=x".as_bytes()).unwrap(),
+                DkimReportRecord::parse("ra=dkim-failures; rp=100; rr=x".as_bytes()).unwrap(),
                 Instant::now() + Duration::new(3600, 0),
             );
 
@@ -244,7 +308,7 @@ pub mod test {
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
-                .agent_user_identifier("\"John Doe\"@example.com")
+                .identity("\"John Doe\"@example.com")
                 .sign(message.as_bytes())
                 .unwrap(),
             message,
@@ -279,7 +343,7 @@ pub mod test {
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
-                .agent_user_identifier("\"John Doe\"@example.com")
+                .identity("\"John Doe\"@example.com")
                 .sign(empty_message.as_bytes())
                 .unwrap(),
             empty_message,
@@ -301,7 +365,7 @@ pub mod test {
                 .headers(["From", "To", "Subject"])
                 .header_canonicalization(Canonicalization::Simple)
                 .body_canonicalization(Canonicalization::Simple)
-                .agent_user_identifier("\"John Doe\"@example.com")
+                .identity("\"John Doe\"@example.com")
                 .sign(empty_message.as_bytes())
                 .unwrap(),
             empty_message,
@@ -375,7 +439,7 @@ pub mod test {
                 .sign(message.as_bytes())
                 .unwrap(),
             &(message.to_string() + "\r\n----- Mailing list"),
-            Err(super::Error::Dkim(crate::dkim::DkimError::SignatureLength)),
+            Err(super::Error::Dkim(crate::dkim::DkimError::BodyLengthTag)),
             true,
         )
         .await;
@@ -443,11 +507,11 @@ pub mod test {
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
-                .agent_user_identifier("@wrongdomain.com")
+                .identity("@wrongdomain.com")
                 .sign(message.as_bytes())
                 .unwrap(),
             message,
-            Err(super::Error::Dkim(crate::dkim::DkimError::FailedAuidMatch)),
+            Err(super::Error::Dkim(crate::dkim::DkimError::AuidMismatch)),
         )
         .await;
 
@@ -463,7 +527,7 @@ pub mod test {
                 .domain("example.com")
                 .selector("default")
                 .headers(["From", "To", "Subject"])
-                .expiration(12345)
+                .expiration(std::time::Duration::from_secs(12345))
                 .reporting(true)
                 .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
@@ -489,12 +553,12 @@ pub mod test {
                 .selector("default")
                 .headers(["From", "To", "Subject"])
                 .atps("example.com")
-                .atpsh(HashAlgorithm::Sha256)
+                .atps_hash(HashAlgorithm::Sha256)
                 .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
             message,
             Err(super::Error::Dns(crate::DnsError::RecordNotFound(
-                crate::DNS_RCODE_NXDOMAIN,
+                crate::dns::DNS_RCODE_NXDOMAIN,
             ))),
         )
         .await;
@@ -506,7 +570,7 @@ pub mod test {
         .unwrap();
         caches.txt_add(
             "UN42N5XOV642KXRXRQIYANHCOUPGQL5LT4WTBKYT2IJFLBWODFDQ._atps.example.com.".to_string(),
-            Atps::parse(b"v=ATPS1;").unwrap(),
+            AtpsRecord::parse(b"v=ATPS1;").unwrap(),
             Instant::now() + Duration::new(3600, 0),
         );
         verify(
@@ -517,7 +581,7 @@ pub mod test {
                 .selector("default")
                 .headers(["From", "To", "Subject"])
                 .atps("example.com")
-                .atpsh(HashAlgorithm::Sha256)
+                .atps_hash(HashAlgorithm::Sha256)
                 .sign_stream(HeaderIterator::new(message.as_bytes()), 12345)
                 .unwrap(),
             message,
@@ -532,7 +596,7 @@ pub mod test {
         .unwrap();
         caches.txt_add(
             "example.com._atps.example.com.".to_string(),
-            Atps::parse(b"v=ATPS1;").unwrap(),
+            AtpsRecord::parse(b"v=ATPS1;").unwrap(),
             Instant::now() + Duration::new(3600, 0),
         );
         verify(

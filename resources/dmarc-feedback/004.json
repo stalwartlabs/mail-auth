@@ -9,14 +9,14 @@
       "begin": 302832000,
       "end": 302918399
     },
-    "error": [],
+    "errors": [],
     "generator": "Example DMARC Aggregate Reporter v1.2"
   },
   "policy_published": {
     "domain": "example.com",
     "version_published": null,
-    "adkim": "Unspecified",
-    "aspf": "Unspecified",
+    "adkim": null,
+    "aspf": null,
     "p": "Quarantine",
     "sp": "None",
     "np": "None",
@@ -24,7 +24,7 @@
     "discovery_method": "Treewalk",
     "fo": null
   },
-  "record": [
+  "records": [
     {
       "row": {
         "source_ip": "192.0.2.123",

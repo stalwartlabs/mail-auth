@@ -12,11 +12,11 @@
     in a real-world application. Use at your own risk.
 */
 
-use mail_auth::common::parse::TxtRecordParser;
-use mail_auth::common::verify::DomainKey;
-use mail_auth::dmarc::Dmarc;
-use mail_auth::spf::Spf;
-use mail_auth::{DnssecStatus, MX, RecordSet, ResolverCache, Txt};
+use mail_auth::dkim::DomainKey;
+use mail_auth::dmarc::DmarcRecord;
+use mail_auth::dns::TxtRecordParser;
+use mail_auth::spf::SpfRecord;
+use mail_auth::{DnsCache, DnssecStatus, Mx, RecordSet, ResolverCache, TxtRecord};
 use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::Hash;
@@ -26,8 +26,8 @@ use web_time::Instant;
 
 #[derive(Default)]
 pub struct OfflineCache {
-    txt: Mutex<HashMap<Box<str>, Txt>>,
-    mx: Mutex<HashMap<Box<str>, RecordSet<MX>>>,
+    txt: Mutex<HashMap<Box<str>, TxtRecord>>,
+    mx: Mutex<HashMap<Box<str>, RecordSet<Mx>>>,
     ipv4: Mutex<HashMap<Box<str>, RecordSet<Ipv4Addr>>>,
     ipv6: Mutex<HashMap<Box<str>, RecordSet<Ipv6Addr>>>,
     ptr: Mutex<HashMap<IpAddr, RecordSet<Box<str>>>>,
@@ -44,7 +44,7 @@ fn fqdn(name: &str) -> Box<str> {
 
 fn record_set<T>(items: Vec<T>) -> RecordSet<T> {
     RecordSet {
-        rrset: items.into(),
+        records: items.into(),
         dnssec_status: DnssecStatus::Insecure,
     }
 }
@@ -79,12 +79,12 @@ impl OfflineCache {
         match rtype {
             "TXT" => {
                 let value = value.trim().trim_matches('"');
-                let txt: Txt = if name.contains("._domainkey.") {
+                let txt: TxtRecord = if name.contains("._domainkey.") {
                     DomainKey::parse(value.as_bytes()).into()
                 } else if name.to_ascii_lowercase().starts_with("_dmarc.") {
-                    Dmarc::parse(value.as_bytes()).into()
+                    DmarcRecord::parse(value.as_bytes()).into()
                 } else {
-                    Spf::parse(value.as_bytes()).into()
+                    SpfRecord::parse(value.as_bytes()).into()
                 };
                 self.txt.lock().unwrap().insert(fqdn(name), txt);
             }
@@ -111,14 +111,16 @@ impl OfflineCache {
                 let host = fields
                     .next()
                     .ok_or_else(|| format!("Line {line_no}: MX needs an exchange host"))?;
-                let mx = MX {
+                let mx = Mx {
                     exchanges: Box::new([fqdn(host)]),
                     preference,
                 };
                 let mut map = self.mx.lock().unwrap();
                 let key = fqdn(name);
-                let mut existing: Vec<MX> =
-                    map.get(&key).map(|r| r.rrset.to_vec()).unwrap_or_default();
+                let mut existing: Vec<Mx> = map
+                    .get(&key)
+                    .map(|r| r.records.to_vec())
+                    .unwrap_or_default();
                 existing.push(mx);
                 map.insert(key, record_set(existing));
             }
@@ -153,42 +155,42 @@ fn parse_list<T: std::str::FromStr>(
         .collect()
 }
 
-impl ResolverCache<Box<str>, Txt> for OfflineCache {
-    fn get<Q>(&self, name: &Q) -> Option<Txt>
+impl ResolverCache<Box<str>, TxtRecord> for OfflineCache {
+    fn get<Q>(&self, name: &Q) -> Option<TxtRecord>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.txt.lock().unwrap().get(name).cloned()
     }
-    fn remove<Q>(&self, name: &Q) -> Option<Txt>
+    fn remove<Q>(&self, name: &Q) -> Option<TxtRecord>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.txt.lock().unwrap().remove(name)
     }
-    fn insert(&self, key: Box<str>, value: Txt, _valid_until: Instant) {
+    fn insert(&self, key: Box<str>, value: TxtRecord, _valid_until: Instant) {
         self.txt.lock().unwrap().insert(key, value);
     }
 }
 
-impl ResolverCache<Box<str>, RecordSet<MX>> for OfflineCache {
-    fn get<Q>(&self, name: &Q) -> Option<RecordSet<MX>>
+impl ResolverCache<Box<str>, RecordSet<Mx>> for OfflineCache {
+    fn get<Q>(&self, name: &Q) -> Option<RecordSet<Mx>>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.mx.lock().unwrap().get(name).cloned()
     }
-    fn remove<Q>(&self, name: &Q) -> Option<RecordSet<MX>>
+    fn remove<Q>(&self, name: &Q) -> Option<RecordSet<Mx>>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.mx.lock().unwrap().remove(name)
     }
-    fn insert(&self, key: Box<str>, value: RecordSet<MX>, _valid_until: Instant) {
+    fn insert(&self, key: Box<str>, value: RecordSet<Mx>, _valid_until: Instant) {
         self.mx.lock().unwrap().insert(key, value);
     }
 }
@@ -250,5 +252,33 @@ impl ResolverCache<IpAddr, RecordSet<Box<str>>> for OfflineCache {
     }
     fn insert(&self, key: IpAddr, value: RecordSet<Box<str>>, _valid_until: Instant) {
         self.ptr.lock().unwrap().insert(key, value);
+    }
+}
+
+impl DnsCache for OfflineCache {
+    type Txt = OfflineCache;
+    type Mx = OfflineCache;
+    type Ipv4 = OfflineCache;
+    type Ipv6 = OfflineCache;
+    type Ptr = OfflineCache;
+
+    fn txt(&self) -> Option<&Self::Txt> {
+        Some(self)
+    }
+
+    fn mx(&self) -> Option<&Self::Mx> {
+        Some(self)
+    }
+
+    fn ipv4(&self) -> Option<&Self::Ipv4> {
+        Some(self)
+    }
+
+    fn ipv6(&self) -> Option<&Self::Ipv6> {
+        Some(self)
+    }
+
+    fn ptr(&self) -> Option<&Self::Ptr> {
+        Some(self)
     }
 }

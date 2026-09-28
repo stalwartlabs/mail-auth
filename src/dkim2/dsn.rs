@@ -4,23 +4,36 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! Authentication of inbound DKIM2-signed delivery status notifications
+//! (§12.1.2) through [`MessageAuthenticator::verify_dkim2_dsn`].
+
 use super::{ChainBinding, Dkim2Result, Signature, sign::Envelope, verify::relaxed_domain_match};
+use crate::dns::DnsCache;
 use crate::{
-    AuthenticatedMessage, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache, Txt,
-    dkim2::sign::now,
+    AuthenticatedMessage, MessageAuthenticator, Parameters, ResolverCache, TxtRecord,
+    dkim2::sign::now, dns::NoCache,
 };
 use mail_parser::{MessageParser, MimeHeaders, PartType};
 use std::marker::PhantomData;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
+/// An inbound delivery status notification (DSN) and the message it returns.
+///
+/// Input of [`MessageAuthenticator::verify_dkim2_dsn`]. Build it with
+/// [`Dkim2Dsn::parse`] from a raw `multipart/report` DSN, or with
+/// [`Dkim2Dsn::new`] from messages parsed by the caller.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dkim2Dsn<'x, R = AuthenticatedMessage<'x>, S = AuthenticatedMessage<'x>>
 where
     R: AsRef<AuthenticatedMessage<'x>>,
     S: AsRef<AuthenticatedMessage<'x>>,
 {
-    pub raw: R,
+    /// The DSN message itself, including its own DKIM2 header fields.
+    pub dsn: R,
+    /// The returned message embedded in the DSN.
     pub returned: S,
+    /// Whether `returned` includes the body (`message/rfc822`) or only the
+    /// header fields (`text/rfc822-headers`). Without the body, body hashes
+    /// are not checked.
     pub returned_full: bool,
     _marker: PhantomData<&'x ()>,
 }
@@ -30,10 +43,11 @@ where
     R: AsRef<AuthenticatedMessage<'x>>,
     S: AsRef<AuthenticatedMessage<'x>>,
 {
-    /// Creates a new Dkim2Dsn from the raw DSN and the returned message
-    pub fn new(raw: R, returned: S, returned_full: bool) -> Self {
+    /// Creates a `Dkim2Dsn` from the parsed DSN, the parsed returned message
+    /// and whether the returned message includes its body.
+    pub fn new(dsn: R, returned: S, returned_full: bool) -> Self {
         Dkim2Dsn {
-            raw,
+            dsn,
             returned,
             returned_full,
             _marker: PhantomData,
@@ -42,8 +56,16 @@ where
 }
 
 impl<'x> Dkim2Dsn<'x> {
-    /// Parses a multipart/report DSN and locates the embedded returned message
-    /// (message/rfc822 or text/rfc822-headers).
+    /// Parses a `multipart/report` DSN and locates the embedded returned
+    /// message, a `message/rfc822` or `text/rfc822-headers` part. If several
+    /// parts qualify, the last one is used.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Dkim2DsnFailure::DsnUnparseable`] if `raw_message` is not a
+    /// parseable multipart message, and
+    /// [`Dkim2DsnFailure::ReturnedUnparseable`] if it has no returned message
+    /// part or that part cannot be parsed.
     pub fn parse(raw_message: &'x [u8]) -> Result<Dkim2Dsn<'x>, Dkim2DsnFailure> {
         let message = MessageParser::new()
             .parse(raw_message)
@@ -71,7 +93,7 @@ impl<'x> Dkim2Dsn<'x> {
         let (returned_slice, returned_full) =
             returned.ok_or(Dkim2DsnFailure::ReturnedUnparseable)?;
         Ok(Dkim2Dsn {
-            raw: AuthenticatedMessage::parse(raw_message).ok_or(Dkim2DsnFailure::DsnUnparseable)?,
+            dsn: AuthenticatedMessage::parse(raw_message).ok_or(Dkim2DsnFailure::DsnUnparseable)?,
             returned: AuthenticatedMessage::parse(returned_slice)
                 .ok_or(Dkim2DsnFailure::ReturnedUnparseable)?,
             returned_full,
@@ -80,21 +102,34 @@ impl<'x> Dkim2Dsn<'x> {
     }
 }
 
+/// Result of a successful
+/// [`MessageAuthenticator::verify_dkim2_dsn`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Dkim2DsnOutput {
+    /// Verification result of the DSN's own DKIM2 chain.
     pub dsn: Dkim2Result,
+    /// Verification result of the returned message's DKIM2 chain.
     pub returned: Dkim2Result,
 }
 
-/// Why an inbound DSN failed authentication
+/// Reason an inbound DSN failed parsing or authentication.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Dkim2DsnFailure {
+    /// The DSN is not a parseable multipart message.
     DsnUnparseable,
+    /// The DSN has no returned message part, or it cannot be parsed.
     ReturnedUnparseable,
+    /// The DSN has no `DKIM2-Signature` header field, not even a malformed
+    /// one.
     DsnNotSigned,
+    /// The DSN's DKIM2 chain did not pass verification.
     DsnChainFailed,
+    /// The returned message has no `DKIM2-Signature` header field.
     ReturnedNotSigned,
+    /// The returned message's DKIM2 chain did not pass verification.
     ReturnedChainFailed,
+    /// The DSN signer is not a recipient of the returned message, or the
+    /// returned message was not last signed by the receiving system.
     NotAligned,
 }
 
@@ -139,43 +174,106 @@ fn is_dkim2_signed(message: &AuthenticatedMessage<'_>) -> bool {
     !message.dkim2_signatures.is_empty() || message.has_dkim2_errors
 }
 
-impl Signature {
-    /// Returns the address a DSN for this message must be returned to
-    pub fn dsn_return_path(signatures: &[Signature]) -> Option<&str> {
-        signatures
-            .iter()
-            .max_by_key(|s| s.i)
-            .and_then(|top| match &top.chain {
-                ChainBinding::Envelope { mail_from, .. }
-                    if !mail_from.is_empty() && mail_from != "<>" =>
-                {
-                    Some(mail_from.as_str())
-                }
-                _ => None,
-            })
+impl AuthenticatedMessage<'_> {
+    /// Returns the address a DSN about this message must be sent to.
+    ///
+    /// This is the `mf=` (`MAIL FROM`) of the signature with the highest
+    /// `i=`, including angle brackets. Returns `None` if the message has no
+    /// DKIM2 signature, if that signature uses `nd=`, or if its `MAIL FROM`
+    /// is the null reverse-path `<>`. Signatures that failed to parse are
+    /// not considered, so when [`has_dkim2_errors`](Self::has_dkim2_errors)
+    /// is `true` the address may come from an older hop.
+    pub fn dkim2_return_path(&self) -> Option<&str> {
+        dsn_return_path(self.dkim2_signatures.iter().map(|header| &header.header))
     }
 }
 
+fn dsn_return_path<'x>(signatures: impl Iterator<Item = &'x Signature>) -> Option<&'x str> {
+    signatures
+        .max_by_key(|s| s.i)
+        .and_then(|top| match &top.chain {
+            ChainBinding::Envelope { mail_from, .. }
+                if !mail_from.is_empty() && mail_from != "<>" =>
+            {
+                Some(mail_from.as_str())
+            }
+            _ => None,
+        })
+}
+
 impl MessageAuthenticator {
-    /// Authenticates an inbound DKIM2-signed DSN
-    pub async fn verify_dkim2_dsn<'x, R, S, TXT, MXX, IPV4, IPV6, PTR, A, RT>(
+    /// Authenticates an inbound DKIM2-signed delivery status notification
+    /// (§12.1.2).
+    ///
+    /// `params` wraps the [`Dkim2Dsn`], optionally with a DNS cache (see
+    /// [`Parameters`]). `envelope` is the SMTP envelope the DSN was received
+    /// with, usually with a null `MAIL FROM` (`<>`).
+    ///
+    /// Both messages must be DKIM2 signed. The DSN is verified against
+    /// `envelope` as with
+    /// [`verify_dkim2`](MessageAuthenticator::verify_dkim2). The returned
+    /// message is verified against the envelope recorded in its most recent
+    /// signature; its body hashes are checked only when
+    /// [`Dkim2Dsn::returned_full`] is true. Finally the DSN must be aligned
+    /// with the returned message:
+    ///
+    /// 1. The DSN signing domain relaxed-matches the domain of an `rt=`
+    ///    recipient in the returned message's most recent signature.
+    /// 2. The `d=` of that signature relaxed-matches the domain of an
+    ///    `envelope` `RCPT TO` address, which shows that the receiving system
+    ///    made it.
+    ///
+    /// Each chain costs one DNS TXT lookup per `s=` entry of each signature,
+    /// for the public key at `<selector>._domainkey.<d>`.
+    ///
+    /// On success both fields of [`Dkim2DsnOutput`] are
+    /// [`Dkim2Result::Pass`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Dkim2DsnFailure::DsnNotSigned`] or
+    /// [`Dkim2DsnFailure::ReturnedNotSigned`] if a message has no
+    /// `DKIM2-Signature` header field, [`Dkim2DsnFailure::DsnChainFailed`] or
+    /// [`Dkim2DsnFailure::ReturnedChainFailed`] if a chain does not pass
+    /// (including temporary DNS failures), and
+    /// [`Dkim2DsnFailure::NotAligned`] if the alignment checks fail.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{
+    ///     MessageAuthenticator, Parameters,
+    ///     dkim2::{Dkim2Dsn, Envelope},
+    /// };
+    ///
+    /// # async fn run(raw_dsn: &[u8]) {
+    /// let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
+    /// let dsn = Dkim2Dsn::parse(raw_dsn).unwrap();
+    ///
+    /// let envelope = Envelope::new("<>", ["sender@example.com"]);
+    /// match authenticator
+    ///     .verify_dkim2_dsn(Parameters::new(&dsn), envelope)
+    ///     .await
+    /// {
+    ///     Ok(_) => println!("authentic DSN"),
+    ///     Err(failure) => println!("DSN rejected: {failure}"),
+    /// }
+    /// # }
+    /// ```
+    pub async fn verify_dkim2_dsn<'x, R, S, C, A, RT>(
         &self,
-        params: impl Into<Parameters<'x, &'x Dkim2Dsn<'x, R, S>, TXT, MXX, IPV4, IPV6, PTR>>,
+        params: impl Into<Parameters<'x, &'x Dkim2Dsn<'x, R, S>, C>>,
         envelope: Envelope<A, RT>,
     ) -> Result<Dkim2DsnOutput, Dkim2DsnFailure>
     where
         R: AsRef<AuthenticatedMessage<'x>> + 'x,
         S: AsRef<AuthenticatedMessage<'x>> + 'x,
-        TXT: ResolverCache<Box<str>, Txt> + 'x,
-        MXX: ResolverCache<Box<str>, RecordSet<MX>> + 'x,
-        IPV4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>> + 'x,
-        IPV6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>> + 'x,
-        PTR: ResolverCache<IpAddr, RecordSet<Box<str>>> + 'x,
+        C: DnsCache + 'x,
         A: AsRef<str> + Clone,
         RT: IntoIterator<Item: AsRef<str>> + Clone,
     {
         let params = params.into();
-        self.verify_dkim2_dsn_(params.params, envelope, params.cache_txt, now())
+        self.verify_dkim2_dsn_(params.input, envelope, params.txt_cache(), now())
             .await
     }
 
@@ -189,25 +287,25 @@ impl MessageAuthenticator {
     where
         R: AsRef<AuthenticatedMessage<'x>> + 'x,
         S: AsRef<AuthenticatedMessage<'x>> + 'x,
-        TXT: ResolverCache<Box<str>, Txt>,
+        TXT: ResolverCache<Box<str>, TxtRecord>,
         A: AsRef<str> + Clone,
         RT: IntoIterator<Item: AsRef<str>> + Clone,
     {
-        if !is_dkim2_signed(dsn.raw.as_ref()) {
+        if !is_dkim2_signed(dsn.dsn.as_ref()) {
             return Err(Dkim2DsnFailure::DsnNotSigned);
         } else if !is_dkim2_signed(dsn.returned.as_ref()) {
             return Err(Dkim2DsnFailure::ReturnedNotSigned);
         }
 
         let dsn_output = self
-            .verify_dkim2_(dsn.raw.as_ref(), envelope.clone(), cache_txt, now, true)
+            .verify_dkim2_(dsn.dsn.as_ref(), envelope.clone(), cache_txt, now, true)
             .await;
         let dsn_result = dsn_output.result;
         if !matches!(dsn_result, Dkim2Result::Pass) {
             return Err(Dkim2DsnFailure::DsnChainFailed);
         }
 
-        let dsn_signing_domain = top_signature(dsn.raw.as_ref()).map(|(d, _, _)| d);
+        let dsn_signing_domain = top_signature(dsn.dsn.as_ref()).map(|(d, _, _)| d);
         let returned_top = top_signature(dsn.returned.as_ref());
         let (returned_mail_from, returned_rcpt_to) = returned_top
             .as_ref()
@@ -229,14 +327,10 @@ impl MessageAuthenticator {
 
         let aligned = match (&dsn_signing_domain, &returned_top) {
             (Some(dsn_domain), Some((returned_domain, _, rcpt_to))) => {
-                // 12.1.2(1): the DSN signer is aligned with the recipient
-                // recorded in the rt= tag of the returned message's top signature.
                 let recipient_aligned = rcpt_to
                     .iter()
                     .any(|rcpt| relaxed_domain_match(domain_of(rcpt), dsn_domain));
 
-                // 12.1.2(2): the returned message's top signature was generated
-                // by us, the system receiving the DSN.
                 let Envelope {
                     rcpt_to: envelope_rcpt_to,
                     ..
@@ -261,15 +355,26 @@ impl MessageAuthenticator {
     }
 }
 
+impl<'x, R, S> From<&'x Dkim2Dsn<'x, R, S>> for Parameters<'x, &'x Dkim2Dsn<'x, R, S>, NoCache>
+where
+    R: AsRef<AuthenticatedMessage<'x>>,
+    S: AsRef<AuthenticatedMessage<'x>>,
+{
+    fn from(params: &'x Dkim2Dsn<'x, R, S>) -> Self {
+        Parameters::new(params)
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput, Signature};
+    use super::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput, Signature, dsn_return_path};
     use crate::{
         MessageAuthenticator,
-        common::{
-            cache::test::DummyCaches, crypto::Ed25519Key, parse::TxtRecordParser, verify::DomainKey,
-        },
+        crypto::Ed25519Key,
+        dkim::DomainKey,
         dkim2::{ChainBinding, Dkim2Signer, Envelope, Hop},
+        dns::cache::test::DummyCaches,
+        parse::TxtRecordParser,
     };
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
     use std::{
@@ -407,7 +512,7 @@ mod test {
         let params = caches.parameters(&dsn);
         let envelope = Envelope::new("<>", ["sender@test1.dkim2.com"]);
         resolver
-            .verify_dkim2_dsn_(&dsn, envelope, params.cache_txt, NOW)
+            .verify_dkim2_dsn_(&dsn, envelope, params.txt_cache(), NOW)
             .await
     }
 
@@ -421,17 +526,14 @@ mod test {
             },
             ..Default::default()
         };
-        assert_eq!(
-            Signature::dsn_return_path(std::slice::from_ref(&signature)),
-            None
-        );
+        assert_eq!(dsn_return_path(std::iter::once(&signature)), None);
 
         signature.chain = ChainBinding::Envelope {
             mail_from: "sender@test1.dkim2.com".to_string(),
             rcpt_to: vec!["recipient@example.com".to_string()],
         };
         assert_eq!(
-            Signature::dsn_return_path(std::slice::from_ref(&signature)),
+            dsn_return_path(std::iter::once(&signature)),
             Some("sender@test1.dkim2.com")
         );
     }

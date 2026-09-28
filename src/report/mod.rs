@@ -4,304 +4,92 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! Parsing and generation of email authentication reports (feature `report`).
+//!
+//! Three report formats are supported, one per submodule:
+//!
+//! - [`dmarc`]: DMARC aggregate reports ([`dmarc::AggregateReport`], RFC 9990).
+//! - [`arf`]: Abuse Reporting Format feedback reports, including
+//!   authentication failure reports ([`arf::FeedbackReport`], RFC 5965 and RFC 6591).
+//! - [`tlsrpt`]: SMTP TLS reports ([`tlsrpt::TlsReport`], RFC 8460).
+//!
+//! Each report type has a `parse_rfc5322` function that extracts the report
+//! from a complete email message, a function that parses the bare report
+//! document (`parse_xml`, `parse_arf` or `parse_json`), and `write_rfc5322` and
+//! `to_rfc5322` methods that wrap the report in a new email message. The
+//! addressing of that message is taken from a [`ReportEnvelope`]. Parse
+//! failures are reported as [`ReportError`].
+
 pub mod arf;
 pub mod dmarc;
 pub mod tlsrpt;
-use serde::{Deserialize, Serialize};
-use std::{borrow::Cow, io::Read, net::IpAddr};
+use mail_builder::headers::{HeaderType, address::Address};
+use std::{fmt::Display, io::Read};
 
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct DateRange {
-    pub begin: u64,
-    pub end: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct ReportMetadata {
-    pub org_name: String,
-    pub email: String,
-    pub extra_contact_info: Option<String>,
-    pub report_id: String,
-    pub date_range: DateRange,
-    pub error: Vec<String>,
-    #[serde(default)]
-    pub generator: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum Alignment {
-    Relaxed,
-    Strict,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum Disposition {
-    None,
-    Quarantine,
-    Reject,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum ActionDisposition {
-    None,
-    Pass,
-    Quarantine,
-    Reject,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct PolicyPublished {
-    pub domain: String,
-    pub version_published: Option<f32>,
-    pub adkim: Alignment,
-    pub aspf: Alignment,
-    pub p: Disposition,
-    pub sp: Disposition,
-    #[serde(default)]
-    pub np: Disposition,
-    pub testing: bool,
-    #[serde(default)]
-    pub discovery_method: Discovery,
-    pub fo: Option<String>,
-}
-
-impl Eq for PolicyPublished {}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum Discovery {
-    Psl,
-    Treewalk,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum DmarcResult {
-    Pass,
-    Fail,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum PolicyOverride {
-    LocalPolicy,
-    MailingList,
-    PolicyTestMode,
-    TrustedForwarder,
-    #[default]
-    Other,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct PolicyOverrideReason {
-    pub type_: PolicyOverride,
-    pub comment: Option<String>,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct PolicyEvaluated {
-    pub disposition: ActionDisposition,
-    pub dkim: DmarcResult,
-    pub spf: DmarcResult,
-    pub reason: Vec<PolicyOverrideReason>,
-}
-
-#[derive(Debug, Clone, Hash, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct Row {
-    pub source_ip: Option<IpAddr>,
-    pub count: u32,
-    pub policy_evaluated: PolicyEvaluated,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct Extension {
-    pub name: String,
-    pub definition: String,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct Identifier {
-    pub envelope_to: Option<String>,
-    pub envelope_from: String,
-    pub header_from: String,
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum DkimResult {
-    #[default]
-    None,
-    Pass,
-    Fail,
-    Policy,
-    Neutral,
-    TempError,
-    PermError,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct DKIMAuthResult {
-    pub domain: String,
-    pub selector: String,
-    pub result: DkimResult,
-    pub human_result: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum SPFDomainScope {
-    Helo,
-    MailFrom,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum SpfResult {
-    #[default]
-    None,
-    Neutral,
-    Pass,
-    Fail,
-    SoftFail,
-    TempError,
-    PermError,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct SPFAuthResult {
-    pub domain: String,
-    pub scope: SPFDomainScope,
-    pub result: SpfResult,
-    pub human_result: Option<String>,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct AuthResult {
-    pub dkim: Vec<DKIMAuthResult>,
-    pub spf: Vec<SPFAuthResult>,
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct Record {
-    pub row: Row,
-    pub identifiers: Identifier,
-    pub auth_results: AuthResult,
-    pub extensions: Vec<Extension>,
-}
-
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct Report {
-    pub version: f32,
-    pub report_metadata: ReportMetadata,
-    pub policy_published: PolicyPublished,
-    pub record: Vec<Record>,
-    pub extensions: Vec<Extension>,
-}
-
-impl Eq for Report {}
-
+/// Addressing and identification of a generated report message.
+///
+/// Passed to the `write_rfc5322` and `to_rfc5322` methods of every report
+/// type. Not every report type reads every field; see the documentation of
+/// each `write_rfc5322` method for the fields it uses.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Error {
-    MailParseError,
-    ReportParseError(String),
-    UncompressError(String),
-    ReportTooLarge,
-    NoReportsFound,
+pub struct ReportEnvelope<'x> {
+    /// Address written to the `From` header field.
+    pub from: Address<'x>,
+    /// Recipient addresses written to the `To` header field.
+    pub to: Vec<&'x str>,
+    /// Domain of the organization submitting the report.
+    ///
+    /// Used as the `Message-ID` host, in the default subject, the text body
+    /// and the attachment file name.
+    pub submitter: &'x str,
+    /// Domain the report is about (TLS-RPT only).
+    ///
+    /// Written to the `TLS-Report-Domain` header field, the default subject
+    /// and the attachment file name. DMARC and ARF reports ignore it.
+    pub report_domain: &'x str,
+    /// Subject of the message. When `None`, each report type writes its own
+    /// default subject.
+    pub subject: Option<&'x str>,
 }
+
+impl<'x> ReportEnvelope<'x> {
+    pub(crate) fn to_header(&self) -> HeaderType<'x> {
+        HeaderType::Address(Address::List(
+            self.to.iter().map(|to| (*to).into()).collect(),
+        ))
+    }
+}
+
+/// Error returned when a report cannot be parsed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReportError {
+    /// The input is not a parseable RFC 5322 message.
+    MailParse,
+    /// The report document is malformed or lacks a required element. Holds
+    /// the parser's error message.
+    Parse(String),
+    /// A gzip or zip attachment could not be decompressed. Holds the
+    /// decompressor's error message.
+    Decompress(String),
+    /// The report exceeds the `max_size` passed to the parse function.
+    TooLarge,
+    /// The message contains no part that looks like a report.
+    NotFound,
+}
+
+impl Display for ReportError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReportError::MailParse => f.write_str("Failed to parse the report message"),
+            ReportError::Parse(err) => write!(f, "Failed to parse the report: {err}"),
+            ReportError::Decompress(err) => write!(f, "Failed to decompress the report: {err}"),
+            ReportError::TooLarge => f.write_str("Report exceeds the maximum allowed size"),
+            ReportError::NotFound => f.write_str("No report found in the message"),
+        }
+    }
+}
+
+impl std::error::Error for ReportError {}
 
 const MAX_SIZE_RESERVATION: u64 = 64 * 1024;
 
@@ -309,185 +97,45 @@ pub(crate) fn read_capped(
     reader: impl Read,
     size_hint: u64,
     max_size: usize,
-) -> Result<Vec<u8>, Error> {
+) -> Result<Vec<u8>, ReportError> {
     let max_size = max_size as u64;
     if size_hint > max_size {
-        return Err(Error::ReportTooLarge);
+        return Err(ReportError::TooLarge);
     }
 
     let mut buf = Vec::with_capacity(size_hint.min(MAX_SIZE_RESERVATION) as usize);
     reader
         .take(max_size.saturating_add(1))
         .read_to_end(&mut buf)
-        .map_err(|err| Error::UncompressError(err.to_string()))?;
+        .map_err(|err| ReportError::Decompress(err.to_string()))?;
 
     if buf.len() as u64 > max_size {
-        return Err(Error::ReportTooLarge);
+        return Err(ReportError::TooLarge);
     }
 
     Ok(buf)
 }
 
-impl From<String> for Error {
+impl From<String> for ReportError {
     fn from(err: String) -> Self {
-        Error::ReportParseError(err)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub struct Feedback<'x> {
-    pub feedback_type: FeedbackType,
-    pub arrival_date: Option<i64>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub authentication_results: Vec<Cow<'x, str>>,
-    pub incidents: u32,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub original_envelope_id: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub original_mail_from: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub original_rcpt_to: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub reported_domain: Vec<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub reported_uri: Vec<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub reporting_mta: Option<Cow<'x, str>>,
-    pub source_ip: Option<IpAddr>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub user_agent: Option<Cow<'x, str>>,
-    pub version: u32,
-    pub source_port: u32,
-
-    // Auth-Failure keys
-    pub auth_failure: AuthFailureType,
-    pub delivery_result: DeliveryResult,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub dkim_adsp_dns: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub dkim_canonicalized_body: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub dkim_canonicalized_header: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub dkim_domain: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub dkim_identity: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub dkim_selector: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub dkim_selector_dns: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub spf_dns: Option<Cow<'x, str>>,
-    pub identity_alignment: IdentityAlignment,
-
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub message: Option<Cow<'x, str>>,
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
-    pub headers: Option<Cow<'x, str>>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum AuthFailureType {
-    Adsp,
-    BodyHash,
-    Revoked,
-    Signature,
-    Spf,
-    Dmarc,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum IdentityAlignment {
-    None,
-    Spf,
-    Dkim,
-    DkimSpf,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum DeliveryResult {
-    Delivered,
-    Spam,
-    Policy,
-    Reject,
-    Other,
-    #[default]
-    Unspecified,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
-pub enum FeedbackType {
-    Abuse,
-    AuthFailure,
-    Fraud,
-    NotSpam,
-    #[default]
-    Other,
-    Virus,
-}
-
-impl From<&crate::DkimResult> for AuthFailureType {
-    fn from(value: &crate::DkimResult) -> Self {
-        match value {
-            crate::DkimResult::Neutral(err)
-            | crate::DkimResult::Fail(err)
-            | crate::DkimResult::PermError(err)
-            | crate::DkimResult::TempError(err) => match err {
-                crate::Error::Dkim(crate::dkim::DkimError::FailedBodyHashMatch) => {
-                    AuthFailureType::BodyHash
-                }
-                #[cfg(feature = "arc")]
-                crate::Error::Arc(crate::arc::ArcError::FailedBodyHashMatch) => {
-                    AuthFailureType::BodyHash
-                }
-                crate::Error::Dkim(crate::dkim::DkimError::RevokedPublicKey) => {
-                    AuthFailureType::Revoked
-                }
-                _ => AuthFailureType::Signature,
-            },
-            crate::DkimResult::Pass | crate::DkimResult::None => AuthFailureType::Signature,
-        }
+        ReportError::Parse(err)
     }
 }
 
 #[cfg(test)]
 mod test {
     const MAX_REPORT_SIZE: usize = 25 * 1024 * 1024;
-    use super::{Error, read_capped, test_util::gzip};
+    use super::{ReportError, read_capped, test_util::gzip};
 
     #[test]
     fn read_capped_rejects_forged_size_hint() {
         assert_eq!(
             read_capped(&b"hello"[..], u32::MAX as u64, MAX_REPORT_SIZE),
-            Err(Error::ReportTooLarge)
+            Err(ReportError::TooLarge)
         );
         assert_eq!(
             read_capped(&b"hello"[..], u64::MAX, MAX_REPORT_SIZE),
-            Err(Error::ReportTooLarge)
+            Err(ReportError::TooLarge)
         );
     }
 
@@ -495,9 +143,9 @@ mod test {
     fn read_capped_rejects_oversized_output() {
         assert_eq!(
             read_capped(&[0u8; 1024][..], 0, 1023),
-            Err(Error::ReportTooLarge)
+            Err(ReportError::TooLarge)
         );
-        assert_eq!(read_capped(&b"hello"[..], 0, 0), Err(Error::ReportTooLarge));
+        assert_eq!(read_capped(&b"hello"[..], 0, 0), Err(ReportError::TooLarge));
     }
 
     #[test]
@@ -517,7 +165,7 @@ mod test {
 
         assert_eq!(
             read_capped(flate2::read::GzDecoder::new(&bomb[..]), 0, 64 * 1024),
-            Err(Error::ReportTooLarge)
+            Err(ReportError::TooLarge)
         );
         assert_eq!(
             read_capped(flate2::read::GzDecoder::new(&bomb[..]), 0, MAX_REPORT_SIZE)

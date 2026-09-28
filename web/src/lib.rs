@@ -39,8 +39,8 @@ pub(crate) fn normalize_eol(message: &str) -> String {
 pub(crate) fn load_key(
     key_pem: &str,
     algorithm: &str,
-) -> Result<mail_auth::common::crypto::DkimKey, String> {
-    use mail_auth::common::crypto::{DkimKey, Ed25519Key, RsaKey, Sha256};
+) -> Result<mail_auth::crypto::DkimKey, String> {
+    use mail_auth::crypto::{DkimKey, Ed25519Key, RsaKey, Sha256};
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
 
     let der = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())

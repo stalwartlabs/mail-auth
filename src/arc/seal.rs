@@ -4,39 +4,55 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use super::{ArcError, ArcSealer, ArcSet, ChainValidation, Signature};
+use super::{ArcError, ArcSealer, ChainValidation, SealedSet, Signature};
 use crate::SystemTime;
 use crate::{
     ArcOutput, AuthenticatedMessage, AuthenticationResults, DkimResult, Error,
-    common::{
-        crypto::{HashAlgorithm, Sha256, SigningKey},
-        headers::{Writable, Writer},
-    },
+    crypto::{HashAlgorithm, Sha256, SigningKey},
     dkim::{
-        Canonicalization, Done,
+        Canonicalization,
         canonicalize::{CanonicalHeaders, FoundHeaders},
     },
+    headers::{Writable, Writer},
+    signer::Ready,
 };
 
-impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
+impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Ready> {
+    /// Seals `message`, producing the next ARC set (RFC 8617, Section 5.1).
+    ///
+    /// `results` holds the `Authentication-Results` of this host, copied into
+    /// the new `ARC-Authentication-Results`. `arc_output` is the result of
+    /// [`MessageAuthenticator::verify_arc`](crate::MessageAuthenticator::verify_arc)
+    /// on the same message: it sets the new instance number (one above the
+    /// newest set, or 1 for an empty chain) and the `cv=` tag (`none` for an
+    /// empty chain, `pass` when the chain validated, `fail` otherwise), and
+    /// its sets are covered by the new `ARC-Seal`.
+    ///
+    /// Write the returned [`SealedSet`] in front of the message with
+    /// [`HeaderWriter`](crate::headers::HeaderWriter).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Arc`] with [`ArcError::InvalidChainValidation`] when
+    /// [`ArcOutput::can_be_sealed`] is `false`, [`Error::NoHeadersFound`]
+    /// when the list of headers to sign is empty, and a crypto error when
+    /// signing fails.
     pub fn seal<'x>(
         &self,
         message: &'x AuthenticatedMessage<'x>,
         results: &'x AuthenticationResults,
         arc_output: &ArcOutput,
-    ) -> crate::Result<ArcSet<'x>> {
+    ) -> crate::Result<SealedSet<'x>> {
         if !arc_output.can_be_sealed() {
-            return Err(Error::Arc(ArcError::InvalidCV));
+            return Err(Error::Arc(ArcError::InvalidChainValidation));
         }
 
-        // Create set
-        let mut set = ArcSet {
+        let mut set = SealedSet {
             signature: self.signature.clone(),
             seal: self.seal.clone(),
             results,
         };
 
-        // Set i= and cv=
         if arc_output.set.is_empty() {
             set.signature.i = 1;
             set.seal.i = 1;
@@ -51,13 +67,11 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
             };
         }
 
-        // Canonicalize headers
         let (canonical_headers, signed_headers) = set.signature.canonicalize_headers(message)?;
         if signed_headers.is_empty() {
             return Err(Error::NoHeadersFound);
         }
 
-        // Canonicalize body
         if set.signature.l > 0 {
             set.signature.l = message.raw_message.len() as u64 - message.body_offset as u64;
         }
@@ -83,7 +97,6 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
                 .to_vec(),
         };
 
-        // Create Signature
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -91,19 +104,17 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
 
         set.signature.t = now;
         set.signature.x = if set.signature.x > 0 {
-            now + set.signature.x
+            now.saturating_add(set.signature.x)
         } else {
             0
         };
         set.signature.h = signed_headers;
 
-        // Sign
         set.signature.b = self.key.sign(SignableSet {
             set: &set,
             headers: canonical_headers,
         })?;
 
-        // Seal
         set.seal.b = self.key.sign(SignableChain {
             arc_output,
             set: &set,
@@ -114,7 +125,7 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Done> {
 }
 
 struct SignableSet<'a> {
-    set: &'a ArcSet<'a>,
+    set: &'a SealedSet<'a>,
     headers: CanonicalHeaders<'a>,
 }
 
@@ -127,7 +138,7 @@ impl Writable for SignableSet<'_> {
 
 struct SignableChain<'a> {
     arc_output: &'a ArcOutput<'a>,
-    set: &'a ArcSet<'a>,
+    set: &'a SealedSet<'a>,
 }
 
 impl Writable for SignableChain<'_> {
@@ -175,7 +186,6 @@ impl Signature {
 
         let canonical_headers = self.ch.canonical_headers(headers);
 
-        // Add any missing headers
         signed_headers.reverse();
         for (pos, header) in self.h.iter().enumerate() {
             if !found_headers.contains(pos) {
@@ -193,14 +203,12 @@ mod test {
     use crate::{
         AuthenticatedMessage, AuthenticationResults, DkimResult, MessageAuthenticator,
         arc::ArcSealer,
-        common::{
-            cache::test::DummyCaches,
-            crypto::{Ed25519Key, RsaKey, Sha256, SigningKey},
-            headers::HeaderWriter,
-            parse::TxtRecordParser,
-            verify::DomainKey,
-        },
+        crypto::{Ed25519Key, RsaKey, Sha256, SigningKey},
         dkim::DkimSigner,
+        dkim::DomainKey,
+        dns::cache::test::DummyCaches,
+        headers::HeaderWriter,
+        parse::TxtRecordParser,
     };
     use encodify::base64;
     use mail_parser::MessageParser;
@@ -227,7 +235,7 @@ mod test {
 
     #[tokio::test]
     async fn arc_seal() {
-        use crate::common::cache::test::DummyCaches;
+        use crate::dns::cache::test::DummyCaches;
 
         let message = concat!(
             "From: queso@manchego.org\r\n",
@@ -238,7 +246,6 @@ mod test {
             "is tastier.\r\n"
         );
 
-        // Crate resolver
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
         let caches = DummyCaches::new()
             .with_txt(
@@ -252,13 +259,11 @@ mod test {
                 Instant::now() + Duration::new(3600, 0),
             );
 
-        // Create private keys
         let pk_ed_public = base64::LENIENT
             .decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1)
             .unwrap();
         let pk_ed_private = base64::LENIENT.decode(ED25519_PRIVATE_KEY).unwrap();
 
-        // Create DKIM-signed message
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
             PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
         ))
@@ -272,7 +277,6 @@ mod test {
             .to_header()
             + message;
 
-        // Verify and seal the message 50 times
         for _ in 0..25 {
             let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
                 PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
@@ -298,8 +302,6 @@ mod test {
             )
             .await;
         }
-
-        //println!("{}", raw_message);
     }
 
     async fn arc_verify_and_seal(

@@ -4,28 +4,58 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::SystemTime;
-use crate::report::{AuthFailureType, DeliveryResult, Feedback, FeedbackType, IdentityAlignment};
+//! Serialization of [`FeedbackReport`] to the ARF field format and to a
+//! complete feedback report email message.
+
+use crate::{
+    SystemTime,
+    report::{
+        ReportEnvelope,
+        arf::{AuthFailureType, DeliveryResult, FeedbackReport, FeedbackType, IdentityAlignment},
+    },
+    utf8::into_string,
+};
 use mail_builder::{
     MessageBuilder,
-    headers::{HeaderType, address::Address, content_type::ContentType},
+    headers::{HeaderType, content_type::ContentType},
     mime::{BodyPart, MimePart, make_boundary},
 };
 use mail_parser::DateTime;
 use std::{fmt::Write, io};
 
-impl<'x> Feedback<'x> {
+impl<'x> FeedbackReport<'x> {
+    /// Writes the report as an RFC 5322 `multipart/report` message with
+    /// `report-type=feedback-report` to `writer`.
+    ///
+    /// The parts are a `text/plain` summary, the output of
+    /// [`to_arf`](Self::to_arf) as `message/feedback-report`, and the original
+    /// message as `message/rfc822` or, when `message` is `None`, its headers
+    /// as `text/rfc822-headers`. The summary uses `arrival_date`, or the
+    /// current time when it is unset. The message carries an
+    /// `Auto-Submitted: auto-generated` header field.
+    ///
+    /// Fields read from `envelope`:
+    ///
+    /// - `from`: the `From` header field.
+    /// - `to`: the `To` header field.
+    /// - `subject`: the subject; when `None`, defaults to
+    ///   `Authentication Failure Report` for [`FeedbackType::AuthFailure`]
+    ///   and `Abuse Report` otherwise.
+    /// - `submitter`: the `Message-ID` host, only when `reporting_mta` is
+    ///   `None`. When both are empty, `localhost` is used.
+    ///
+    /// `envelope.report_domain` is ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns any I/O error raised by `writer`.
     pub fn write_rfc5322(
         &self,
-        from: impl Into<Address<'x>>,
-        to: &'x str,
-        subject: &'x str,
+        envelope: &ReportEnvelope<'_>,
         writer: impl io::Write,
     ) -> io::Result<()> {
-        // Generate ARF
         let arf = self.to_arf();
 
-        // Generate text/plain body
         let mut text_body = String::with_capacity(128);
         if self.feedback_type == FeedbackType::AuthFailure {
             write!(
@@ -52,7 +82,6 @@ impl<'x> Feedback<'x> {
         });
         write!(&mut text_body, "on {}.\r\n", dt.to_rfc822()).ok();
 
-        // Build message parts
         let mut parts = vec![
             MimePart::new(
                 ContentType::new("text/plain"),
@@ -75,15 +104,22 @@ impl<'x> Feedback<'x> {
             ));
         }
 
+        let host = self
+            .reporting_mta
+            .as_deref()
+            .filter(|host| !host.is_empty())
+            .or((!envelope.submitter.is_empty()).then_some(envelope.submitter))
+            .unwrap_or("localhost");
+        let subject = envelope.subject.unwrap_or(match self.feedback_type {
+            FeedbackType::AuthFailure => "Authentication Failure Report",
+            _ => "Abuse Report",
+        });
+
         MessageBuilder::new()
-            .from(from)
-            .header("To", HeaderType::Text(to.into()))
+            .from(envelope.from.clone())
+            .header("To", envelope.to_header())
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
-            .message_id(format!(
-                "{}@{}",
-                make_boundary("."),
-                self.reporting_mta().unwrap_or("localhost")
-            ))
+            .message_id(format!("{}@{}", make_boundary("."), host))
             .subject(subject)
             .body(MimePart::new(
                 ContentType::new("multipart/report").attribute("report-type", "feedback-report"),
@@ -92,17 +128,26 @@ impl<'x> Feedback<'x> {
             .write_to(writer)
     }
 
-    pub fn to_rfc5322(
-        &self,
-        from: impl Into<Address<'x>>,
-        to: &'x str,
-        subject: &'x str,
-    ) -> io::Result<String> {
+    /// Returns the report as an RFC 5322 message.
+    ///
+    /// Same as [`write_rfc5322`](Self::write_rfc5322), collected into a
+    /// `String`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the message is not valid UTF-8.
+    pub fn to_rfc5322(&self, envelope: &ReportEnvelope<'_>) -> io::Result<String> {
         let mut buf = Vec::new();
-        self.write_rfc5322(from, to, subject, &mut buf)?;
-        String::from_utf8(buf).map_err(io::Error::other)
+        self.write_rfc5322(envelope, &mut buf)?;
+        into_string(buf).map_err(io::Error::other)
     }
 
+    /// Serializes the machine-readable part of the report as ARF fields,
+    /// each terminated by CRLF.
+    ///
+    /// Unset optional fields are omitted. The RFC 6591 fields (`Auth-Failure`
+    /// through `Identity-Alignment`) are written only for
+    /// [`FeedbackType::AuthFailure`] reports.
     pub fn to_arf(&self) -> String {
         let mut arf = String::with_capacity(128);
 
@@ -213,10 +258,10 @@ impl<'x> Feedback<'x> {
         if let Some(value) = &self.original_rcpt_to {
             write!(&mut arf, "Original-Rcpt-To: {value}\r\n").ok();
         }
-        for value in &self.reported_domain {
+        for value in &self.reported_domains {
             write!(&mut arf, "Reported-Domain: {value}\r\n").ok();
         }
-        for value in &self.reported_uri {
+        for value in &self.reported_uris {
             write!(&mut arf, "Reported-URI: {value}\r\n").ok();
         }
         if let Some(value) = &self.reporting_mta {
@@ -238,47 +283,53 @@ impl<'x> Feedback<'x> {
 
 #[cfg(test)]
 mod test {
-    use crate::report::{AuthFailureType, Feedback, FeedbackType, IdentityAlignment};
+    use crate::report::{
+        ReportEnvelope,
+        arf::{AuthFailureType, FeedbackReport, FeedbackType, IdentityAlignment},
+    };
 
     #[test]
     fn arf_report_generate() {
-        let feedback = Feedback::new(FeedbackType::AuthFailure)
-            .with_arrival_date(5934759438)
-            .with_authentication_results("dkim=pass")
-            .with_incidents(10)
-            .with_original_envelope_id("821-abc-123")
-            .with_original_mail_from("hello@world.org")
-            .with_original_rcpt_to("ciao@mundo.org")
-            .with_reported_domain("example.org")
-            .with_reported_domain("example2.org")
-            .with_reported_uri("uri:domain.org")
-            .with_reported_uri("uri:domain2.org")
-            .with_reporting_mta("Manchegator 2.0")
-            .with_source_ip("192.168.1.1".parse().unwrap())
-            .with_user_agent("DMARC-Meister")
-            .with_version(2)
-            .with_source_port(1234)
-            .with_auth_failure(AuthFailureType::Dmarc)
-            .with_dkim_adsp_dns("v=dkim1")
-            .with_dkim_canonicalized_body("base64 goes here")
-            .with_dkim_canonicalized_header("more base64")
-            .with_dkim_domain("dkim-domain.org")
-            .with_dkim_identity("my-dkim-identity@domain.org")
-            .with_dkim_selector("the-selector")
-            .with_dkim_selector_dns("v=dkim1;")
-            .with_spf_dns("v=spf1")
-            .with_identity_alignment(IdentityAlignment::DkimSpf)
-            .with_message("From: hello@world.org\r\nTo: ciao@mondo.org\r\n\r\n");
+        let feedback = FeedbackReport {
+            arrival_date: Some(5934759438),
+            authentication_results: vec!["dkim=pass".into()],
+            incidents: 10,
+            original_envelope_id: Some("821-abc-123".into()),
+            original_mail_from: Some("hello@world.org".into()),
+            original_rcpt_to: Some("ciao@mundo.org".into()),
+            reported_domains: vec!["example.org".into(), "example2.org".into()],
+            reported_uris: vec!["uri:domain.org".into(), "uri:domain2.org".into()],
+            reporting_mta: Some("Manchegator 2.0".into()),
+            source_ip: Some("192.168.1.1".parse().unwrap()),
+            user_agent: Some("DMARC-Meister".into()),
+            version: 2,
+            source_port: 1234,
+            auth_failure: AuthFailureType::Dmarc,
+            dkim_adsp_dns: Some("v=dkim1".into()),
+            dkim_canonicalized_body: Some("base64 goes here".into()),
+            dkim_canonicalized_header: Some("more base64".into()),
+            dkim_domain: Some("dkim-domain.org".into()),
+            dkim_identity: Some("my-dkim-identity@domain.org".into()),
+            dkim_selector: Some("the-selector".into()),
+            dkim_selector_dns: Some("v=dkim1;".into()),
+            spf_dns: Some("v=spf1".into()),
+            identity_alignment: IdentityAlignment::DkimSpf,
+            message: Some("From: hello@world.org\r\nTo: ciao@mondo.org\r\n\r\n".into()),
+            ..FeedbackReport::new(FeedbackType::AuthFailure)
+        };
 
         let message = feedback
-            .to_rfc5322(
-                ("DMARC Reporter", "no-reply@example.org"),
-                "ruf@otherdomain.com",
-                "DMARC Authentication Failure Report",
-            )
+            .to_rfc5322(&ReportEnvelope {
+                from: ("DMARC Reporter", "no-reply@example.org").into(),
+                to: vec!["ruf@otherdomain.com"],
+                submitter: "example.org",
+                report_domain: "",
+                subject: Some("DMARC Authentication Failure Report"),
+            })
             .unwrap();
 
-        let parsed_feedback = Feedback::parse_rfc5322(message.as_bytes()).unwrap();
+        let parsed_feedback =
+            FeedbackReport::parse_rfc5322(message.as_bytes(), message.len()).unwrap();
 
         assert_eq!(feedback, parsed_feedback);
     }

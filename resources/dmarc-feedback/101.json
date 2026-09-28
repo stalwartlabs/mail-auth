@@ -1,5 +1,5 @@
 {
-  "version": 0.0,
+  "version": null,
   "report_metadata": {
     "org_name": "\"backschues.NET",
     "email": "noreply-dmarc-support@backschues.net",
@@ -9,7 +9,8 @@
       "begin": 1667948400,
       "end": 1668034800
     },
-    "error": []
+    "errors": [],
+    "generator": null
   },
   "policy_published": {
     "domain": "stalw.art",
@@ -18,10 +19,12 @@
     "aspf": "Relaxed",
     "p": "None",
     "sp": "None",
+    "np": "Unspecified",
     "testing": false,
+    "discovery_method": "Unspecified",
     "fo": null
   },
-  "record": [
+  "records": [
     {
       "row": {
         "source_ip": "50.223.129.194",

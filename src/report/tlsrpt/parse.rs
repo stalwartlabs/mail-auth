@@ -4,23 +4,52 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! Parsing of TLS reports from JSON documents and from report email
+//! messages.
+
 use super::TlsReport;
-use crate::report::{Error, read_capped};
+use crate::report::{ReportError, read_capped};
 use flate2::read::GzDecoder;
 use mail_parser::{MessageParser, MimeHeaders, PartType};
 use std::io::Cursor;
 use zip::ZipArchive;
 
 impl TlsReport {
-    pub fn parse_json(report: &[u8]) -> Result<Self, Error> {
-        serde_json::from_slice(report).map_err(|err| Error::ReportParseError(err.to_string()))
+    /// Parses an RFC 8460 JSON report document.
+    ///
+    /// Unknown members are ignored. Unrecognized `policy-type` and
+    /// `result-type` values map to the `Other` variant.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReportError::Parse`] if the JSON is malformed or a required
+    /// member is missing: `date-range`, or `policy`, `summary`, `policy-type`
+    /// or `result-type` inside a `policies` entry.
+    pub fn parse_json(report: &[u8]) -> Result<Self, ReportError> {
+        serde_json::from_slice(report).map_err(|err| ReportError::Parse(err.to_string()))
     }
 
-    pub fn parse_rfc5322(report: &[u8], max_size: usize) -> Result<Self, Error> {
+    /// Extracts and parses the TLS report attached to an RFC 5322 message.
+    ///
+    /// Binary parts are tried in order when their subtype (`tlsrpt+gzip`,
+    /// `tlsrpt+zip`, `tlsrpt+json`) or, failing that, file extension (`.gz`,
+    /// `.zip`, `.json`) identifies the report. The first part that parses is
+    /// returned. `max_size` caps the decompressed size of each gzip stream or
+    /// zip member.
+    ///
+    /// # Errors
+    ///
+    /// - [`ReportError::MailParse`] if `report` is not a parseable message.
+    /// - [`ReportError::TooLarge`] if a decompressed report exceeds `max_size`.
+    /// - [`ReportError::Decompress`] if a gzip or zip attachment is corrupt.
+    /// - [`ReportError::Parse`] if every candidate part failed to parse; the
+    ///   error of the last one is returned.
+    /// - [`ReportError::NotFound`] if the message has no candidate part.
+    pub fn parse_rfc5322(report: &[u8], max_size: usize) -> Result<Self, ReportError> {
         let message = MessageParser::new()
             .parse(report)
-            .ok_or(Error::MailParseError)?;
-        let mut error = Error::NoReportsFound;
+            .ok_or(ReportError::MailParse)?;
+        let mut error = ReportError::NotFound;
 
         for part in &message.parts {
             match &part.body {
@@ -70,7 +99,7 @@ impl TlsReport {
                         }
                         ReportType::Zip => {
                             let mut archive = ZipArchive::new(Cursor::new(report))
-                                .map_err(|err| Error::UncompressError(err.to_string()))?;
+                                .map_err(|err| ReportError::Decompress(err.to_string()))?;
                             for i in 0..archive.len() {
                                 match archive.by_index(i) {
                                     Ok(mut file) => {
@@ -84,7 +113,7 @@ impl TlsReport {
                                         }
                                     }
                                     Err(err) => {
-                                        error = Error::UncompressError(err.to_string());
+                                        error = ReportError::Decompress(err.to_string());
                                     }
                                 }
                             }
@@ -108,7 +137,7 @@ impl TlsReport {
 #[cfg(test)]
 mod tests {
     use crate::report::{
-        Error,
+        ReportError,
         test_util::{gzip, message_with_attachment, zip},
         tlsrpt::TlsReport,
     };
@@ -123,7 +152,6 @@ mod tests {
 
     #[test]
     fn tlsrpt_parse() {
-        // Add dns entries
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("resources");
         path.push("tlsrpt");
@@ -161,7 +189,7 @@ mod tests {
 
         assert_eq!(
             TlsReport::parse_rfc5322(&message, MAX_REPORT_SIZE),
-            Err(Error::ReportTooLarge)
+            Err(ReportError::TooLarge)
         );
     }
 
@@ -184,7 +212,7 @@ mod tests {
         );
         assert_eq!(
             TlsReport::parse_rfc5322(&message, REPORT.len() - 1),
-            Err(Error::ReportTooLarge)
+            Err(ReportError::TooLarge)
         );
     }
 
@@ -195,7 +223,7 @@ mod tests {
 
         assert_eq!(
             TlsReport::parse_rfc5322(&message, 64 * 1024),
-            Err(Error::ReportTooLarge)
+            Err(ReportError::TooLarge)
         );
     }
 
@@ -213,7 +241,7 @@ mod tests {
         );
         assert_eq!(
             TlsReport::parse_rfc5322(&message, REPORT.len() - 1),
-            Err(Error::ReportTooLarge)
+            Err(ReportError::TooLarge)
         );
     }
 }

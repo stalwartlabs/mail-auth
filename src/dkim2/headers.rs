@@ -4,8 +4,19 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! Serialization of `DKIM2-Signature` and `Message-Instance` header fields.
+//!
+//! The inherent `write` methods emit a header field on one line. The
+//! [`HeaderWriter`] implementations fold long header fields, which does not
+//! change the signed bytes because DKIM2 canonicalization removes all
+//! whitespace (§9.6). The [`Display`] implementations format the value
+//! without the field name.
+
 use super::{ChainBinding, MessageInstance, Signature, SignatureValue};
-use crate::common::headers::{HEADER_CAPACITY, HeaderFolder, HeaderWriter, Writer, write_integer};
+use crate::{
+    headers::{HEADER_CAPACITY, HeaderFolder, HeaderWriter, Writer, write_integer},
+    utf8::to_str_lossy,
+};
 use std::fmt::{Display, Formatter};
 
 impl SignatureValue {
@@ -77,6 +88,8 @@ impl Signature {
         }
     }
 
+    /// Writes the complete `DKIM2-Signature` header field on one line,
+    /// terminated by CRLF.
     pub fn write(&self, writer: &mut impl Writer) {
         writer.write(b"DKIM2-Signature: ");
         self.write_value(writer, false);
@@ -110,6 +123,9 @@ impl MessageInstance {
         writer.write(b";");
     }
 
+    /// Writes the complete `Message-Instance` header field on one line,
+    /// terminated by CRLF. The recipe, if any, is written as base64-encoded
+    /// JSON in the `r=` tag, and omitted if it cannot be serialized.
     pub fn write(&self, writer: &mut impl Writer) {
         writer.write(b"Message-Instance: ");
         self.write_value(writer);
@@ -133,7 +149,7 @@ impl Display for Signature {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::with_capacity(HEADER_CAPACITY);
         self.write_value(&mut buf, false);
-        f.write_str(&String::from_utf8_lossy(&buf))
+        f.write_str(&to_str_lossy(&buf))
     }
 }
 
@@ -141,17 +157,17 @@ impl Display for MessageInstance {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let mut buf = Vec::with_capacity(HEADER_CAPACITY);
         self.write_value(&mut buf);
-        f.write_str(&String::from_utf8_lossy(&buf))
+        f.write_str(&to_str_lossy(&buf))
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::common::crypto::{Algorithm, HashAlgorithm};
-    use crate::common::headers::HeaderWriter;
+    use crate::crypto::{Algorithm, HashAlgorithm};
     use crate::dkim2::{
         ChainBinding, Flag, MessageHash, MessageInstance, Signature, SignatureValue,
     };
+    use crate::headers::HeaderWriter;
 
     const MAX_HEADER_LINE_LEN: usize = 76;
 
@@ -163,10 +179,10 @@ mod test {
             .collect()
     }
 
-    // draft-ietf-dkim-dkim2-spec-03 §9.6: the signature canonicalization unfolds
-    // and then deletes ALL whitespace, so a folded header field and its unfolded
-    // form MUST reduce to identical bytes. Also assert no physical line exceeds the
-    // fold limit (excluding the single leading fold tab).
+    /// The signature canonicalization unfolds and then deletes all
+    /// whitespace (§9.6), so a folded header field and its unfolded form must
+    /// reduce to identical bytes. Also asserts that no physical line exceeds
+    /// the fold limit (excluding the single leading fold tab).
     fn assert_fold_is_transparent(field_name: &[u8], folded: &[u8], unfolded: &[u8]) {
         assert!(
             folded.ends_with(b"\r\n"),

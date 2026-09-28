@@ -4,15 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+//! Parsing of `DKIM2-Signature` (§8) and `Message-Instance` (§7) header
+//! field values.
+
 use super::{
     ChainBinding, Dkim2Error, Flag, MessageHash, MessageInstance, Signature, SignatureValue,
 };
 use crate::{
     Error,
-    common::{
-        crypto::{Algorithm, HashAlgorithm},
-        parse::TagParser,
-    },
+    crypto::{Algorithm, HashAlgorithm},
+    parse::TagParser,
 };
 use encodify::base64;
 
@@ -73,7 +74,21 @@ impl SeenTags {
 }
 
 impl Signature {
-    /// Parses a single DKIM2-Signature header value (without the field name).
+    /// Parses a single `DKIM2-Signature` header field value (without the
+    /// field name).
+    ///
+    /// Tag names are case-insensitive and unknown tags are ignored. `s=`
+    /// entries with an unknown algorithm or `rsa-sha1` are dropped, so `s`
+    /// can be empty. `mf=` and `rt=` are base64-decoded.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Dkim2Error::SignatureSyntax`] for a repeated tag, a
+    /// malformed `s=`, an undecodable `mf=` or `rt=` value or a nonce longer
+    /// than 64 characters; [`Dkim2Error::SignatureTagMissing`] if `i=`,
+    /// `m=`, `t=`, `d=` or `s=` is missing, or if neither `nd=` nor both
+    /// `mf=` and `rt=` are present; and [`Dkim2Error::SignatureTagUnexpected`]
+    /// if `nd=` appears together with `mf=` or `rt=`.
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &[u8]) -> crate::Result<Signature> {
         let mut signature = Signature::default();
@@ -197,7 +212,17 @@ impl Signature {
 }
 
 impl MessageInstance {
-    /// Parses a single Message-Instance header value (without the field name).
+    /// Parses a single `Message-Instance` header field value (without the
+    /// field name).
+    ///
+    /// Tag names are case-insensitive and unknown tags are ignored. The `r=`
+    /// recipe is base64-decoded and parsed as JSON.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Dkim2Error::InstanceSyntax`] for a repeated tag or a
+    /// malformed `h=`, [`Error::Base64`] if `r=` is not valid base64, and
+    /// [`Dkim2Error::RecipeSyntax`] if the decoded recipe is not valid JSON.
     #[allow(clippy::while_let_on_iterator)]
     pub fn parse(header: &[u8]) -> crate::Result<MessageInstance> {
         let mut instance = MessageInstance::default();
@@ -275,6 +300,8 @@ pub(crate) fn parse_hashes(value: &str) -> Option<Vec<MessageHash>> {
 }
 
 impl Flag {
+    /// Parses one `f=` flag value. Unrecognized values become
+    /// [`Flag::Unknown`].
     pub fn parse(value: &str) -> Flag {
         hashify::fnc_map!(value.as_bytes(),
             b"donotmodify" => Some(Flag::DoNotModify),
@@ -347,7 +374,7 @@ mod test {
     fn header_with_digit_parses() {
         let msg = b"X-Test1-Header: v\r\nFrom: a@b\r\n\r\nbody\r\n";
         let parsed = AuthenticatedMessage::parse(msg).unwrap();
-        assert_eq!(parsed.raw_parsed_headers().len(), 2);
+        assert_eq!(parsed.headers().len(), 2);
     }
 
     #[test]

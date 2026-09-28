@@ -4,51 +4,146 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use crate::report::{
-    ActionDisposition, Alignment, AuthResult, DKIMAuthResult, DateRange, Discovery, Disposition,
-    DkimResult, DmarcResult, Identifier, PolicyEvaluated, PolicyOverride, PolicyOverrideReason,
-    PolicyPublished, Record, Report, ReportMetadata, Row, SPFAuthResult, SPFDomainScope, SpfResult,
+//! Serialization of [`AggregateReport`] to RFC 9990 XML and to a complete
+//! report email message.
+
+use crate::{
+    dmarc::Policy,
+    report::{
+        ReportEnvelope,
+        dmarc::{
+            AggregateReport, AuthResults, DateRange, Discovery, Disposition, DkimAuthResult,
+            DkimStatus, DmarcStatus, Identifiers, PolicyEvaluated, PolicyOverride,
+            PolicyOverrideReason, PolicyPublished, Record, ReportMetadata, Row, SpfAuthResult,
+            SpfScope, SpfStatus,
+        },
+    },
 };
 use flate2::{Compression, write::GzEncoder};
-use mail_builder::{
-    MessageBuilder,
-    headers::{HeaderType, address::Address},
-    mime::make_boundary,
-};
+use mail_builder::{MessageBuilder, headers::HeaderType, mime::make_boundary};
 use std::{
     borrow::Cow,
     fmt::{Display, Formatter, Write},
     io,
 };
 
-impl Report {
-    pub fn write_rfc5322<'x>(
+impl AggregateReport {
+    /// Writes the report as an RFC 5322 message to `writer`.
+    ///
+    /// The message has a `text/plain` summary and the output of
+    /// [`to_xml`](Self::to_xml), gzip-compressed, as an `application/gzip`
+    /// attachment named `submitter!domain!begin!end.xml.gz`. It carries an
+    /// `Auto-Submitted: auto-generated` header field.
+    ///
+    /// Fields read from `envelope`:
+    ///
+    /// - `from`: the `From` header field.
+    /// - `to`: the `To` header field.
+    /// - `submitter`: the `Message-ID` host, the subject, the text body and
+    ///   the file name.
+    /// - `subject`: the subject; when `None`, defaults to
+    ///   `Report Domain: <domain> Submitter: <submitter> Report-ID: <<report_id>>`.
+    ///
+    /// The Report Domain is always `policy_published.domain`;
+    /// `envelope.report_domain` is ignored.
+    ///
+    /// # Errors
+    ///
+    /// Returns any I/O error raised by `writer` or by the gzip encoder.
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use mail_auth::{
+    ///     dmarc::Policy,
+    ///     report::{
+    ///         ReportEnvelope,
+    ///         dmarc::{
+    ///             AggregateReport, DateRange, Disposition, DmarcStatus, Identifiers,
+    ///             PolicyEvaluated, PolicyPublished, Record, ReportMetadata, ReportVersion, Row,
+    ///         },
+    ///     },
+    /// };
+    ///
+    /// # fn main() -> std::io::Result<()> {
+    /// let report = AggregateReport {
+    ///     version: Some(ReportVersion::V1),
+    ///     report_metadata: ReportMetadata {
+    ///         org_name: "Example Inc.".into(),
+    ///         email: "dmarc@example.net".into(),
+    ///         report_id: "abc-123".into(),
+    ///         date_range: DateRange {
+    ///             begin: 1_700_000_000,
+    ///             end: 1_700_086_400,
+    ///         },
+    ///         ..Default::default()
+    ///     },
+    ///     policy_published: PolicyPublished {
+    ///         domain: "example.org".into(),
+    ///         p: Policy::Reject,
+    ///         ..Default::default()
+    ///     },
+    ///     records: vec![Record {
+    ///         row: Row {
+    ///             source_ip: Some("192.0.2.1".parse().expect("valid IP address")),
+    ///             count: 3,
+    ///             policy_evaluated: PolicyEvaluated {
+    ///                 disposition: Disposition::Pass,
+    ///                 dkim: DmarcStatus::Pass,
+    ///                 spf: DmarcStatus::Fail,
+    ///                 reason: vec![],
+    ///             },
+    ///         },
+    ///         identifiers: Identifiers {
+    ///             envelope_from: "example.org".into(),
+    ///             header_from: "example.org".into(),
+    ///             ..Default::default()
+    ///         },
+    ///         ..Default::default()
+    ///     }],
+    ///     ..Default::default()
+    /// };
+    ///
+    /// let envelope = ReportEnvelope {
+    ///     from: ("Example DMARC Reporter", "noreply-dmarc@example.net").into(),
+    ///     to: vec!["dmarc-reports@example.org"],
+    ///     submitter: "example.net",
+    ///     report_domain: "",
+    ///     subject: None,
+    /// };
+    ///
+    /// report.write_rfc5322(&envelope, std::io::stdout())?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn write_rfc5322(
         &self,
-        submitter: &'x str,
-        from: impl Into<Address<'x>>,
-        to: impl Iterator<Item = &'x str>,
+        envelope: &ReportEnvelope<'_>,
         writer: impl io::Write,
     ) -> io::Result<()> {
-        // Compress XML report
         let xml = self.to_xml();
         let mut e = GzEncoder::new(Vec::with_capacity(xml.len()), Compression::default());
         io::Write::write_all(&mut e, xml.as_bytes())?;
         let compressed_bytes = e.finish()?;
 
+        let submitter = envelope.submitter;
+        let domain = self.policy_published.domain.as_str();
+        let report_id = self.report_metadata.report_id.as_str();
+        let subject = envelope.subject.map_or_else(
+            || {
+                Cow::Owned(format!(
+                    "Report Domain: {domain} Submitter: {submitter} Report-ID: <{report_id}>"
+                ))
+            },
+            Cow::Borrowed,
+        );
+
         MessageBuilder::new()
-            .from(from)
-            .header(
-                "To",
-                HeaderType::Address(Address::List(to.map(|to| (*to).into()).collect())),
-            )
+            .from(envelope.from.clone())
+            .header("To", envelope.to_header())
             .header("Auto-Submitted", HeaderType::Text("auto-generated".into()))
             .message_id(format!("{}@{}", make_boundary("."), submitter))
-            .subject(format!(
-                "Report Domain: {} Submitter: {} Report-ID: <{}>",
-                self.domain(),
-                submitter,
-                self.report_id()
-            ))
+            .subject(subject)
             .text_body(format!(
                 concat!(
                     "DMARC aggregate report from {}\r\n\r\n",
@@ -56,36 +151,44 @@ impl Report {
                     "Submitter: {}\r\n",
                     "Report-ID: {}\r\n",
                 ),
-                submitter,
-                self.domain(),
-                submitter,
-                self.report_id()
+                submitter, domain, submitter, report_id
             ))
             .attachment(
                 "application/gzip",
                 format!(
                     "{}!{}!{}!{}.xml.gz",
                     submitter,
-                    self.domain(),
-                    self.date_range_begin(),
-                    self.date_range_end()
+                    domain,
+                    self.report_metadata.date_range.begin,
+                    self.report_metadata.date_range.end
                 ),
                 compressed_bytes,
             )
             .write_to(writer)
     }
 
-    pub fn to_rfc5322<'x>(
-        &self,
-        submitter: &'x str,
-        from: impl Into<Address<'x>>,
-        to: impl Iterator<Item = &'x str>,
-    ) -> io::Result<String> {
+    /// Returns the report as an RFC 5322 message.
+    ///
+    /// Same as [`write_rfc5322`](Self::write_rfc5322), collected into a
+    /// `String`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the gzip encoder fails or the message is not valid
+    /// UTF-8.
+    pub fn to_rfc5322(&self, envelope: &ReportEnvelope<'_>) -> io::Result<String> {
         let mut buf = Vec::new();
-        self.write_rfc5322(submitter, from, to, &mut buf)?;
+        self.write_rfc5322(envelope, &mut buf)?;
         String::from_utf8(buf).map_err(io::Error::other)
     }
 
+    /// Serializes the report as an RFC 9990 XML document in the
+    /// `urn:ietf:params:xml:ns:dmarc-2.0` namespace.
+    ///
+    /// Optional elements are omitted when unset. The `version_published`
+    /// element and all extensions are not written. Multiple `errors` are
+    /// joined with `; ` into a single `error` element, and each record gets
+    /// at most one `spf` result (see [`AuthResults::spf`]).
     pub fn to_xml(&self) -> String {
         let mut xml = String::with_capacity(128);
         writeln!(&mut xml, "<?xml version=\"1.0\" encoding=\"UTF-8\" ?>").ok();
@@ -94,13 +197,12 @@ impl Report {
             "<feedback xmlns=\"urn:ietf:params:xml:ns:dmarc-2.0\">"
         )
         .ok();
-        if self.version != 0.0 {
-            // RFC 9990 Section 3.1.1.2: the report format version MUST be 1.0
-            writeln!(&mut xml, "\t<version>{:.1}</version>", self.version).ok();
+        if let Some(version) = self.version {
+            writeln!(&mut xml, "\t<version>{}</version>", version.as_str()).ok();
         }
         self.report_metadata.to_xml(&mut xml);
         self.policy_published.to_xml(&mut xml);
-        for record in &self.record {
+        for record in &self.records {
             record.to_xml(&mut xml);
         }
         writeln!(&mut xml, "</feedback>").ok();
@@ -133,18 +235,13 @@ impl ReportMetadata {
         )
         .ok();
         self.date_range.to_xml(xml);
-        match self.error.len() {
-            0 => {}
-            1 => {
-                writeln!(xml, "\t\t<error>{}</error>", escape_xml(&self.error[0])).ok();
+        match self.errors.as_slice() {
+            [] => {}
+            [error] => {
+                writeln!(xml, "\t\t<error>{}</error>", escape_xml(error)).ok();
             }
-            _ => {
-                writeln!(
-                    xml,
-                    "\t\t<error>{}</error>",
-                    escape_xml(&self.error.join("; "))
-                )
-                .ok();
+            errors => {
+                writeln!(xml, "\t\t<error>{}</error>", escape_xml(&errors.join("; "))).ok();
             }
         }
         if let Some(generator) = &self.generator {
@@ -159,17 +256,17 @@ impl PolicyPublished {
         writeln!(xml, "\t<policy_published>").ok();
         writeln!(xml, "\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
         writeln!(xml, "\t\t<p>{}</p>", self.p).ok();
-        if self.sp != Disposition::Unspecified {
+        if self.sp != Policy::Unspecified {
             writeln!(xml, "\t\t<sp>{}</sp>", self.sp).ok();
         }
-        if self.np != Disposition::Unspecified {
+        if self.np != Policy::Unspecified {
             writeln!(xml, "\t\t<np>{}</np>", self.np).ok();
         }
-        if self.adkim != Alignment::Unspecified {
-            writeln!(xml, "\t\t<adkim>{}</adkim>", self.adkim).ok();
+        if let Some(adkim) = self.adkim {
+            writeln!(xml, "\t\t<adkim>{adkim}</adkim>").ok();
         }
-        if self.aspf != Alignment::Unspecified {
-            writeln!(xml, "\t\t<aspf>{}</aspf>", self.aspf).ok();
+        if let Some(aspf) = self.aspf {
+            writeln!(xml, "\t\t<aspf>{aspf}</aspf>").ok();
         }
         if self.discovery_method != Discovery::Unspecified {
             writeln!(
@@ -244,7 +341,7 @@ impl PolicyEvaluated {
 impl PolicyOverrideReason {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t\t\t<reason>").ok();
-        writeln!(xml, "\t\t\t\t\t<type>{}</type>", self.type_).ok();
+        writeln!(xml, "\t\t\t\t\t<type>{}</type>", self.kind).ok();
         if let Some(comment) = &self.comment {
             writeln!(xml, "\t\t\t\t\t<comment>{}</comment>", escape_xml(comment)).ok();
         }
@@ -252,7 +349,7 @@ impl PolicyOverrideReason {
     }
 }
 
-impl Identifier {
+impl Identifiers {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t<identifiers>").ok();
         if let Some(envelope_to) = &self.envelope_to {
@@ -279,24 +376,20 @@ impl Identifier {
     }
 }
 
-impl AuthResult {
+impl AuthResults {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t<auth_results>").ok();
         for dkim in &self.dkim {
             dkim.to_xml(xml);
         }
-        if let Some(spf) = self
-            .spf
-            .iter()
-            .find(|spf| spf.scope != SPFDomainScope::Helo)
-        {
+        if let Some(spf) = self.spf.iter().find(|spf| spf.scope != SpfScope::Helo) {
             spf.to_xml(xml);
         }
         writeln!(xml, "\t\t</auth_results>").ok();
     }
 }
 
-impl DKIMAuthResult {
+impl DkimAuthResult {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t\t<dkim>").ok();
         writeln!(xml, "\t\t\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
@@ -319,11 +412,11 @@ impl DKIMAuthResult {
     }
 }
 
-impl SPFAuthResult {
+impl SpfAuthResult {
     pub(crate) fn to_xml(&self, xml: &mut String) {
         writeln!(xml, "\t\t\t<spf>").ok();
         writeln!(xml, "\t\t\t\t<domain>{}</domain>", escape_xml(&self.domain)).ok();
-        if self.scope == SPFDomainScope::MailFrom {
+        if self.scope == SpfScope::MailFrom {
             writeln!(xml, "\t\t\t\t<scope>{}</scope>", self.scope).ok();
         }
         writeln!(xml, "\t\t\t\t<result>{}</result>", self.result).ok();
@@ -339,42 +432,23 @@ impl SPFAuthResult {
     }
 }
 
-impl Display for Alignment {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            Alignment::Strict => "s",
-            _ => "r",
-        })
-    }
-}
-
 impl Display for Disposition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Disposition::None | Disposition::Unspecified => "none",
+            Disposition::Pass => "pass",
             Disposition::Quarantine => "quarantine",
             Disposition::Reject => "reject",
         })
     }
 }
 
-impl Display for ActionDisposition {
+impl Display for DmarcStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            ActionDisposition::None | ActionDisposition::Unspecified => "none",
-            ActionDisposition::Pass => "pass",
-            ActionDisposition::Quarantine => "quarantine",
-            ActionDisposition::Reject => "reject",
-        })
-    }
-}
-
-impl Display for DmarcResult {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        f.write_str(match self {
-            DmarcResult::Pass => "pass",
-            DmarcResult::Fail => "fail",
-            DmarcResult::Unspecified => "",
+            DmarcStatus::Pass => "pass",
+            DmarcStatus::Fail => "fail",
+            DmarcStatus::Unspecified => "",
         })
     }
 }
@@ -401,39 +475,39 @@ impl Display for Discovery {
     }
 }
 
-impl Display for DkimResult {
+impl Display for DkimStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            DkimResult::None => "none",
-            DkimResult::Pass => "pass",
-            DkimResult::Fail => "fail",
-            DkimResult::Policy => "policy",
-            DkimResult::Neutral => "neutral",
-            DkimResult::TempError => "temperror",
-            DkimResult::PermError => "permerror",
+            DkimStatus::None => "none",
+            DkimStatus::Pass => "pass",
+            DkimStatus::Fail => "fail",
+            DkimStatus::Policy => "policy",
+            DkimStatus::Neutral => "neutral",
+            DkimStatus::TempError => "temperror",
+            DkimStatus::PermError => "permerror",
         })
     }
 }
 
-impl Display for SPFDomainScope {
+impl Display for SpfScope {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            SPFDomainScope::Helo => "helo",
-            SPFDomainScope::MailFrom | SPFDomainScope::Unspecified => "mfrom",
+            SpfScope::Helo => "helo",
+            SpfScope::MailFrom | SpfScope::Unspecified => "mfrom",
         })
     }
 }
 
-impl Display for SpfResult {
+impl Display for SpfStatus {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
-            SpfResult::None => "none",
-            SpfResult::Neutral => "neutral",
-            SpfResult::Pass => "pass",
-            SpfResult::Fail => "fail",
-            SpfResult::SoftFail => "softfail",
-            SpfResult::TempError => "temperror",
-            SpfResult::PermError => "permerror",
+            SpfStatus::None => "none",
+            SpfStatus::Neutral => "neutral",
+            SpfStatus::Pass => "pass",
+            SpfStatus::Fail => "fail",
+            SpfStatus::SoftFail => "softfail",
+            SpfStatus::TempError => "temperror",
+            SpfStatus::PermError => "permerror",
         })
     }
 }
@@ -473,146 +547,201 @@ fn escape_xml(text: &str) -> Cow<'_, str> {
 
 #[cfg(test)]
 mod test {
-    use crate::report::{
-        ActionDisposition, Alignment, DKIMAuthResult, Discovery, Disposition, DkimResult,
-        DmarcResult, PolicyOverride, PolicyOverrideReason, Record, Report, SPFAuthResult,
-        SPFDomainScope, SpfResult,
+    use crate::{
+        dmarc::{Alignment, Policy},
+        report::{
+            ReportEnvelope,
+            dmarc::{
+                AggregateReport, AuthResults, DateRange, Discovery, Disposition, DkimAuthResult,
+                DkimStatus, DmarcStatus, Identifiers, PolicyEvaluated, PolicyOverride,
+                PolicyOverrideReason, PolicyPublished, Record, ReportMetadata, ReportVersion, Row,
+                SpfAuthResult, SpfScope, SpfStatus,
+            },
+        },
     };
     const MAX_REPORT_SIZE: usize = 25 * 1024 * 1024;
 
+    fn reason(kind: PolicyOverride, comment: &str) -> PolicyOverrideReason {
+        PolicyOverrideReason {
+            kind,
+            comment: Some(comment.to_string()),
+        }
+    }
+
     #[test]
     fn dmarc_report_generate() {
-        let report = Report::new()
-            .with_version(1.0)
-            .with_org_name("Initech Industries Incorporated")
-            .with_email("dmarc@initech.net")
-            .with_extra_contact_info("XMPP:dmarc@initech.net")
-            .with_report_id("abc-123")
-            .with_date_range_begin(12345)
-            .with_date_range_end(12346)
-            .with_error("Did not include TPS report cover.")
-            .with_generator("Initech DMARC Reporter v1.0")
-            .with_domain("example.org")
-            .with_adkim(Alignment::Relaxed)
-            .with_aspf(Alignment::Strict)
-            .with_p(Disposition::Quarantine)
-            .with_sp(Disposition::Reject)
-            .with_np(Disposition::None)
-            .with_discovery_method(Discovery::Treewalk)
-            .with_testing(true)
-            .with_record(
-                Record::new()
-                    .with_source_ip("192.168.1.2".parse().unwrap())
-                    .with_count(3)
-                    .with_action_disposition(ActionDisposition::Pass)
-                    .with_dmarc_dkim_result(DmarcResult::Pass)
-                    .with_dmarc_spf_result(DmarcResult::Fail)
-                    .with_policy_override_reason(
-                        PolicyOverrideReason::new(PolicyOverride::TrustedForwarder)
-                            .with_comment("it was forwarded"),
-                    )
-                    .with_policy_override_reason(
-                        PolicyOverrideReason::new(PolicyOverride::MailingList)
-                            .with_comment("sent from mailing list"),
-                    )
-                    .with_envelope_from("hello@example.org")
-                    .with_envelope_to("other@example.org")
-                    .with_header_from("bye@example.org")
-                    .with_dkim_auth_result(
-                        DKIMAuthResult::new()
-                            .with_domain("test.org")
-                            .with_selector("my-selector")
-                            .with_result(DkimResult::PermError)
-                            .with_human_result("failed to parse record"),
-                    )
-                    .with_spf_auth_result(
-                        SPFAuthResult::new()
-                            .with_domain("test.org")
-                            .with_scope(SPFDomainScope::MailFrom)
-                            .with_result(SpfResult::SoftFail)
-                            .with_human_result("dns timed out"),
-                    ),
-            )
-            .with_record(
-                Record::new()
-                    .with_source_ip("a:b:c::e:f".parse().unwrap())
-                    .with_count(99)
-                    .with_action_disposition(ActionDisposition::Reject)
-                    .with_dmarc_dkim_result(DmarcResult::Fail)
-                    .with_dmarc_spf_result(DmarcResult::Pass)
-                    .with_policy_override_reason(
-                        PolicyOverrideReason::new(PolicyOverride::LocalPolicy)
-                            .with_comment("on the white list"),
-                    )
-                    .with_policy_override_reason(
-                        PolicyOverrideReason::new(PolicyOverride::PolicyTestMode)
-                            .with_comment("policy in test mode"),
-                    )
-                    .with_envelope_from("hello2example.org")
-                    .with_envelope_to("other2@example.org")
-                    .with_header_from("bye2@example.org")
-                    .with_dkim_auth_result(
-                        DKIMAuthResult::new()
-                            .with_domain("test2.org")
-                            .with_selector("my-other-selector")
-                            .with_result(DkimResult::Neutral)
-                            .with_human_result("something went wrong"),
-                    )
-                    .with_spf_auth_result(
-                        SPFAuthResult::new()
-                            .with_domain("test.org")
-                            .with_scope(SPFDomainScope::MailFrom)
-                            .with_result(SpfResult::None)
-                            .with_human_result("no policy found"),
-                    ),
-            );
+        let report = AggregateReport {
+            version: Some(ReportVersion::V1),
+            report_metadata: ReportMetadata {
+                org_name: "Initech Industries Incorporated".to_string(),
+                email: "dmarc@initech.net".to_string(),
+                extra_contact_info: Some("XMPP:dmarc@initech.net".to_string()),
+                report_id: "abc-123".to_string(),
+                date_range: DateRange {
+                    begin: 12345,
+                    end: 12346,
+                },
+                errors: vec!["Did not include TPS report cover.".to_string()],
+                generator: Some("Initech DMARC Reporter v1.0".to_string()),
+            },
+            policy_published: PolicyPublished {
+                domain: "example.org".to_string(),
+                adkim: Some(Alignment::Relaxed),
+                aspf: Some(Alignment::Strict),
+                p: Policy::Quarantine,
+                sp: Policy::Reject,
+                np: Policy::None,
+                discovery_method: Discovery::Treewalk,
+                testing: true,
+                ..Default::default()
+            },
+            records: vec![
+                Record {
+                    row: Row {
+                        source_ip: Some("192.168.1.2".parse().unwrap()),
+                        count: 3,
+                        policy_evaluated: PolicyEvaluated {
+                            disposition: Disposition::Pass,
+                            dkim: DmarcStatus::Pass,
+                            spf: DmarcStatus::Fail,
+                            reason: vec![
+                                reason(PolicyOverride::TrustedForwarder, "it was forwarded"),
+                                reason(PolicyOverride::MailingList, "sent from mailing list"),
+                            ],
+                        },
+                    },
+                    identifiers: Identifiers {
+                        envelope_to: Some("other@example.org".to_string()),
+                        envelope_from: "hello@example.org".to_string(),
+                        header_from: "bye@example.org".to_string(),
+                    },
+                    auth_results: AuthResults {
+                        dkim: vec![DkimAuthResult {
+                            domain: "test.org".to_string(),
+                            selector: "my-selector".to_string(),
+                            result: DkimStatus::PermError,
+                            human_result: Some("failed to parse record".to_string()),
+                        }],
+                        spf: vec![SpfAuthResult {
+                            domain: "test.org".to_string(),
+                            scope: SpfScope::MailFrom,
+                            result: SpfStatus::SoftFail,
+                            human_result: Some("dns timed out".to_string()),
+                        }],
+                    },
+                    extensions: vec![],
+                },
+                Record {
+                    row: Row {
+                        source_ip: Some("a:b:c::e:f".parse().unwrap()),
+                        count: 99,
+                        policy_evaluated: PolicyEvaluated {
+                            disposition: Disposition::Reject,
+                            dkim: DmarcStatus::Fail,
+                            spf: DmarcStatus::Pass,
+                            reason: vec![
+                                reason(PolicyOverride::LocalPolicy, "on the white list"),
+                                reason(PolicyOverride::PolicyTestMode, "policy in test mode"),
+                            ],
+                        },
+                    },
+                    identifiers: Identifiers {
+                        envelope_to: Some("other2@example.org".to_string()),
+                        envelope_from: "hello2example.org".to_string(),
+                        header_from: "bye2@example.org".to_string(),
+                    },
+                    auth_results: AuthResults {
+                        dkim: vec![DkimAuthResult {
+                            domain: "test2.org".to_string(),
+                            selector: "my-other-selector".to_string(),
+                            result: DkimStatus::Neutral,
+                            human_result: Some("something went wrong".to_string()),
+                        }],
+                        spf: vec![SpfAuthResult {
+                            domain: "test.org".to_string(),
+                            scope: SpfScope::MailFrom,
+                            result: SpfStatus::None,
+                            human_result: Some("no policy found".to_string()),
+                        }],
+                    },
+                    extensions: vec![],
+                },
+            ],
+            extensions: vec![],
+        };
 
         let message = report
-            .to_rfc5322(
-                "initech.net",
-                ("Initech Industries", "noreply-dmarc@initech.net"),
-                ["dmarc-reports@example.org"].iter().copied(),
-            )
+            .to_rfc5322(&ReportEnvelope {
+                from: ("Initech Industries", "noreply-dmarc@initech.net").into(),
+                to: vec!["dmarc-reports@example.org"],
+                submitter: "initech.net",
+                report_domain: "",
+                subject: None,
+            })
             .unwrap();
-        let parsed_report = Report::parse_rfc5322(message.as_bytes(), MAX_REPORT_SIZE).unwrap();
+        let parsed_report =
+            AggregateReport::parse_rfc5322(message.as_bytes(), MAX_REPORT_SIZE).unwrap();
 
         assert_eq!(report, parsed_report);
     }
 
     #[test]
     fn dmarc_report_generate_single_spf_result() {
-        let xml = Report::new()
-            .with_version(1.0)
-            .with_org_name("Initech Industries Incorporated")
-            .with_email("dmarc@initech.net")
-            .with_report_id("abc-123")
-            .with_date_range_begin(12345)
-            .with_date_range_end(12346)
-            .with_domain("example.org")
-            .with_p(Disposition::Reject)
-            .with_record(
-                Record::new()
-                    .with_source_ip("192.168.1.2".parse().unwrap())
-                    .with_count(1)
-                    .with_action_disposition(ActionDisposition::Reject)
-                    .with_dmarc_dkim_result(DmarcResult::Fail)
-                    .with_dmarc_spf_result(DmarcResult::Fail)
-                    .with_envelope_from("example.org")
-                    .with_header_from("example.org")
-                    .with_spf_auth_result(
-                        SPFAuthResult::new()
-                            .with_domain("mail.example.org")
-                            .with_scope(SPFDomainScope::Helo)
-                            .with_result(SpfResult::Pass),
-                    )
-                    .with_spf_auth_result(
-                        SPFAuthResult::new()
-                            .with_domain("example.org")
-                            .with_scope(SPFDomainScope::MailFrom)
-                            .with_result(SpfResult::Fail),
-                    ),
-            )
-            .to_xml();
+        let xml = AggregateReport {
+            version: Some(ReportVersion::V1),
+            report_metadata: ReportMetadata {
+                org_name: "Initech Industries Incorporated".to_string(),
+                email: "dmarc@initech.net".to_string(),
+                report_id: "abc-123".to_string(),
+                date_range: DateRange {
+                    begin: 12345,
+                    end: 12346,
+                },
+                ..Default::default()
+            },
+            policy_published: PolicyPublished {
+                domain: "example.org".to_string(),
+                p: Policy::Reject,
+                ..Default::default()
+            },
+            records: vec![Record {
+                row: Row {
+                    source_ip: Some("192.168.1.2".parse().unwrap()),
+                    count: 1,
+                    policy_evaluated: PolicyEvaluated {
+                        disposition: Disposition::Reject,
+                        dkim: DmarcStatus::Fail,
+                        spf: DmarcStatus::Fail,
+                        reason: vec![],
+                    },
+                },
+                identifiers: Identifiers {
+                    envelope_to: None,
+                    envelope_from: "example.org".to_string(),
+                    header_from: "example.org".to_string(),
+                },
+                auth_results: AuthResults {
+                    dkim: vec![],
+                    spf: vec![
+                        SpfAuthResult {
+                            domain: "mail.example.org".to_string(),
+                            scope: SpfScope::Helo,
+                            result: SpfStatus::Pass,
+                            human_result: None,
+                        },
+                        SpfAuthResult {
+                            domain: "example.org".to_string(),
+                            scope: SpfScope::MailFrom,
+                            result: SpfStatus::Fail,
+                            human_result: None,
+                        },
+                    ],
+                },
+                extensions: vec![],
+            }],
+            extensions: vec![],
+        }
+        .to_xml();
 
         assert_eq!(xml.matches("\t\t\t<spf>\n").count(), 1, "{xml}");
         assert!(xml.contains("<version>1.0</version>"), "{xml}");

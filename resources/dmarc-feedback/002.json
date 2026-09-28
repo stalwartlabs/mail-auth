@@ -1,5 +1,5 @@
 {
-  "version": 0.0,
+  "version": null,
   "report_metadata": {
     "org_name": "google.com",
     "email": "noreply-dmarc-support@google.com",
@@ -9,7 +9,8 @@
       "begin": 1661558400,
       "end": 1661644799
     },
-    "error": []
+    "errors": [],
+    "generator": null
   },
   "policy_published": {
     "domain": "example.org",
@@ -18,10 +19,12 @@
     "aspf": "Relaxed",
     "p": "None",
     "sp": "None",
+    "np": "Unspecified",
     "testing": false,
+    "discovery_method": "Unspecified",
     "fo": null
   },
-  "record": [
+  "records": [
     {
       "row": {
         "source_ip": "209.85.220.41",
