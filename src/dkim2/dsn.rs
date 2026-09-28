@@ -13,7 +13,7 @@ use crate::{
     AuthenticatedMessage, MessageAuthenticator, Parameters, ResolverCache, TxtRecord,
     dkim2::sign::now, dns::NoCache,
 };
-use mail_parser::{MessageParser, MimeHeaders, PartType};
+use mail_parser::MessageParser;
 use std::marker::PhantomData;
 
 /// An inbound delivery status notification (DSN) and the message it returns.
@@ -70,18 +70,15 @@ impl<'x> Dkim2Dsn<'x> {
         let message = MessageParser::new()
             .parse(raw_message)
             .ok_or(Dkim2DsnFailure::DsnUnparseable)?;
-        let PartType::Multipart(children) = &message.root_part().body else {
+        let root = message.root_part();
+        if !root.is_multipart() {
             return Err(Dkim2DsnFailure::DsnUnparseable);
-        };
+        }
 
         let mut returned = None;
-        for child in children {
-            let part = message
-                .parts
-                .get(*child as usize)
-                .ok_or(Dkim2DsnFailure::DsnUnparseable)?;
+        for part in root.children() {
             let slice = raw_message
-                .get(part.offset_body as usize..part.offset_end as usize)
+                .get(part.offset_body() as usize..part.offset_end() as usize)
                 .ok_or(Dkim2DsnFailure::DsnUnparseable)?;
             if part.is_content_type("message", "rfc822") {
                 returned = Some((slice, true));

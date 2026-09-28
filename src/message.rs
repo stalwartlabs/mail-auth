@@ -23,7 +23,7 @@ use crate::{
     dkim2,
     headers::{AuthenticatedHeader, Header, HeaderParser},
 };
-use mail_parser::{Address, HeaderName, HeaderValue, Message, parsers::MessageStream};
+use mail_parser::{AddressList, HeaderForm, HeaderName, Message};
 
 const EXPECTED_HEADER_COUNT: usize = 32;
 
@@ -112,20 +112,29 @@ impl<'x> AuthenticatedMessage<'x> {
     /// [`parse_with_opts`](Self::parse_with_opts).
     pub fn from_parsed<'y>(parsed: &'y Message<'x>, raw_message: &'x [u8], strict: bool) -> Self {
         let root = parsed.root_part();
+        let headers = root.headers();
         let mut message = AuthenticatedMessage {
             raw_message,
-            body_offset: root.raw_body_offset(),
-            headers: Vec::with_capacity(root.headers.len()),
+            body_offset: root.offset_body(),
+            headers: Vec::with_capacity(headers.len()),
             ..Default::default()
         };
+        let raw_range = |from: u32, to: u32| {
+            raw_message
+                .get(from as usize..to as usize)
+                .unwrap_or_default()
+        };
 
-        for header in root.headers() {
-            let name = &raw_message[header.offset_field as usize..header.offset_start as usize - 1];
-            let value = &raw_message[header.offset_start as usize..header.offset_end as usize];
+        for header in headers {
+            let name = raw_range(
+                header.offset_field(),
+                header.offset_start().saturating_sub(1),
+            );
+            let value = raw_range(header.offset_start(), header.offset_end());
 
-            match &header.name {
+            match header.name() {
                 HeaderName::From => {
-                    message.parse_from(&header.value);
+                    message.parse_from(header.value().as_address());
                 }
                 HeaderName::Date => {
                     message.date_header_present = true;
@@ -242,7 +251,7 @@ impl<'x> AuthenticatedMessage<'x> {
                     name
                 }
                 AuthenticatedHeader::From(name) => {
-                    self.parse_from(&MessageStream::new(value).parse_address());
+                    self.parse_from(HeaderForm::Addresses.parse(value).value().as_address());
                     name
                 }
                 AuthenticatedHeader::Other(name) => name,
@@ -351,23 +360,13 @@ impl<'x> AuthenticatedMessage<'x> {
         self.errors.push(Header::new(name, value, err));
     }
 
-    fn parse_from(&mut self, value: &HeaderValue<'x>) {
-        match value {
-            HeaderValue::Address(Address::List(list)) => {
-                self.from.extend(
-                    list.iter()
-                        .filter_map(|a| a.address.as_ref().map(|a| a.to_lowercase())),
-                );
-            }
-            HeaderValue::Address(Address::Group(group_list)) => {
-                self.from.extend(group_list.iter().flat_map(|group| {
-                    group
-                        .addresses
-                        .iter()
-                        .filter_map(|a| a.address.as_ref().map(|a| a.to_lowercase()))
-                }))
-            }
-            _ => (),
+    fn parse_from(&mut self, addresses: Option<AddressList<'_>>) {
+        if let Some(addresses) = addresses {
+            self.from.extend(
+                addresses
+                    .mailboxes()
+                    .filter_map(|mailbox| mailbox.address().map(str::to_lowercase)),
+            );
         }
     }
 

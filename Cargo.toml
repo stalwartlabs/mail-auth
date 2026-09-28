@@ -26,12 +26,11 @@ dns-doh = ["dep:reqwest", "dep:web-time", "dep:hickory-proto"]
 arc = []
 report = ["quick-xml", "zip"]
 test = []
-rkyv = ["dep:rkyv", "mail-parser/rkyv"]
 
 [dependencies]
 flate2 = "1.1"
 encodify = "1.0"
-mail-parser = { version = "0.11.9", features = ["full_encoding"] }
+mail-parser = { version = "1.0", features = ["full_encoding"] }
 quick-xml = { version = "0.42", optional = true }
 hashify =  { version = "0.3" }
 idna = "1.1"
@@ -52,7 +51,6 @@ hickory-resolver = { version = "0.26", optional = true }
 hickory-proto = { version = "0.26", optional = true }
 zip = { version = "8.5", optional = true, default-features = false, features = ["deflate-flate2"] }
 rand = { version = "0.10", optional = true }
-rkyv = { version = "0.8", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 mail-builder = { version = "2.0" }
@@ -99,3 +97,4 @@ unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [patch.crates-io]
 mail-builder = { path = "../mail-builder" }
+mail-parser = { path = "../mail-parser" }

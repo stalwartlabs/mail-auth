@@ -33,10 +33,6 @@ mod parse;
 
 /// Reporting period covered by an aggregate report (`date_range` element).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct DateRange {
     /// Start of the period in seconds since the Unix epoch (`begin`).
     pub begin: u64,
@@ -46,10 +42,6 @@ pub struct DateRange {
 
 /// Information about the reporting organization (`report_metadata` element).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct ReportMetadata {
     /// Name of the reporting organization (`org_name`).
     pub org_name: String,
@@ -74,10 +66,6 @@ pub struct ReportMetadata {
 /// Policy applied to the messages of a row (`disposition` element of
 /// `policy_evaluated`).
 #[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum Disposition {
     /// No action was taken (`none`).
     None,
@@ -94,10 +82,6 @@ pub enum Disposition {
 
 /// DMARC policy published by the domain owner (`policy_published` element).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct PolicyPublished {
     /// Domain whose DMARC record was applied (`domain`). This is the Report
     /// Domain of the generated report message.
@@ -137,10 +121,6 @@ pub struct PolicyPublished {
 /// Method used to discover the DMARC policy record (`discovery_method`
 /// element).
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum Discovery {
     /// Public Suffix List lookup, as in RFC 7489 (`psl`).
     Psl,
@@ -154,10 +134,6 @@ pub enum Discovery {
 /// DMARC-aligned result of one mechanism (`dkim` and `spf` elements of
 /// `policy_evaluated`).
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum DmarcStatus {
     /// The mechanism passed and was aligned (`pass`).
     Pass,
@@ -172,10 +148,6 @@ pub enum DmarcStatus {
 /// Reason the applied disposition differs from the published policy (`type`
 /// element of `reason`).
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum PolicyOverride {
     /// A local policy overrode the published one (`local_policy`).
     LocalPolicy,
@@ -193,10 +165,6 @@ pub enum PolicyOverride {
 
 /// One policy override reason (`reason` element of `policy_evaluated`).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct PolicyOverrideReason {
     /// Kind of override (`type`).
     pub kind: PolicyOverride,
@@ -206,10 +174,6 @@ pub struct PolicyOverrideReason {
 
 /// Result of applying the DMARC policy to a row (`policy_evaluated` element).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct PolicyEvaluated {
     /// Action taken on the messages (`disposition`).
     pub disposition: Disposition,
@@ -224,10 +188,6 @@ pub struct PolicyEvaluated {
 
 /// Source and count of the messages of a record (`row` element).
 #[derive(Debug, Clone, Hash, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct Row {
     /// IP address the messages came from (`source_ip`). `None` when the
     /// element is absent or not a valid address.
@@ -244,10 +204,6 @@ pub struct Row {
 /// Only the `name` and `definition` attributes are kept; the extension content
 /// is skipped. Extensions are not written by [`AggregateReport::to_xml`].
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct Extension {
     /// Extension name (`name` attribute).
     pub name: String,
@@ -257,10 +213,6 @@ pub struct Extension {
 
 /// Identifiers of the messages of a record (`identifiers` element).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct Identifiers {
     /// Domain of the envelope recipient (`envelope_to`).
     pub envelope_to: Option<String>,
@@ -273,10 +225,6 @@ pub struct Identifiers {
 /// Result of verifying one DKIM signature (`result` element of an
 /// `auth_results/dkim` element).
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum DkimStatus {
     /// The message was not signed (`none`). Also used when the element is
     /// absent or has an unrecognized value.
@@ -300,10 +248,6 @@ pub enum DkimStatus {
 
 /// Raw result of one DKIM signature (`dkim` element of `auth_results`).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct DkimAuthResult {
     /// Signing domain, from the signature's `d=` tag (`domain`).
     pub domain: String,
@@ -318,10 +262,6 @@ pub struct DkimAuthResult {
 /// Identity checked by SPF (`scope` element of an `auth_results/spf`
 /// element).
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum SpfScope {
     /// The `HELO` identity (`helo`, RFC 7489 only).
     Helo,
@@ -336,10 +276,6 @@ pub enum SpfScope {
 /// Result of an SPF check (`result` element of an `auth_results/spf`
 /// element).
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum SpfStatus {
     /// No SPF record was found (`none`). Also used when the element is absent
     /// or has an unrecognized value.
@@ -363,10 +299,6 @@ pub enum SpfStatus {
 
 /// Raw result of one SPF check (`spf` element of `auth_results`).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct SpfAuthResult {
     /// Domain that was checked (`domain`).
     pub domain: String,
@@ -381,10 +313,6 @@ pub struct SpfAuthResult {
 /// Raw authentication results of a record, before DMARC alignment
 /// (`auth_results` element).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct AuthResults {
     /// DKIM results, one per `dkim` element.
     pub dkim: Vec<DkimAuthResult>,
@@ -402,10 +330,6 @@ pub struct AuthResults {
 /// [`Record::with_spf_output`], [`Record::with_dmarc_output`],
 /// [`Record::with_dkim2_output`] and `with_arc_output` (feature `arc`).
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct Record {
     /// Message source, count and policy evaluation (`row`).
     pub row: Row,
@@ -420,10 +344,6 @@ pub struct Record {
 
 /// DMARC aggregate report (`feedback` element), as defined in RFC 9990.
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct AggregateReport {
     /// Report format version (`version`). `None` when the element is absent
     /// or holds a version other than 1.0; not written in that case.
@@ -448,10 +368,6 @@ pub struct AggregateReport {
 /// [`ReportVersion::V1`] as the number `1.0` and accepts `1`, `1.0` or the
 /// string `"1.0"`.
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum ReportVersion {
     /// Version 1.0.
     V1,

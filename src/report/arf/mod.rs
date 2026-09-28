@@ -31,10 +31,6 @@ mod parse;
 /// [`into_owned`](Self::into_owned) to detach them. Build a new report with
 /// [`FeedbackReport::new`] and struct update syntax.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct FeedbackReport<'x> {
     /// Kind of feedback (`Feedback-Type`).
     pub feedback_type: FeedbackType,
@@ -43,35 +39,27 @@ pub struct FeedbackReport<'x> {
     pub arrival_date: Option<i64>,
     /// Authentication results for the original message, one per
     /// `Authentication-Results` field.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub authentication_results: Vec<Cow<'x, str>>,
     /// Number of incidents the report represents (`Incidents`). Parsing
     /// defaults to 1; the field is written only when greater than 1.
     pub incidents: u32,
     /// Envelope ID of the original message (`Original-Envelope-Id`).
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub original_envelope_id: Option<Cow<'x, str>>,
     /// Envelope sender of the original message (`Original-Mail-From`).
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub original_mail_from: Option<Cow<'x, str>>,
     /// Envelope recipient of the original message (`Original-Rcpt-To`).
     /// When the field repeats, the last value is kept.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub original_rcpt_to: Option<Cow<'x, str>>,
     /// Domains the report concerns, one per `Reported-Domain` field.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub reported_domains: Vec<Cow<'x, str>>,
     /// URIs the report concerns, one per `Reported-URI` field.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub reported_uris: Vec<Cow<'x, str>>,
     /// Host name of the MTA generating the report (`Reporting-MTA`), without
     /// the `dns;` type prefix, which is added when writing.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub reporting_mta: Option<Cow<'x, str>>,
     /// IP address the original message came from (`Source-IP`).
     pub source_ip: Option<IpAddr>,
     /// Software that generated the report (`User-Agent`).
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub user_agent: Option<Cow<'x, str>>,
     /// ARF version (`Version`), 1 for RFC 5965. Parsing yields 0 when the
     /// field is absent or not a number.
@@ -87,34 +75,26 @@ pub struct FeedbackReport<'x> {
     pub delivery_result: DeliveryResult,
     /// Retrieved ADSP record (`DKIM-ADSP-DNS`, RFC 6591). Auth-failure
     /// reports only.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub dkim_adsp_dns: Option<Cow<'x, str>>,
     /// Base64 of the canonicalized body the verifier hashed
     /// (`DKIM-Canonicalized-Body`, RFC 6591). Auth-failure reports only.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub dkim_canonicalized_body: Option<Cow<'x, str>>,
     /// Base64 of the canonicalized header the verifier hashed
     /// (`DKIM-Canonicalized-Header`, RFC 6591). Auth-failure reports only.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub dkim_canonicalized_header: Option<Cow<'x, str>>,
     /// Signing domain of the failed signature (`DKIM-Domain`, RFC 6591).
     /// Auth-failure reports only.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub dkim_domain: Option<Cow<'x, str>>,
     /// Agent or user identifier of the failed signature (`DKIM-Identity`, RFC
     /// 6591). Auth-failure reports only.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub dkim_identity: Option<Cow<'x, str>>,
     /// Selector of the failed signature (`DKIM-Selector`, RFC 6591).
     /// Auth-failure reports only.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub dkim_selector: Option<Cow<'x, str>>,
     /// Retrieved DKIM key record (`DKIM-Selector-DNS`, RFC 6591).
     /// Auth-failure reports only.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub dkim_selector_dns: Option<Cow<'x, str>>,
     /// Retrieved SPF record (`SPF-DNS`, RFC 6591). Auth-failure reports only.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub spf_dns: Option<Cow<'x, str>>,
     /// Which mechanisms produced an aligned identifier
     /// (`Identity-Alignment`, DMARC failure reports). Auth-failure reports
@@ -122,20 +102,14 @@ pub struct FeedbackReport<'x> {
     pub identity_alignment: IdentityAlignment,
 
     /// Full original message, from the `message/rfc822` part.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub message: Option<Cow<'x, str>>,
     /// Header section of the original message, from the
     /// `text/rfc822-headers` part. Written only when `message` is `None`.
-    #[cfg_attr(feature = "rkyv", rkyv(with = rkyv::with::Map<rkyv::with::AsOwned>))]
     pub headers: Option<Cow<'x, str>>,
 }
 
 /// Kind of authentication failure (`Auth-Failure` field, RFC 6591).
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum AuthFailureType {
     /// The message failed an ADSP check (`adsp`).
     Adsp,
@@ -157,10 +131,6 @@ pub enum AuthFailureType {
 /// Mechanisms that produced a DMARC-aligned identifier
 /// (`Identity-Alignment` field).
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum IdentityAlignment {
     /// Neither mechanism produced an aligned identifier (`none`).
     None,
@@ -178,10 +148,6 @@ pub enum IdentityAlignment {
 /// What the receiver did with the original message (`Delivery-Result`
 /// field, RFC 6591).
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum DeliveryResult {
     /// Delivered to the recipient (`delivered`).
     Delivered,
@@ -200,10 +166,6 @@ pub enum DeliveryResult {
 
 /// Kind of feedback (`Feedback-Type` field, RFC 5965).
 #[derive(Debug, Clone, PartialEq, Eq, Copy, Serialize, Deserialize, Default)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum FeedbackType {
     /// Unsolicited or abusive email (`abuse`).
     Abuse,

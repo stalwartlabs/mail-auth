@@ -15,8 +15,34 @@ use crate::{
     },
     utf8::{into_string_lossy, to_str_lossy},
 };
-use mail_parser::{HeaderValue, MessageParser, MimeHeaders, PartType, parsers::MessageStream};
+use mail_parser::{HeaderForm, MessageParser, MessagePart};
 use std::borrow::Cow;
+
+trait PartBody {
+    fn body_in<'x>(&self, source: &'x [u8]) -> Cow<'x, [u8]>;
+}
+
+impl PartBody for MessagePart<'_> {
+    fn body_in<'x>(&self, source: &'x [u8]) -> Cow<'x, [u8]> {
+        match self.text() {
+            Some(Cow::Borrowed(text)) => reborrow(source, text.as_bytes()),
+            Some(Cow::Owned(text)) => Cow::Owned(text.into_bytes()),
+            None => match self.decoded() {
+                Cow::Borrowed(body) => reborrow(source, body),
+                Cow::Owned(body) => Cow::Owned(body),
+            },
+        }
+    }
+}
+
+fn reborrow<'x>(source: &'x [u8], bytes: &[u8]) -> Cow<'x, [u8]> {
+    bytes
+        .as_ptr()
+        .addr()
+        .checked_sub(source.as_ptr().addr())
+        .and_then(|offset| source.get(offset..offset + bytes.len()))
+        .map_or_else(|| Cow::Owned(bytes.to_vec()), Cow::Borrowed)
+}
 
 impl<'x> FeedbackReport<'x> {
     /// Extracts and parses the feedback report in an RFC 5322 message.
@@ -42,55 +68,24 @@ impl<'x> FeedbackReport<'x> {
         if message.len() > max_size {
             return Err(ReportError::TooLarge);
         }
-        let message = MessageParser::new()
+        let parsed = MessageParser::new()
             .parse(message)
             .ok_or(ReportError::MailParse)?;
         let mut feedback = Err(ReportError::NotFound);
         let mut included_message = None;
         let mut included_headers = None;
 
-        for part in message.parts {
-            let arf = match part.body {
-                PartType::Text(arf) | PartType::Html(arf)
-                    if part.is_content_type("message", "feedback-report") =>
-                {
-                    match arf {
-                        Cow::Borrowed(arf) => Cow::Borrowed(arf.as_bytes()),
-                        Cow::Owned(arf) => Cow::Owned(arf.into_bytes()),
-                    }
-                }
-                PartType::Binary(arf) | PartType::InlineBinary(arf)
-                    if part.is_content_type("message", "feedback-report") =>
-                {
-                    arf
-                }
-                PartType::Text(headers) if part.is_content_type("text", "rfc822-headers") => {
-                    included_headers = match headers {
-                        Cow::Borrowed(arf) => Cow::Borrowed(arf.as_bytes()),
-                        Cow::Owned(arf) => Cow::Owned(arf.into_bytes()),
-                    }
-                    .into();
-                    continue;
-                }
-                PartType::Message(message) => {
-                    included_message = match message.raw_message {
-                        Cow::Borrowed(message) => Cow::Borrowed(
-                            message
-                                .get(part.offset_body as usize..part.offset_end as usize)
-                                .unwrap_or_default(),
-                        ),
-                        message => message,
-                    }
-                    .into();
-                    continue;
-                }
-                _ => continue,
-            };
-
-            feedback = match arf {
-                Cow::Borrowed(arf) => FeedbackReport::parse_arf(arf),
-                Cow::Owned(arf) => FeedbackReport::parse_arf(&arf).map(|f| f.into_owned()),
-            };
+        for part in parsed.root().parts() {
+            if let Some(nested) = part.nested() {
+                included_message = Some(reborrow(message, nested.raw()));
+            } else if part.is_content_type("message", "feedback-report") {
+                feedback = match part.body_in(message) {
+                    Cow::Borrowed(arf) => FeedbackReport::parse_arf(arf),
+                    Cow::Owned(arf) => FeedbackReport::parse_arf(&arf).map(|f| f.into_owned()),
+                };
+            } else if part.is_content_type("text", "rfc822-headers") && part.is_text() {
+                included_headers = Some(part.body_in(message));
+            }
         }
 
         feedback.map(|mut feedback| {
@@ -135,7 +130,7 @@ impl<'x> FeedbackReport<'x> {
 
             hashify::fnc_map_ignore_case!(key,
                 b"Arrival-Date" => {
-                    if let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date() {
+                    if let Some(dt) = HeaderForm::Date.parse(value).value().as_datetime() {
                         f.arrival_date = dt.to_timestamp().into();
                     }
                 },
@@ -256,7 +251,7 @@ impl<'x> FeedbackReport<'x> {
                     });
                 },
                 b"Received-Date" => {
-                    if let HeaderValue::DateTime(dt) = MessageStream::new(value).parse_date() {
+                    if let Some(dt) = HeaderForm::Date.parse(value).value().as_datetime() {
                         f.arrival_date = dt.to_timestamp().into();
                     }
                 },

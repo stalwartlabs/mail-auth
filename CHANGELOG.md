@@ -21,11 +21,12 @@ This release reorganizes the public API. Most changes are renames and moves; the
 - `impl From<&Dkim2Dsn> for Parameters`, so `verify_dkim2_dsn(&dsn, envelope)` works without a cache like the other verifiers.
 - `Dkim2Error::RecipeSyntax`, returned by `Recipe::to_json`, `Recipe::from_json` and `MessageInstance::parse` for an invalid recipe. `Dkim2Error` is exhaustive, so a `match` over it needs a new arm.
 - `TlsReport::write_rfc5322_json()`.
-- `Display` for `dmarc::Alignment` (`r`, `s`); serde and rkyv derives for `dmarc::Alignment` and `dmarc::Policy`; `Default` for `dmarc::Policy` (`Unspecified`).
+- `Display` for `dmarc::Alignment` (`r`, `s`); serde derives for `dmarc::Alignment` and `dmarc::Policy`; `Default` for `dmarc::Policy` (`Unspecified`).
 - `Display` and `std::error::Error` for `report::ReportError`.
 - Documentation on every public item; the crate now builds with `#![warn(missing_docs)]`.
 
 ### Changed
+- Bump `mail-parser` to 1.0. `AuthenticatedMessage::from_parsed` takes a 1.0 `Message`, and `tlsrpt::DateRange` holds the 1.0 `DateTime`.
 - Replaced `base64` with `encodify` for better performance and reduced memory usage.
 - UTF-8 validation uses `simdutf8` for DKIM and DKIM2 `Display` output, ARF report parsing and generation, and DKIM2, DMARC and MTA-STS tag values. Lossy conversions validate with SIMD first and fall back to `String::from_utf8_lossy` only for invalid input.
 - The `common` module is gone. Its contents moved to `dns`, `crypto`, `headers`, `message`, `auth_results`, `iprev` and `dkim`. DMARC aggregate report types moved to `report::dmarc` and ARF types to `report::arf`.
@@ -36,7 +37,7 @@ This release reorganizes the public API. Most changes are renames and moves; the
 - `verify_dkim2` reports a `Message-Instance` with an invalid recipe as `PermError(Dkim2(RecipeSyntax))` instead of `PermError(Dkim2(Modified))`.
 - `authorized_report_addresses` (formerly `verify_dmarc_report_address`) returns `Result<Vec<&T>>`: `Err` on a DNS resolver error, otherwise the authorized addresses (possibly empty).
 - `AggregateReport::parse_xml` and `FeedbackReport::parse_arf` return `Result<Self, ReportError>`. `FeedbackReport::parse_rfc5322` takes a `max_size` limit on the raw message length (the DMARC and TLS parsers limit the decompressed report size).
-- Report version fields hold `Option<ReportVersion>`. Versions other than `1.0` parse as `None`, from XML and with serde. The published alignment fields are `Option<dmarc::Alignment>` and the published policy fields are `dmarc::Policy`. These, and the renamed fields (`records`, `errors`, `kind`, `reported_domains`, `reported_uris`), which have no serde aliases, change the serde and rkyv representation of `AggregateReport` and `FeedbackReport`; data stored with 0.13 must be migrated.
+- Report version fields hold `Option<ReportVersion>`. Versions other than `1.0` parse as `None`, from XML and with serde. The published alignment fields are `Option<dmarc::Alignment>` and the published policy fields are `dmarc::Policy`. These, and the renamed fields (`records`, `errors`, `kind`, `reported_domains`, `reported_uris`), which have no serde aliases, change the serde representation of `AggregateReport` and `FeedbackReport`; data stored with 0.13 must be migrated.
 - ARF reports generated without a subject use "Authentication Failure Report" or "Abuse Report". Their Message-ID uses `ReportEnvelope::submitter` when `reporting_mta` is not set or empty (previously `localhost`). The `To` header is written as an address list (`To: <ruf@example.com>`) built from `ReportEnvelope::to`, as for the other report types, so pass several recipients as separate entries rather than one comma-separated string.
 - `Dkim2Signer::sign_with_message_instance` returns `Dkim2Signed` with `message_instance: None`, since the caller supplies and writes the instance.
 - `DkimSigner::expiration` and `ArcSealer::expiration` take a `Duration`, rounded up to whole seconds; the resulting `x=` saturates at `u64::MAX` instead of overflowing.
@@ -44,6 +45,7 @@ This release reorganizes the public API. Most changes are renames and moves; the
 - The `builder`, `generate` and `parse` submodules of `report::dmarc`, `report::arf` and `report::tlsrpt` are private; they only held inherent methods, which remain available on the report types.
 
 ### Removed
+- The `rkyv` feature. mail-parser 1.0 no longer supports rkyv, and `tlsrpt::DateRange` holds its `DateTime`.
 - The `Version` enum and the `version`/`v` fields of `SpfRecord`, `DmarcRecord` and `AtpsRecord`. The parsers already rejected every other version.
 - The getter and `with_` setter pairs on report types (`AggregateReport`, `Record`, `DkimAuthResult`, `SpfAuthResult`, `PolicyOverrideReason`, `FeedbackReport`, `FailureDetails`). Report fields are public; build reports with struct literals and `..Default::default()`.
 - `report::Alignment` and the published-policy `report::Disposition` (replaced by `dmarc::Alignment` and `dmarc::Policy`), with their `FromStr` implementations and the `From<&dmarc::Alignment>` and `From<&dmarc::Policy>` conversions into them.

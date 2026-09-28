@@ -22,10 +22,6 @@ mod parse;
 
 /// SMTP TLS report (RFC 8460 section 4).
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct TlsReport {
     /// Name of the reporting organization (`organization-name`).
     #[serde(rename = "organization-name")]
@@ -55,10 +51,6 @@ pub struct TlsReport {
 /// Entry of the `policies` array: a policy with its session counts and
 /// failure details.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct PolicyResult {
     /// The policy that was applied (`policy`).
     #[serde(rename = "policy")]
@@ -76,10 +68,6 @@ pub struct PolicyResult {
 
 /// Description of an applied policy (`policy` object).
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct PolicyDetails {
     /// Kind of policy (`policy-type`).
     #[serde(rename = "policy-type")]
@@ -104,10 +92,6 @@ pub struct PolicyDetails {
 
 /// Session counts for one policy (`summary` object).
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct Summary {
     /// Number of sessions that established TLS successfully
     /// (`total-successful-session-count`).
@@ -124,10 +108,6 @@ pub struct Summary {
 /// Group of failed sessions sharing a failure type and endpoints (entry of
 /// the `failure-details` array).
 #[derive(Debug, Default, Hash, PartialEq, Eq, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct FailureDetails {
     /// Kind of failure (`result-type`).
     #[serde(rename = "result-type")]
@@ -169,10 +149,6 @@ pub struct FailureDetails {
 /// Both ends are RFC 3339 timestamps in JSON. A timestamp that does not parse
 /// becomes the Unix epoch.
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize, Clone)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub struct DateRange {
     /// Start of the period (`start-datetime`).
     #[serde(rename = "start-datetime")]
@@ -188,10 +164,6 @@ pub struct DateRange {
 
 /// Kind of policy (`policy-type` member).
 #[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone, Copy)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum PolicyType {
     /// DANE TLSA policy (`tlsa`).
     #[serde(rename = "tlsa")]
@@ -211,10 +183,6 @@ pub enum PolicyType {
 /// Kind of TLS negotiation failure (`result-type` member, RFC 8460 section
 /// 4.3).
 #[derive(Debug, Default, Clone, Copy, Hash, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 pub enum FailureType {
     /// The receiving MX does not support STARTTLS (`starttls-not-supported`).
     #[serde(rename = "starttls-not-supported")]

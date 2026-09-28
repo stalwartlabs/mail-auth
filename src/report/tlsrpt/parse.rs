@@ -10,7 +10,7 @@
 use super::TlsReport;
 use crate::report::{ReportError, read_capped};
 use flate2::read::GzDecoder;
-use mail_parser::{MessageParser, MimeHeaders, PartType};
+use mail_parser::{MessageParser, PartKind};
 use std::io::Cursor;
 use zip::ZipArchive;
 
@@ -51,9 +51,9 @@ impl TlsReport {
             .ok_or(ReportError::MailParse)?;
         let mut error = ReportError::NotFound;
 
-        for part in &message.parts {
-            match &part.body {
-                PartType::Binary(report) | PartType::InlineBinary(report) => {
+        for part in message.root().parts() {
+            match part.kind() {
+                PartKind::Binary | PartKind::InlineBinary => {
                     enum ReportType {
                         Json,
                         Gzip,
@@ -84,6 +84,7 @@ impl TlsReport {
                     } else {
                         continue;
                     };
+                    let report = part.decoded();
 
                     match rt {
                         ReportType::Gzip => {
@@ -118,7 +119,7 @@ impl TlsReport {
                                 }
                             }
                         }
-                        ReportType::Json => match Self::parse_json(report) {
+                        ReportType::Json => match Self::parse_json(&report) {
                             Ok(report) => return Ok(report),
                             Err(err) => {
                                 error = err;

@@ -33,10 +33,6 @@ pub struct MtaStsRecord {
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 /// An SMTP TLS Reporting TXT record (RFC 8460 Section 3), published at
 /// `_smtp._tls.<domain>`.
 ///
@@ -49,10 +45,6 @@ pub struct TlsRptRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 /// A TLS report destination from the `rua` tag of a [`TlsRptRecord`].
 pub enum ReportUri {
     /// A `mailto:` destination: the email address, without the scheme.

@@ -21,7 +21,7 @@ use crate::{
     },
 };
 use flate2::read::GzDecoder;
-use mail_parser::{MessageParser, MimeHeaders, PartType};
+use mail_parser::{MessageParser, PartKind};
 use quick_xml::XmlVersion;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::reader::Reader;
@@ -54,9 +54,9 @@ impl AggregateReport {
             .ok_or(ReportError::MailParse)?;
         let mut error = ReportError::NotFound;
 
-        for part in &message.parts {
-            match &part.body {
-                PartType::Text(report)
+        for part in message.root().parts() {
+            match part.kind() {
+                PartKind::Text
                     if part
                         .content_type()
                         .and_then(|ct| ct.subtype())
@@ -66,6 +66,7 @@ impl AggregateReport {
                             .and_then(|n| n.rsplit_once('.'))
                             .is_some_and(|(_, e)| e.eq_ignore_ascii_case("xml")) =>
                 {
+                    let report = part.text().unwrap_or_default();
                     match AggregateReport::parse_xml(report.as_bytes()) {
                         Ok(feedback) => return Ok(feedback),
                         Err(err) => {
@@ -73,7 +74,7 @@ impl AggregateReport {
                         }
                     }
                 }
-                PartType::Binary(report) | PartType::InlineBinary(report) => {
+                PartKind::Binary | PartKind::InlineBinary => {
                     enum ReportType {
                         Xml,
                         Gzip,
@@ -104,6 +105,7 @@ impl AggregateReport {
                     } else {
                         continue;
                     };
+                    let report = part.decoded();
 
                     match rt {
                         ReportType::Gzip => {
@@ -138,7 +140,7 @@ impl AggregateReport {
                                 }
                             }
                         }
-                        ReportType::Xml => match AggregateReport::parse_xml(report) {
+                        ReportType::Xml => match AggregateReport::parse_xml(&report) {
                             Ok(feedback) => return Ok(feedback),
                             Err(err) => {
                                 error = err;

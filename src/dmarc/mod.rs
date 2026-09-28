@@ -67,10 +67,6 @@ pub struct DmarcRecord {
 }
 
 #[derive(Debug, Hash, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 /// A reporting destination from the `rua=` or `ruf=` tag of a DMARC record.
 ///
 /// Only `mailto:` URIs are kept; the scheme is stripped and the address is
@@ -84,10 +80,6 @@ pub struct Uri {
 }
 
 #[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 /// Identifier alignment mode, the `adkim=` and `aspf=` tags (checked as
 /// described in RFC 9989, Section 4.10.2). Displays as `r` or `s`.
 pub enum Alignment {
@@ -132,10 +124,6 @@ pub enum FailureOptions {
 }
 
 #[derive(Debug, Hash, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[cfg_attr(
-    feature = "rkyv",
-    derive(rkyv::Serialize, rkyv::Deserialize, rkyv::Archive)
-)]
 /// A requested handling policy, the `p=`, `sp=` and `np=` tags (RFC 9989,
 /// Section 4.7). Displays as `none`, `quarantine` or `reject`.
 pub enum Policy {
