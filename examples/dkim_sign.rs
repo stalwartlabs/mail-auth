@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
+use encodify::base64;
 use mail_auth::{
     common::{
         crypto::RsaKey,
@@ -12,7 +13,6 @@ use mail_auth::{
     },
     dkim::DkimSigner,
 };
-use mail_parser::decoders::base64::base64_decode;
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
 
 const RSA_PRIVATE_KEY: &str = r#"-----BEGIN RSA PRIVATE KEY-----
@@ -57,8 +57,10 @@ fn main() {
 
     // Sign an e-mail message using ED25519-SHA256
     let pk_ed = Ed25519Key::from_seed_and_public_key(
-        &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
-        &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
+        &base64::LENIENT.decode(ED25519_PRIVATE_KEY).unwrap(),
+        &base64::LENIENT
+            .decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1)
+            .unwrap(),
     )
     .unwrap();
 

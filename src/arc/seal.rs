@@ -202,7 +202,8 @@ mod test {
         },
         dkim::DkimSigner,
     };
-    use mail_parser::{MessageParser, decoders::base64::base64_decode};
+    use encodify::base64;
+    use mail_parser::MessageParser;
     use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
     use std::time::{Duration, Instant};
 
@@ -252,9 +253,10 @@ mod test {
             );
 
         // Create private keys
-        let pk_ed_public =
-            base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap();
-        let pk_ed_private = base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap();
+        let pk_ed_public = base64::LENIENT
+            .decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1)
+            .unwrap();
+        let pk_ed_private = base64::LENIENT.decode(ED25519_PRIVATE_KEY).unwrap();
 
         // Create DKIM-signed message
         let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(

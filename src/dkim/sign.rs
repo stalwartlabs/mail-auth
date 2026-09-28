@@ -106,7 +106,8 @@ pub mod test {
         dkim::{Atps, Canonicalization, DkimSigner, DomainKeyReport, HashAlgorithm, Signature},
     };
     use core::str;
-    use mail_parser::{MessageParser, decoders::base64::base64_decode};
+    use encodify::base64;
+    use mail_parser::MessageParser;
     use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, pem::PemObject};
     use std::time::{Duration, Instant};
 
@@ -205,8 +206,10 @@ pub mod test {
 
         // Create private keys
         let pk_ed = Ed25519Key::from_seed_and_public_key(
-            &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
-            &base64_decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1.as_bytes()).unwrap(),
+            &base64::LENIENT.decode(ED25519_PRIVATE_KEY).unwrap(),
+            &base64::LENIENT
+                .decode(ED25519_PUBLIC_KEY.rsplit_once("p=").unwrap().1)
+                .unwrap(),
         )
         .unwrap();
 

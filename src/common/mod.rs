@@ -9,7 +9,6 @@ use crate::{Error, IprevResult};
 use std::borrow::Cow;
 
 pub mod auth_results;
-pub mod base32;
 pub mod cache;
 pub mod crypto;
 #[cfg(feature = "dns-doh")]

@@ -14,7 +14,7 @@ use crate::{
         parse::TagParser,
     },
 };
-use mail_parser::decoders::base64::base64_decode;
+use encodify::base64;
 
 const I: u64 = b'i' as u64;
 const M: u64 = b'm' as u64;
@@ -114,8 +114,9 @@ impl Signature {
                 MF => {
                     present |= HAS_MF;
                     mail_from = Some(
-                        decode_b64_string(&header.text(false))
-                            .ok_or(Error::Dkim2(Dkim2Error::SignatureSyntax(signature.i)))?,
+                        base64::LENIENT
+                            .decode_to_string(header.text(false))
+                            .map_err(|_| Error::Dkim2(Dkim2Error::SignatureSyntax(signature.i)))?,
                     );
                     has_envelope = true;
                 }
@@ -125,8 +126,9 @@ impl Signature {
                     rcpt_to = value
                         .split(',')
                         .map(|v| {
-                            decode_b64_string(v)
-                                .ok_or(Error::Dkim2(Dkim2Error::SignatureSyntax(signature.i)))
+                            base64::LENIENT
+                                .decode_to_string(v)
+                                .map_err(|_| Error::Dkim2(Dkim2Error::SignatureSyntax(signature.i)))
                         })
                         .collect::<Result<_, _>>()?;
                     has_envelope = true;
@@ -214,7 +216,7 @@ impl MessageInstance {
                 }
                 R => {
                     let encoded = header.text(false);
-                    let json = base64_decode(encoded.as_bytes()).ok_or(Error::Base64)?;
+                    let json = base64::LENIENT.decode(encoded).map_err(|_| Error::Base64)?;
                     instance.recipe = Some(super::recipe::Recipe::from_json(&json)?);
                 }
                 _ => header.ignore(),
@@ -223,10 +225,6 @@ impl MessageInstance {
 
         Ok(instance)
     }
-}
-
-pub(crate) fn decode_b64_string(value: &str) -> Option<String> {
-    base64_decode(value.as_bytes()).and_then(|bytes| String::from_utf8(bytes).ok())
 }
 
 pub(crate) fn parse_signature_values(value: &str) -> Option<Vec<SignatureValue>> {
@@ -249,7 +247,7 @@ pub(crate) fn parse_signature_values(value: &str) -> Option<Vec<SignatureValue>>
         let b = if signature.is_empty() {
             Vec::new()
         } else {
-            base64_decode(signature.as_bytes())?
+            base64::LENIENT.decode(signature).ok()?
         };
         values.push(SignatureValue {
             selector: selector.to_string(),
@@ -265,8 +263,8 @@ pub(crate) fn parse_hashes(value: &str) -> Option<Vec<MessageHash>> {
     for set in value.split(',') {
         let mut parts = set.splitn(3, ':');
         let name = parts.next()?.trim();
-        let header_hash = base64_decode(parts.next()?.trim().as_bytes())?;
-        let body_hash = base64_decode(parts.next()?.trim().as_bytes())?;
+        let header_hash = base64::LENIENT.decode(parts.next()?.trim()).ok()?;
+        let body_hash = base64::LENIENT.decode(parts.next()?.trim()).ok()?;
         hashes.push(MessageHash {
             name: HashAlgorithm::parse(name),
             header_hash,
@@ -364,11 +362,8 @@ mod test {
     #[test]
     fn message_instance_parse_huge_recipe_does_not_panic_on_parse() {
         let json = br#"{"b":[{"c":[1,4294967295]}]}"#;
-        let b64 = mail_builder::encoders::Base64Encoder::new()
-            .encode(json)
-            .unwrap();
         let mut hdr = b"m=2; h=sha256:QQ==:Qg==; r=".to_vec();
-        hdr.extend_from_slice(&b64);
+        base64::STANDARD.encode_append(json, &mut hdr);
         let mi = MessageInstance::parse(&hdr).unwrap();
         assert!(mi.recipe.is_some());
     }

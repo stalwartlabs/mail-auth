@@ -9,16 +9,21 @@ use crate::{
     AuthenticationResults,
     common::{
         crypto::Algorithm,
-        headers::{HeaderWriter, IntegerBuffer, Writer, write_integer, write_wrapped_base64},
+        headers::{HeaderWriter, IntegerBuffer, Writer, write_integer},
     },
     dkim::Canonicalization,
 };
+use encodify::{Fold, base64};
 
 impl Signature {
     pub(crate) fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"arc-message-signature:"[..], &b" "[..]),
             _ => (&b"ARC-Message-Signature: "[..], &b"\r\n\t"[..]),
+        };
+        let fold = Fold {
+            separator: new_line,
+            ..Fold::DKIM
         };
         writer.write(header);
         writer.write(b"i=");
@@ -78,7 +83,7 @@ impl Signature {
 
         for (tag, value) in [(&b"; bh="[..], &self.bh), (&b"; b="[..], &self.b)] {
             writer.write_len(tag, &mut bw);
-            write_wrapped_base64(writer, value, &mut bw, new_line);
+            base64::STANDARD.encode_folded(value, &mut bw, fold, |piece| writer.write(piece));
         }
 
         writer.write(b";");
@@ -94,6 +99,10 @@ impl Seal {
             (&b"arc-seal:"[..], &b" "[..])
         } else {
             (&b"ARC-Seal: "[..], &b"\r\n\t"[..])
+        };
+        let fold = Fold {
+            separator: new_line,
+            ..Fold::DKIM
         };
 
         writer.write(header);
@@ -128,7 +137,7 @@ impl Seal {
         }
 
         writer.write_len(b"b=", &mut bw);
-        write_wrapped_base64(writer, &self.b, &mut bw, new_line);
+        base64::STANDARD.encode_folded(&self.b, &mut bw, fold, |piece| writer.write(piece));
 
         writer.write(b";");
         if as_header {

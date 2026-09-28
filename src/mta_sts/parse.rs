@@ -75,7 +75,7 @@ impl TxtRecordParser for TlsRpt {
                 RUA => loop {
                     match record.flag_value() {
                         (MAILTO, b':') => {
-                            let mail_to = record.text_qp(Vec::with_capacity(20), false, true);
+                            let mail_to = record.uri(Vec::new());
                             if !mail_to.is_empty() {
                                 rua.push(ReportUri::Mail(mail_to));
                             }
@@ -83,7 +83,7 @@ impl TxtRecordParser for TlsRpt {
                         (HTTPS, b':') => {
                             let mut url = Vec::with_capacity(20);
                             url.extend_from_slice(b"https:");
-                            let url = record.text_qp(url, false, true);
+                            let url = record.uri(url);
                             if !url.is_empty() {
                                 rua.push(ReportUri::Http(url));
                             }
@@ -158,6 +158,31 @@ mod tests {
                     rua: vec![
                         ReportUri::Mail("tlsrpt@mydomain.com".to_string()),
                         ReportUri::Http("https://tlsrpt.mydomain.com/v1".to_string()),
+                    ],
+                },
+            ),
+            (
+                "v=TLSRPTv1; rua=https://reporting.example.com/v1/tlsrpt?id=1",
+                TlsRpt {
+                    rua: vec![ReportUri::Http(
+                        "https://reporting.example.com/v1/tlsrpt?id=1".to_string(),
+                    )],
+                },
+            ),
+            (
+                "v=TLSRPTv1; rua=https://r.example.com/tlsrpt?id=abc&token=xyz",
+                TlsRpt {
+                    rua: vec![ReportUri::Http(
+                        "https://r.example.com/tlsrpt?id=abc&token=xyz".to_string(),
+                    )],
+                },
+            ),
+            (
+                "v=TLSRPTv1; rua=mailto:a@example.com , mailto:b=c@example.com ;",
+                TlsRpt {
+                    rua: vec![
+                        ReportUri::Mail("a@example.com".to_string()),
+                        ReportUri::Mail("b=c@example.com".to_string()),
                     ],
                 },
             ),

@@ -83,7 +83,7 @@ impl Signature {
                 }
                 D => signature.d = header.text(true),
                 H => signature.h = header.items(),
-                I => signature.i = header.text_qp(Vec::new(), true, false),
+                I => signature.i = header.text_qp(true).ok_or(Error::ParseError)?,
                 L => signature.l = header.number().unwrap_or(0),
                 S => signature.s = header.text(true),
                 T => signature.t = header.number().unwrap_or(0),
@@ -303,13 +303,13 @@ impl TxtRecordParser for DomainKeyReport {
         while let Some(key) = header.key() {
             match key {
                 RA => {
-                    record.ra = header.text_qp(Vec::new(), true, false);
+                    record.ra = header.text_qp(true).unwrap_or_default();
                 }
                 RP => {
                     record.rp = std::cmp::min(header.number().unwrap_or(0), 100) as u8;
                 }
                 RS => {
-                    record.rs = header.text_qp(Vec::new(), false, false).into();
+                    record.rs = header.text_qp(false);
                 }
                 RR => {
                     record.rr = 0;
@@ -442,9 +442,10 @@ impl ItemParser for Service {
 
 #[cfg(test)]
 mod test {
-    use mail_parser::decoders::base64::base64_decode;
+    use encodify::base64;
 
     use crate::{
+        Error,
         common::{
             crypto::{Algorithm, R_HASH_SHA1, R_HASH_SHA256},
             headers::HeaderWriter,
@@ -476,16 +477,19 @@ mod test {
                     d: "stalw.art".into(),
                     s: "default".into(),
                     i: "".into(),
-                    bh: base64_decode(b"QoiUNYyUV+1tZ/xUPRcE+gST2zAStvJx1OK078Ylm5s=").unwrap(),
-                    b: base64_decode(
-                        concat!(
-                            "Du0rvdzNodI6b5bhlUaZZ+gpXJi0VwjY/3qL7lS0wzKutNVCbvdJuZObGdAcv",
-                            "eVI/RNQh2gxW4H2ynMS3B+Unse1YLJQwdjuGxsCEKBqReKlsEKT8JlO/7b2AvxR",
-                            "9Q+M2aHD5kn9dbNIKnN/PKouutaXmm18QwL5EPEN9DHXSqQ="
+                    bh: base64::LENIENT
+                        .decode(b"QoiUNYyUV+1tZ/xUPRcE+gST2zAStvJx1OK078Ylm5s=")
+                        .unwrap(),
+                    b: base64::LENIENT
+                        .decode(
+                            concat!(
+                                "Du0rvdzNodI6b5bhlUaZZ+gpXJi0VwjY/3qL7lS0wzKutNVCbvdJuZObGdAcv",
+                                "eVI/RNQh2gxW4H2ynMS3B+Unse1YLJQwdjuGxsCEKBqReKlsEKT8JlO/7b2AvxR",
+                                "9Q+M2aHD5kn9dbNIKnN/PKouutaXmm18QwL5EPEN9DHXSqQ="
+                            )
+                            .as_bytes(),
                         )
-                        .as_bytes(),
-                    )
-                    .unwrap(),
+                        .unwrap(),
                     h: vec!["Subject".into(), "To".into(), "From".into()],
                     z: vec![],
                     l: 0,
@@ -515,15 +519,18 @@ mod test {
                     d: "example.net".into(),
                     s: "brisbane".into(),
                     i: "@eng.example.net".into(),
-                    bh: base64_decode(b"MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=").unwrap(),
-                    b: base64_decode(
-                        concat!(
-                            "dzdVyOfAKCdLXdJOc9G2q8LoXSlEniSbav+yuU4zGe",
-                            "eruD00lszZVoG4ZHRNiYzR"
+                    bh: base64::LENIENT
+                        .decode(b"MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODkwMTI=")
+                        .unwrap(),
+                    b: base64::LENIENT
+                        .decode(
+                            concat!(
+                                "dzdVyOfAKCdLXdJOc9G2q8LoXSlEniSbav+yuU4zGe",
+                                "eruD00lszZVoG4ZHRNiYzR"
+                            )
+                            .as_bytes(),
                         )
-                        .as_bytes(),
-                    )
-                    .unwrap(),
+                        .unwrap(),
                     h: vec!["from".into(), "to".into(), "subject".into(), "date".into()],
                     z: vec![
                         "From:foo@eng.example.net".into(),
@@ -559,17 +566,20 @@ mod test {
                     d: "example.com".into(),
                     s: "brisbane".into(),
                     i: "joe @football.example.com".into(),
-                    bh: base64_decode(b"2jUSOH9NhtVGCQWNr9BrIAPreKQjO6Sn7XIkfJVOzv8=").unwrap(),
-                    b: base64_decode(
-                        concat!(
-                            "AuUoFEfDxTDkHlLXSZEpZj79LICEps6eda7W3deTVFOk4yAUoqOB",
-                            "4nujc7YopdG5dWLSdNg6xNAZpOPr+kHxt1IrE+NahM6L/LbvaHut",
-                            "KVdkLLkpVaVVQPzeRDI009SO2Il5Lu7rDNH6mZckBdrIx0orEtZV",
-                            "4bmp/YzhwvcubU4="
+                    bh: base64::LENIENT
+                        .decode(b"2jUSOH9NhtVGCQWNr9BrIAPreKQjO6Sn7XIkfJVOzv8=")
+                        .unwrap(),
+                    b: base64::LENIENT
+                        .decode(
+                            concat!(
+                                "AuUoFEfDxTDkHlLXSZEpZj79LICEps6eda7W3deTVFOk4yAUoqOB",
+                                "4nujc7YopdG5dWLSdNg6xNAZpOPr+kHxt1IrE+NahM6L/LbvaHut",
+                                "KVdkLLkpVaVVQPzeRDI009SO2Il5Lu7rDNH6mZckBdrIx0orEtZV",
+                                "4bmp/YzhwvcubU4="
+                            )
+                            .as_bytes(),
                         )
-                        .as_bytes(),
-                    )
-                    .unwrap(),
+                        .unwrap(),
                     h: vec![
                         "Received".into(),
                         "From".into(),
@@ -611,6 +621,30 @@ mod test {
             let mut round_trip = Signature::parse(value.as_bytes()).unwrap();
             round_trip.z = result.z.clone();
             assert_eq!(round_trip, result, "{header:?}");
+        }
+    }
+
+    #[test]
+    fn dkim_signature_auid_qp() {
+        for (auid, expected) in [
+            (
+                "joe=40football.example.com",
+                Some("joe@football.example.com"),
+            ),
+            ("joe=3db@example.com", Some("joe=b@example.com")),
+            ("jo\r\n\te=\r\n\t40example.com", Some("joe@example.com")),
+            ("x=zz@evil.example", None),
+            ("joe=4@example.com", None),
+            ("joe@example.com=", None),
+        ] {
+            let header = format!(
+                "v=1; a=rsa-sha256; d=example.com; s=sel; h=from; i={auid}; bh=MTIz; b=dzdV;"
+            );
+            match (Signature::parse(header.as_bytes()), expected) {
+                (Ok(signature), Some(expected)) => assert_eq!(signature.i, expected, "{auid:?}"),
+                (Err(Error::ParseError), None) => {}
+                (result, _) => panic!("{auid:?}: unexpected {result:?}"),
+            }
         }
     }
 
@@ -703,6 +737,15 @@ mod test {
                         | RR_VERIFICATION
                         | RR_EXPIRATION,
                     rs: "Error Message".to_string().into(),
+                },
+            ),
+            (
+                "ra=dkim=2Derrors; rs=bad=zz;",
+                DomainKeyReport {
+                    ra: "dkim-errors".to_string(),
+                    rp: 100,
+                    rr: u8::MAX,
+                    rs: None,
                 },
             ),
         ] {

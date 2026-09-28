@@ -13,7 +13,7 @@ use crate::{
     dkim2::Dkim2Output,
 };
 use crate::{DnsError, common::crypto::CryptoError, dmarc::Policy};
-use mail_builder::encoders::base64::base64_encode_slice;
+use encodify::base64;
 use std::{
     borrow::Cow,
     fmt::{Display, Write},
@@ -59,11 +59,7 @@ impl<'x> AuthenticationResults<'x> {
             push_pvalue(&mut self.auth_results, &signature.s);
             if let Some(prefix) = signature.b.get(..6) {
                 self.auth_results.push_str(" header.b=");
-                let mut encoded = [0u8; 8];
-                let len = base64_encode_slice(prefix, &mut encoded);
-                self.auth_results.push_str(
-                    std::str::from_utf8(encoded.get(..len).unwrap_or_default()).unwrap_or_default(),
-                );
+                base64::STANDARD.encode_append(prefix, &mut self.auth_results);
             }
         }
 

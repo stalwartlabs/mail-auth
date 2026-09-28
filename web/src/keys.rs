@@ -12,8 +12,8 @@
     in a real-world application. Use at your own risk.
 */
 
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use mail_auth::dkim::generate::DkimKeyPair;
+use encodify::pem;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -45,21 +45,10 @@ pub fn generate_key(
     let pair = pair.map_err(|err| err.to_string())?;
     let generated = GeneratedKey {
         algorithm: k.to_string(),
-        private_pem: der_to_pem(label, pair.private_key()),
+        private_pem: pem::STANDARD.encode(label, pair.private_key()),
         public_key: pair.encoded_public_key(),
         dns_record_name: format!("{selector}._domainkey.{domain}"),
         dns_record_value: format!("v=DKIM1; k={k}; p={}", pair.encoded_public_key()),
     };
     serde_wasm_bindgen::to_value(&generated).map_err(|err| err.to_string())
-}
-
-fn der_to_pem(label: &str, der: &[u8]) -> String {
-    let encoded = STANDARD.encode(der);
-    let mut out = format!("-----BEGIN {label}-----\n");
-    for chunk in encoded.as_bytes().chunks(64) {
-        out.push_str(std::str::from_utf8(chunk).unwrap_or_default());
-        out.push('\n');
-    }
-    out.push_str(&format!("-----END {label}-----\n"));
-    out
 }

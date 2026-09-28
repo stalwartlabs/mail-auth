@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use mail_builder::encoders::base64::base64_encode_slice;
+use encodify::{Fold, base64};
 use memchr::{memchr, memchr2};
 
 impl<'x, T> Header<'x, T> {
@@ -24,6 +24,9 @@ pub trait HeaderStream<'x> {
 
 pub(crate) const MAX_HEADER_LINE_LEN: usize = 76;
 const MEMCHR_MIN_LEN: usize = 16;
+const BASE64_GROUP_LEN: usize = 4;
+const BASE64_FOLD: Fold<'static> =
+    Fold::new(MAX_HEADER_LINE_LEN - 1, b"\r\n\t", 0).with_granularity(BASE64_GROUP_LEN);
 
 pub struct HeaderFolder<'x, W: Writer> {
     writer: &'x mut W,
@@ -88,32 +91,12 @@ impl<'x, W: Writer> Writer for HeaderFolder<'x, W> {
         }
     }
 
-    fn write_chunked(&mut self, buf: &[u8], chunk_len: usize) {
-        if !(3..MAX_HEADER_LINE_LEN).contains(&chunk_len) || find_semicolon(buf).is_some() {
-            for chunk in buf.chunks(chunk_len.max(1)) {
-                self.write(chunk);
-            }
-            return;
-        }
-
-        let mut rest = buf;
-        while rest.len() >= chunk_len {
-            let whole_chunks = self.bytes_left.saturating_sub(1) / chunk_len;
-            if whole_chunks == 0 {
-                self.writer.write(b"\r\n\t");
-                self.bytes_left = MAX_HEADER_LINE_LEN;
-                continue;
-            }
-            let take = (whole_chunks * chunk_len).min(rest.len() - rest.len() % chunk_len);
-            let (head, tail) = rest.split_at(take);
-            self.writer.write(head);
-            self.bytes_left -= take;
-            rest = tail;
-        }
-
-        if !rest.is_empty() {
-            self.write(rest);
-        }
+    fn write_base64(&mut self, bytes: &[u8]) {
+        let mut column = MAX_HEADER_LINE_LEN.saturating_sub(self.bytes_left);
+        base64::STANDARD.encode_folded(bytes, &mut column, BASE64_FOLD, |piece| {
+            self.writer.write(piece)
+        });
+        self.bytes_left = MAX_HEADER_LINE_LEN.saturating_sub(column);
     }
 }
 
@@ -511,11 +494,8 @@ pub trait Writer {
         *len += buf.len();
     }
 
-    /// Writes `buf` as if it had been split into `chunk_len` sized pieces, each
-    /// passed to [`Writer::write`] in turn. Writers whose output only depends on
-    /// the concatenation of what they receive take the default implementation.
-    fn write_chunked(&mut self, buf: &[u8], _chunk_len: usize) {
-        self.write(buf);
+    fn write_base64(&mut self, bytes: &[u8]) {
+        base64::STANDARD.encode_chunks(bytes, |chunk| self.write(chunk));
     }
 }
 
@@ -564,58 +544,6 @@ impl IntegerBuffer {
 pub(crate) fn write_integer(writer: &mut impl Writer, value: u64) {
     let mut buffer = IntegerBuffer::new();
     writer.write(buffer.digits(value));
-}
-
-pub(crate) fn write_wrapped(
-    writer: &mut impl Writer,
-    value: &[u8],
-    bytes_written: &mut usize,
-    new_line: &[u8],
-) {
-    let mut rest = value;
-    while !rest.is_empty() {
-        let take = MAX_HEADER_LINE_LEN
-            .saturating_sub(*bytes_written)
-            .max(1)
-            .min(rest.len());
-        let (head, tail) = rest.split_at(take);
-        writer.write_len(head, bytes_written);
-        if *bytes_written >= MAX_HEADER_LINE_LEN {
-            writer.write(new_line);
-            *bytes_written = 1;
-        }
-        rest = tail;
-    }
-}
-
-pub(crate) const BASE64_GROUP_LEN: usize = 4;
-const BASE64_INPUT_LEN: usize = 192;
-const BASE64_OUTPUT_LEN: usize = BASE64_INPUT_LEN / 3 * BASE64_GROUP_LEN;
-
-pub(crate) fn write_base64(writer: &mut impl Writer, bytes: &[u8]) {
-    let mut buffer = [0u8; BASE64_OUTPUT_LEN];
-    for window in bytes.chunks(BASE64_INPUT_LEN) {
-        let written = base64_encode_slice(window, &mut buffer);
-        writer.write_chunked(buffer.get(..written).unwrap_or_default(), BASE64_GROUP_LEN);
-    }
-}
-
-pub(crate) fn write_wrapped_base64(
-    writer: &mut impl Writer,
-    bytes: &[u8],
-    bytes_written: &mut usize,
-    new_line: &[u8],
-) {
-    let mut buffer = [0u8; BASE64_OUTPUT_LEN];
-    for window in bytes.chunks(BASE64_INPUT_LEN) {
-        let written = base64_encode_slice(window, &mut buffer);
-        write_wrapped(
-            writer,
-            buffer.get(..written).unwrap_or_default(),
-            bytes_written,
-            new_line,
-        );
-    }
 }
 
 const FROM: u64 =

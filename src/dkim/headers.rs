@@ -5,23 +5,19 @@
  */
 
 use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
-use crate::common::headers::{
-    HEADER_CAPACITY, HeaderWriter, IntegerBuffer, Writer, write_wrapped, write_wrapped_base64,
-};
+use crate::common::headers::{HEADER_CAPACITY, HeaderWriter, IntegerBuffer, Writer};
+use encodify::{Fold, base64, qp};
 use std::fmt::{Display, Formatter};
-
-const HEX_DIGITS: &[u8; 16] = b"0123456789ABCDEF";
-
-#[inline(always)]
-fn is_quoted_printable(ch: u8) -> bool {
-    matches!(ch, 0..=0x20 | b';' | 0x7f..=u8::MAX)
-}
 
 impl Signature {
     pub fn write(&self, writer: &mut impl Writer, as_header: bool) {
         let (header, new_line) = match self.ch {
             Canonicalization::Relaxed if !as_header => (&b"dkim-signature:"[..], &b" "[..]),
             _ => (&b"DKIM-Signature: "[..], &b"\r\n\t"[..]),
+        };
+        let fold = Fold {
+            separator: new_line,
+            ..Fold::DKIM
         };
         writer.write(header);
         writer.write(b"v=1; a=");
@@ -79,33 +75,7 @@ impl Signature {
                 writer.write_len(b"; ", &mut bw);
             }
             writer.write_len(b"i=", &mut bw);
-
-            let mut rest = self.i.as_bytes();
-            while let Some(&ch) = rest.first() {
-                if is_quoted_printable(ch) {
-                    writer.write_len(
-                        &[
-                            b'=',
-                            HEX_DIGITS[(ch >> 4) as usize],
-                            HEX_DIGITS[(ch & 0x0f) as usize],
-                        ],
-                        &mut bw,
-                    );
-                    rest = rest.get(1..).unwrap_or_default();
-                    if bw >= 76 {
-                        writer.write(new_line);
-                        bw = 1;
-                    }
-                } else {
-                    let run = rest
-                        .iter()
-                        .position(|ch| is_quoted_printable(*ch))
-                        .unwrap_or(rest.len());
-                    let (head, tail) = rest.split_at(run);
-                    write_wrapped(writer, head, &mut bw, new_line);
-                    rest = tail;
-                }
-            }
+            qp::DKIM.encode_folded(&self.i, &mut bw, fold, |piece| writer.write(piece));
         }
 
         let mut integer = IntegerBuffer::new();
@@ -131,7 +101,7 @@ impl Signature {
 
         for (tag, value) in [(&b"; bh="[..], &self.bh), (&b"; b="[..], &self.b)] {
             writer.write_len(tag, &mut bw);
-            write_wrapped_base64(writer, value, &mut bw, new_line);
+            base64::STANDARD.encode_folded(value, &mut bw, fold, |piece| writer.write(piece));
         }
 
         writer.write(b";");

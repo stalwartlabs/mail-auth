@@ -580,7 +580,7 @@ mod test {
         },
         dkim::Canonicalization,
     };
-    use mail_builder::encoders::Base64Encoder;
+    use encodify::base64;
 
     #[test]
     #[allow(clippy::needless_collect)]
@@ -685,15 +685,7 @@ mod test {
                 }
                 .write(&mut hasher);
 
-                assert_eq!(
-                    String::from_utf8(
-                        Base64Encoder::new()
-                            .encode(hasher.complete().as_ref())
-                            .unwrap()
-                    )
-                    .unwrap(),
-                    hash,
-                );
+                assert_eq!(base64::STANDARD.encode(hasher.complete()), hash);
             }
         }
     }

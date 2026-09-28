@@ -4,10 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-use mail_parser::decoders::{
-    base64::base64_decode_slice, quoted_printable::quoted_printable_decode_char,
-};
-use memchr::{memchr, memchr_iter};
+use encodify::{base64, qp};
+use memchr::{memchr, memchr_iter, memchr2};
 use std::{borrow::Cow, slice::Iter};
 
 const MAX_ITEMS: usize = 32;
@@ -42,7 +40,8 @@ pub(crate) trait TagParser: Sized {
     fn key(&mut self) -> Option<u64>;
     fn value(&mut self) -> u64;
     fn text(&mut self, to_lower: bool) -> String;
-    fn text_qp(&mut self, base: Vec<u8>, to_lower: bool, stop_comma: bool) -> String;
+    fn text_qp(&mut self, to_lower: bool) -> Option<String>;
+    fn uri(&mut self, base: Vec<u8>) -> String;
     fn headers_qp<T: ItemParser>(&mut self) -> Vec<T>;
     fn number(&mut self) -> Option<u64>;
     fn items<T: ItemParser>(&mut self) -> Vec<T>;
@@ -60,7 +59,12 @@ pub(crate) trait ItemParser: Sized {
 
 #[inline(always)]
 fn split_tag_value(slice: &[u8]) -> (&[u8], &[u8]) {
-    match memchr(b';', slice) {
+    split_value_at(slice, memchr(b';', slice))
+}
+
+#[inline(always)]
+fn split_value_at(slice: &[u8], end: Option<usize>) -> (&[u8], &[u8]) {
+    match end {
         Some(pos) => (
             slice.get(..pos).unwrap_or(slice),
             slice.get(pos + 1..).unwrap_or_default(),
@@ -72,16 +76,6 @@ fn split_tag_value(slice: &[u8]) -> (&[u8], &[u8]) {
 #[inline(always)]
 fn is_text_stop(ch: u8, to_lower: bool) -> bool {
     ch.is_ascii_whitespace() || (to_lower && (ch.is_ascii_uppercase() || ch >= 0x7f))
-}
-
-#[inline(always)]
-fn is_qp_stop(ch: u8, stop_comma: bool) -> bool {
-    ch == b'=' || ch == b';' || ch.is_ascii_whitespace() || (stop_comma && ch == b',')
-}
-
-#[inline(always)]
-fn is_header_stop(ch: u8) -> bool {
-    ch == b'=' || ch == b'|' || ch == b';' || ch.is_ascii_whitespace()
 }
 
 #[inline(always)]
@@ -164,16 +158,6 @@ fn text_value(value: &[u8], pos: usize, to_lower: bool) -> String {
         String::from_utf8_lossy(&tag).to_lowercase()
     } else {
         vec_to_string(tag)
-    }
-}
-
-#[inline(always)]
-fn push_item<T: ItemParser>(tag: &mut Vec<u8>, tags: &mut Vec<T>) {
-    if !tag.is_empty() {
-        if let Some(parsed) = T::parse(tag) {
-            tags.push(parsed);
-        }
-        tag.clear();
     }
 }
 
@@ -312,127 +296,48 @@ impl TagParser for Iter<'_, u8> {
     }
 
     #[inline(always)]
-    fn text_qp(&mut self, mut tag: Vec<u8>, to_lower: bool, stop_comma: bool) -> String {
-        let mut rest = self.as_slice();
+    fn text_qp(&mut self, to_lower: bool) -> Option<String> {
+        let (value, tail) = split_tag_value(self.as_slice());
+        *self = tail.iter();
 
-        'outer: loop {
-            let Some(pos) = rest.iter().position(|&ch| is_qp_stop(ch, stop_comma)) else {
-                tag.extend_from_slice(rest);
-                rest = &[];
-                break;
-            };
-            let Some((head, next)) = rest.split_at_checked(pos) else {
-                break;
-            };
-            tag.extend_from_slice(head);
-            let Some((&ch, mut next)) = next.split_first() else {
-                break;
-            };
+        let mut tag = Vec::with_capacity(value.len());
+        qp::DKIM.decode_append(value, &mut tag).ok()?;
 
-            if ch == b';' || ch == b',' {
-                rest = next;
-                break;
-            } else if ch == b'=' {
-                let mut hex1 = 0;
-
-                while let Some((&ch, tail)) = next.split_first() {
-                    next = tail;
-                    if ch.is_ascii_hexdigit() {
-                        if hex1 != 0 {
-                            if let Some(ch) = quoted_printable_decode_char(hex1, ch) {
-                                tag.push(ch);
-                            }
-                            break;
-                        } else {
-                            hex1 = ch;
-                        }
-                    } else if ch == b';' {
-                        rest = next;
-                        break 'outer;
-                    } else if !ch.is_ascii_whitespace() {
-                        break;
-                    }
-                }
-            }
-
-            rest = next;
-        }
-
-        *self = rest.iter();
-
-        if !to_lower {
+        Some(if !to_lower {
             vec_to_string(tag)
         } else if tag.is_ascii() {
             tag.make_ascii_lowercase();
             vec_to_string(tag)
         } else {
             String::from_utf8_lossy(&tag).to_lowercase()
-        }
+        })
+    }
+
+    #[inline(always)]
+    fn uri(&mut self, mut base: Vec<u8>) -> String {
+        let slice = self.as_slice();
+        let (value, tail) = split_value_at(slice, memchr2(b';', b',', slice));
+        *self = tail.iter();
+
+        base.extend_from_slice(value.trim_ascii());
+        vec_to_string(base)
     }
 
     #[inline(always)]
     fn headers_qp<T: ItemParser>(&mut self) -> Vec<T> {
-        let mut tags = Vec::new();
-        let mut tag = Vec::with_capacity(20);
-        let mut rest = self.as_slice();
+        let (value, tail) = split_tag_value(self.as_slice());
+        *self = tail.iter();
 
-        'outer: loop {
-            let Some(pos) = rest.iter().position(|&ch| is_header_stop(ch)) else {
-                tag.extend_from_slice(rest);
-                rest = &[];
-                break;
-            };
-            let Some((head, next)) = rest.split_at_checked(pos) else {
-                break;
-            };
-            tag.extend_from_slice(head);
-            let Some((&ch, mut next)) = next.split_first() else {
-                break;
-            };
-
-            if ch == b';' {
-                rest = next;
-                break;
-            } else if ch == b'|' {
-                push_item(&mut tag, &mut tags);
-            } else if ch == b'=' {
-                let mut hex1 = 0;
-
-                while let Some((&ch, tail)) = next.split_first() {
-                    next = tail;
-                    if ch.is_ascii_hexdigit() {
-                        if hex1 != 0 {
-                            if let Some(ch) = quoted_printable_decode_char(hex1, ch) {
-                                tag.push(ch);
-                            }
-                            break;
-                        } else {
-                            hex1 = ch;
-                        }
-                    } else if ch == b'|' {
-                        push_item(&mut tag, &mut tags);
-                        break;
-                    } else if ch == b';' {
-                        rest = next;
-                        break 'outer;
-                    } else if !ch.is_ascii_whitespace() {
-                        break;
-                    }
-                }
+        let mut items = Vec::new();
+        let mut item = Vec::new();
+        for encoded in value.split(|&ch| ch == b'|') {
+            item.clear();
+            if qp::DKIM.decode_append(encoded, &mut item).is_ok() && !item.is_empty() {
+                items.extend(T::parse(&item));
             }
-
-            rest = next;
         }
 
-        *self = rest.iter();
-
-        if !tag.is_empty()
-            && let Some(tag) = T::parse(&tag)
-        {
-            tags.push(tag);
-        }
-
-        tags
+        items
     }
 
     #[inline(always)]
@@ -463,12 +368,12 @@ impl TagParser for Iter<'_, u8> {
     #[inline(always)]
     fn base64(&mut self) -> Option<Vec<u8>> {
         let slice = self.as_slice();
-        match base64_decode_slice(slice, b';') {
-            Some((decoded, consumed)) => {
-                *self = slice.get(consumed..).unwrap_or_default().iter();
+        match base64::LENIENT.decode_until(slice, b';') {
+            Ok((decoded, consumed)) => {
+                *self = slice.get(consumed + 1..).unwrap_or_default().iter();
                 Some(decoded)
             }
-            None => {
+            Err(_) => {
                 self.ignore();
                 None
             }

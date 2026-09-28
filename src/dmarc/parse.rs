@@ -10,7 +10,7 @@ use crate::{
     Error, Version,
     common::parse::{N, T, TagParser, TxtRecordParser, V, Y},
 };
-use mail_parser::decoders::quoted_printable::quoted_printable_decode_char;
+use encodify::hex::decode_pair;
 use std::slice::Iter;
 
 impl TxtRecordParser for Dmarc {
@@ -172,7 +172,7 @@ impl DMARCParser for Iter<'_, u8> {
                     while let Some(&ch) = self.next() {
                         if ch.is_ascii_hexdigit() {
                             if hex1 != 0 {
-                                if let Some(ch) = quoted_printable_decode_char(hex1, ch) {
+                                if let Some(ch) = decode_pair(hex1, ch) {
                                     match ch {
                                         b'@' => {
                                             found_at = true;

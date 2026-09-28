@@ -13,12 +13,12 @@
 */
 
 use crate::{load_key, normalize_eol};
-use base64::{Engine as _, engine::general_purpose::STANDARD};
 use mail_auth::{
     common::headers::HeaderWriter,
     dkim::DkimSigner,
     dkim2::{BodyRecipe, Dkim2Signed, Dkim2Signer, Hop, MessageInstance, Recipe, Step},
 };
+use encodify::base64;
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
@@ -163,8 +163,8 @@ fn instance_to_json(instance: Option<&MessageInstance>) -> String {
             .iter()
             .map(|hash| JsonHash {
                 algorithm: hash.name.map(|name| format!("{name:?}")),
-                header_hash: STANDARD.encode(&hash.header_hash),
-                body_hash: STANDARD.encode(&hash.body_hash),
+                header_hash: base64::STANDARD.encode(&hash.header_hash),
+                body_hash: base64::STANDARD.encode(&hash.body_hash),
             })
             .collect(),
         recipe: instance.recipe.as_ref().map(recipe_to_json),

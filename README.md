@@ -146,8 +146,8 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
 
     // Sign an e-mail message using ED25519-SHA256
     let pk_ed = Ed25519Key::from_bytes(
-        &base64_decode(ED25519_PUBLIC_KEY.as_bytes()).unwrap(),
-        &base64_decode(ED25519_PRIVATE_KEY.as_bytes()).unwrap(),
+        &base64::LENIENT.decode(ED25519_PUBLIC_KEY).unwrap(),
+        &base64::LENIENT.decode(ED25519_PRIVATE_KEY).unwrap(),
     )
     .unwrap();
     let signature_ed = DkimSigner::from_key(pk_ed)

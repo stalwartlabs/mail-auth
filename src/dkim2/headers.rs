@@ -5,9 +5,7 @@
  */
 
 use super::{ChainBinding, MessageInstance, Signature, SignatureValue};
-use crate::common::headers::{
-    HEADER_CAPACITY, HeaderFolder, HeaderWriter, Writer, write_base64, write_integer,
-};
+use crate::common::headers::{HEADER_CAPACITY, HeaderFolder, HeaderWriter, Writer, write_integer};
 use std::fmt::{Display, Formatter};
 
 impl SignatureValue {
@@ -17,7 +15,7 @@ impl SignatureValue {
         writer.write(self.a.name().as_bytes());
         writer.write(b":");
         if !empty {
-            write_base64(writer, &self.b);
+            writer.write_base64(&self.b);
         }
     }
 }
@@ -37,13 +35,13 @@ impl Signature {
         match &self.chain {
             ChainBinding::Envelope { mail_from, rcpt_to } => {
                 writer.write(b"mf=");
-                write_base64(writer, mail_from.as_bytes());
+                writer.write_base64(mail_from.as_bytes());
                 writer.write(b"; rt=");
                 for (pos, rcpt) in rcpt_to.iter().enumerate() {
                     if pos > 0 {
                         writer.write(b",");
                     }
-                    write_base64(writer, rcpt.as_bytes());
+                    writer.write_base64(rcpt.as_bytes());
                 }
             }
             ChainBinding::NextDomain(domain) => {
@@ -97,16 +95,16 @@ impl MessageInstance {
             }
             writer.write(hash.name.map(|n| n.name().as_bytes()).unwrap_or(b""));
             writer.write(b":");
-            write_base64(writer, &hash.header_hash);
+            writer.write_base64(&hash.header_hash);
             writer.write(b":");
-            write_base64(writer, &hash.body_hash);
+            writer.write_base64(&hash.body_hash);
         }
 
         if let Some(recipe) = &self.recipe {
             let mut json = Vec::new();
             if recipe.to_json(&mut json).is_ok() {
                 writer.write(b"; r=");
-                write_base64(writer, &json);
+                writer.write_base64(&json);
             }
         }
         writer.write(b";");

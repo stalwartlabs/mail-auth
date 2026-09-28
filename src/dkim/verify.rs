@@ -9,14 +9,13 @@ use crate::{
     AuthenticatedMessage, DkimOutput, DkimResult, Error, MX, MessageAuthenticator, Parameters,
     RecordSet, ResolverCache, Txt,
     common::{
-        base32::Base32Writer,
         cache::NoCache,
-        headers::Writer,
         verify::{DomainKey, VerifySignature},
     },
     is_within_pct,
 };
 use crate::{DnsError, common::crypto::CryptoError};
+use encodify::base32;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 
 use super::{
@@ -149,10 +148,7 @@ impl MessageAuthenticator {
                 if found {
                     let mut query_domain = match &signature.atpsh {
                         Some(algorithm) => {
-                            let mut writer = Base32Writer::with_capacity(40);
-                            let output = algorithm.hash(signature.d.as_bytes());
-                            writer.write(output.as_ref());
-                            writer.finalize()
+                            base32::STANDARD_NO_PAD.encode(algorithm.hash(signature.d.as_bytes()))
                         }
                         None => signature.d.to_string(),
                     };
@@ -521,12 +517,13 @@ pub mod test {
         time::{Duration, Instant},
     };
 
+    use encodify::base32;
     use mail_parser::MessageParser;
 
     use crate::{
         AuthenticatedMessage, DkimResult, MessageAuthenticator,
         common::{cache::test::DummyCaches, parse::TxtRecordParser, verify::DomainKey},
-        dkim::{Signature, verify::Verifier},
+        dkim::{HashAlgorithm, Signature, verify::Verifier},
     };
 
     #[test]
@@ -617,6 +614,19 @@ pub mod test {
             assert_eq!(
                 String::from_utf8(value.as_bytes().strip_signature()).unwrap(),
                 stripped_value
+            );
+        }
+    }
+
+    #[test]
+    fn atps_query_label() {
+        for (domain, label) in [
+            ("one.example.net", "QSP4I4D24CRHOPDZ3O3ZIU2KSGS3X6Z6"),
+            ("two.example.net", "ZTZGRRV3F45A4U6HLDKBF3ZCOW4V2AJX"),
+        ] {
+            assert_eq!(
+                base32::STANDARD_NO_PAD.encode(HashAlgorithm::Sha1.hash(domain.as_bytes())),
+                label
             );
         }
     }
