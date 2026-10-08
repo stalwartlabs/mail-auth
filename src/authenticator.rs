@@ -8,6 +8,9 @@
 use crate::dns::DohResolver;
 #[cfg(not(feature = "dns-doh"))]
 use hickory_resolver::TokioResolver;
+use std::time::Duration;
+
+pub(crate) const DEFAULT_MAX_NEGATIVE_TTL: Duration = Duration::from_secs(3600);
 
 /// Entry point for every verifier and DNS lookup in this crate.
 ///
@@ -35,7 +38,10 @@ use hickory_resolver::TokioResolver;
 /// ```
 #[derive(Clone)]
 #[cfg(not(feature = "dns-doh"))]
-pub struct MessageAuthenticator(pub(crate) TokioResolver);
+pub struct MessageAuthenticator {
+    pub(crate) resolver: TokioResolver,
+    pub(crate) max_negative_ttl: Duration,
+}
 
 /// Entry point for every verifier and DNS lookup in this crate.
 ///
@@ -63,19 +69,29 @@ pub struct MessageAuthenticator(pub(crate) TokioResolver);
 /// ```
 #[derive(Clone)]
 #[cfg(feature = "dns-doh")]
-pub struct MessageAuthenticator(pub(crate) DohResolver);
+pub struct MessageAuthenticator {
+    pub(crate) resolver: DohResolver,
+    pub(crate) max_negative_ttl: Duration,
+}
 
 impl MessageAuthenticator {
     /// Returns the underlying hickory resolver, for issuing DNS queries that
     /// this crate does not wrap.
     #[cfg(not(feature = "dns-doh"))]
     pub fn resolver(&self) -> &TokioResolver {
-        &self.0
+        &self.resolver
     }
 
     /// Returns the underlying DNS-over-HTTPS resolver.
     #[cfg(feature = "dns-doh")]
     pub fn resolver(&self) -> &DohResolver {
-        &self.0
+        &self.resolver
+    }
+
+    /// Sets the longest time a negative answer (`NXDOMAIN` or NODATA) is
+    /// kept in the DNS caches.
+    pub fn with_max_negative_ttl(mut self, ttl: Duration) -> Self {
+        self.max_negative_ttl = ttl;
+        self
     }
 }

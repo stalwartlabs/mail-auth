@@ -6,7 +6,7 @@
 
 use super::{Alignment, DmarcRecord, Policy, Psd};
 use crate::DnsError;
-use crate::dns::DnsCache;
+use crate::dns::{DnsCache, Negative};
 use crate::{
     AuthenticatedMessage, Dkim2Result, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
     MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult, TxtRecord,
@@ -429,7 +429,7 @@ impl MessageAuthenticator {
     async fn domain_exists(
         &self,
         domain: &str,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv4Addr>, Negative>>>,
     ) -> Option<bool> {
         match self.ipv4_lookup(domain, cache_ipv4).await {
             Ok(_) => Some(true),

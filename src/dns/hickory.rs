@@ -9,8 +9,8 @@
 //! Queries go through a [`hickory_resolver::TokioResolver`] over UDP, TCP or
 //! DNS-over-TLS (RFC 7858).
 
-use super::DnsEntry;
-use crate::{Error, Instant, MessageAuthenticator};
+use super::{DnsEntry, QueryError, QueryResult};
+use crate::{Error, Instant, MessageAuthenticator, authenticator::DEFAULT_MAX_NEGATIVE_TTL};
 use hickory_resolver::{
     TokioResolver,
     config::{CLOUDFLARE, GOOGLE, QUAD9, ResolverConfig, ResolverOpts},
@@ -105,16 +105,17 @@ impl MessageAuthenticator {
     ///
     /// Returns a [`NetError`] if the resolver cannot be built.
     pub fn new(config: ResolverConfig, options: ResolverOpts) -> Result<Self, NetError> {
-        Ok(MessageAuthenticator(
-            TokioResolver::builder_with_config(config, TokioRuntimeProvider::default())
+        Ok(MessageAuthenticator {
+            resolver: TokioResolver::builder_with_config(config, TokioRuntimeProvider::default())
                 .with_options(options)
                 .build()?,
-        ))
+            max_negative_ttl: DEFAULT_MAX_NEGATIVE_TTL,
+        })
     }
 
-    pub(crate) async fn query_txt(&self, key: &str) -> crate::Result<DnsEntry<Vec<Vec<u8>>>> {
+    pub(crate) async fn query_txt(&self, key: &str) -> QueryResult<Vec<Vec<u8>>> {
         let lookup = self
-            .0
+            .resolver
             .txt_lookup(Name::from_str_relaxed::<&str>(key)?)
             .await?;
         let expires = lookup.valid_until();
@@ -138,12 +139,9 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    pub(crate) async fn query_mx(
-        &self,
-        key: &str,
-    ) -> crate::Result<DnsEntry<Vec<(u16, Box<str>)>>> {
+    pub(crate) async fn query_mx(&self, key: &str) -> QueryResult<Vec<(u16, Box<str>)>> {
         let lookup = self
-            .0
+            .resolver
             .mx_lookup(Name::from_str_relaxed::<&str>(key)?)
             .await?;
         let expires = lookup.valid_until();
@@ -163,9 +161,9 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    pub(crate) async fn query_ipv4(&self, key: &str) -> crate::Result<DnsEntry<Arc<[Ipv4Addr]>>> {
+    pub(crate) async fn query_ipv4(&self, key: &str) -> QueryResult<Arc<[Ipv4Addr]>> {
         let lookup = self
-            .0
+            .resolver
             .ipv4_lookup(Name::from_str_relaxed::<&str>(key)?)
             .await?;
         let expires = lookup.valid_until();
@@ -184,9 +182,9 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    pub(crate) async fn query_ipv6(&self, key: &str) -> crate::Result<DnsEntry<Arc<[Ipv6Addr]>>> {
+    pub(crate) async fn query_ipv6(&self, key: &str) -> QueryResult<Arc<[Ipv6Addr]>> {
         let lookup = self
-            .0
+            .resolver
             .ipv6_lookup(Name::from_str_relaxed::<&str>(key)?)
             .await?;
         let expires = lookup.valid_until();
@@ -205,8 +203,8 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    pub(crate) async fn query_ptr(&self, addr: IpAddr) -> crate::Result<DnsEntry<Arc<[Box<str>]>>> {
-        let lookup = self.0.reverse_lookup(addr).await?;
+    pub(crate) async fn query_ptr(&self, addr: IpAddr) -> QueryResult<Arc<[Box<str>]>> {
+        let lookup = self.resolver.reverse_lookup(addr).await?;
         let expires: Instant = lookup.valid_until();
         let entry = lookup
             .answers()
@@ -225,9 +223,12 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    #[cfg(not(any(test, feature = "test")))]
     pub(crate) async fn query_exists(&self, key: &str) -> crate::Result<bool> {
-        match self.0.lookup_ip(Name::from_str_relaxed::<&str>(key)?).await {
+        match self
+            .resolver
+            .lookup_ip(Name::from_str_relaxed::<&str>(key)?)
+            .await
+        {
             Ok(result) => Ok(result.as_lookup().answers().iter().any(|r| {
                 matches!(
                     &r.data.record_type(),
@@ -247,14 +248,27 @@ impl From<ProtoError> for Error {
     }
 }
 
-impl From<NetError> for Error {
+impl From<ProtoError> for QueryError {
+    fn from(_: ProtoError) -> Self {
+        QueryError::Other(Error::Parse)
+    }
+}
+
+impl From<NetError> for QueryError {
     fn from(err: NetError) -> Self {
         match &err {
-            NetError::Dns(DnsError::NoRecordsFound(no_records)) => {
-                Error::Dns(crate::DnsError::RecordNotFound(no_records.response_code))
-            }
-            _ => Error::Dns(crate::DnsError::Resolver(err.to_string())),
+            NetError::Dns(DnsError::NoRecordsFound(no_records)) => QueryError::NotFound {
+                code: no_records.response_code,
+                negative_ttl: no_records.negative_ttl,
+            },
+            _ => QueryError::Other(Error::Dns(crate::DnsError::Resolver(err.to_string()))),
         }
+    }
+}
+
+impl From<NetError> for Error {
+    fn from(err: NetError) -> Self {
+        QueryError::from(err).into()
     }
 }
 

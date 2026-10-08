@@ -17,7 +17,7 @@
 //!
 //! ```rust,no_run
 //! use mail_auth::{
-//!     AuthenticatedMessage, DnsCache, MessageAuthenticator, Mx, Parameters, RecordSet,
+//!     AuthenticatedMessage, DnsCache, MessageAuthenticator, Mx, Negative, Parameters, RecordSet,
 //!     ResolverCache, TxtRecord,
 //! };
 //! use std::{
@@ -55,20 +55,22 @@
 //!     }
 //! }
 //!
+//! type Answer<T> = Result<RecordSet<T>, Negative>;
+//!
 //! struct Caches {
 //!     txt: MapCache<Box<str>, TxtRecord>,
-//!     mx: MapCache<Box<str>, RecordSet<Mx>>,
-//!     ipv4: MapCache<Box<str>, RecordSet<Ipv4Addr>>,
-//!     ipv6: MapCache<Box<str>, RecordSet<Ipv6Addr>>,
-//!     ptr: MapCache<IpAddr, RecordSet<Box<str>>>,
+//!     mx: MapCache<Box<str>, Answer<Mx>>,
+//!     ipv4: MapCache<Box<str>, Answer<Ipv4Addr>>,
+//!     ipv6: MapCache<Box<str>, Answer<Ipv6Addr>>,
+//!     ptr: MapCache<IpAddr, Answer<Box<str>>>,
 //! }
 //!
 //! impl DnsCache for Caches {
 //!     type Txt = MapCache<Box<str>, TxtRecord>;
-//!     type Mx = MapCache<Box<str>, RecordSet<Mx>>;
-//!     type Ipv4 = MapCache<Box<str>, RecordSet<Ipv4Addr>>;
-//!     type Ipv6 = MapCache<Box<str>, RecordSet<Ipv6Addr>>;
-//!     type Ptr = MapCache<IpAddr, RecordSet<Box<str>>>;
+//!     type Mx = MapCache<Box<str>, Answer<Mx>>;
+//!     type Ipv4 = MapCache<Box<str>, Answer<Ipv4Addr>>;
+//!     type Ipv6 = MapCache<Box<str>, Answer<Ipv6Addr>>;
+//!     type Ptr = MapCache<IpAddr, Answer<Box<str>>>;
 //!
 //!     fn txt(&self) -> Option<&Self::Txt> { Some(&self.txt) }
 //!     fn mx(&self) -> Option<&Self::Mx> { Some(&self.mx) }
@@ -85,7 +87,7 @@
 //! # }
 //! ```
 
-use super::{Mx, RecordSet, TxtRecord};
+use super::{Mx, Negative, RecordSet, TxtRecord};
 use crate::Instant;
 use std::{
     borrow::Borrow,
@@ -99,8 +101,9 @@ use std::{
 /// Methods take `&self`, so implementations that mutate must use interior
 /// mutability (a lock or a concurrent map). The lookup helpers call
 /// [`get`](Self::get) before querying and [`insert`](Self::insert) after a
-/// successful query; they do not check expiry themselves. See the
-/// [module documentation](self) for an example.
+/// query that returned records or a cacheable negative answer; they do not
+/// check expiry themselves. See the [module documentation](self) for an
+/// example.
 pub trait ResolverCache<K, V>: Sized {
     /// Returns a copy of the cached value for `name`, or `None` if there is
     /// none. Implementations should return `None` for expired entries.
@@ -115,7 +118,8 @@ pub trait ResolverCache<K, V>: Sized {
         K: Borrow<Q>,
         Q: Hash + Eq + ?Sized;
     /// Stores `value` under `key`. `valid_until` is the expiry time derived
-    /// from the TTLs of the DNS answer.
+    /// from the TTLs of the DNS answer, or from its negative TTL for a
+    /// negative answer.
     fn insert(&self, key: K, value: V, valid_until: Instant);
 }
 
@@ -128,14 +132,17 @@ pub trait DnsCache {
     /// Cache for parsed TXT records (SPF, DKIM, DMARC, ATPS, MTA-STS,
     /// TLSRPT), keyed by fully qualified domain name.
     type Txt: ResolverCache<Box<str>, TxtRecord>;
-    /// Cache for MX records, keyed by fully qualified domain name.
-    type Mx: ResolverCache<Box<str>, RecordSet<Mx>>;
-    /// Cache for A records, keyed by fully qualified domain name.
-    type Ipv4: ResolverCache<Box<str>, RecordSet<Ipv4Addr>>;
-    /// Cache for AAAA records, keyed by fully qualified domain name.
-    type Ipv6: ResolverCache<Box<str>, RecordSet<Ipv6Addr>>;
-    /// Cache for PTR records, keyed by IP address.
-    type Ptr: ResolverCache<IpAddr, RecordSet<Box<str>>>;
+    /// Cache for MX records and negative MX answers, keyed by fully
+    /// qualified domain name.
+    type Mx: ResolverCache<Box<str>, Result<RecordSet<Mx>, Negative>>;
+    /// Cache for A records and negative A answers, keyed by fully qualified
+    /// domain name.
+    type Ipv4: ResolverCache<Box<str>, Result<RecordSet<Ipv4Addr>, Negative>>;
+    /// Cache for AAAA records and negative AAAA answers, keyed by fully
+    /// qualified domain name.
+    type Ipv6: ResolverCache<Box<str>, Result<RecordSet<Ipv6Addr>, Negative>>;
+    /// Cache for PTR records and negative PTR answers, keyed by IP address.
+    type Ptr: ResolverCache<IpAddr, Result<RecordSet<Box<str>>, Negative>>;
 
     /// Returns the TXT record cache, or `None` to disable it.
     fn txt(&self) -> Option<&Self::Txt>;
@@ -273,7 +280,8 @@ impl<'x, P, C: DnsCache> Parameters<'x, P, C> {
 #[cfg(test)]
 pub(crate) mod test {
     use crate::dns::{
-        DnsCache, DnssecStatus, Mx, Parameters, RecordSet, ResolverCache, ToFqdn, TxtRecord,
+        DnsCache, DnssecStatus, Mx, Negative, Parameters, RecordSet, ResolverCache, ToFqdn,
+        TxtRecord,
     };
     use std::{
         borrow::Borrow,
@@ -312,12 +320,14 @@ pub(crate) mod test {
         }
     }
 
+    type Answer<T> = Result<RecordSet<T>, Negative>;
+
     pub(crate) struct DummyCaches {
         pub txt: DummyCache<Box<str>, TxtRecord>,
-        pub mx: DummyCache<Box<str>, RecordSet<Mx>>,
-        pub ptr: DummyCache<IpAddr, RecordSet<Box<str>>>,
-        pub ipv4: DummyCache<Box<str>, RecordSet<Ipv4Addr>>,
-        pub ipv6: DummyCache<Box<str>, RecordSet<Ipv6Addr>>,
+        pub mx: DummyCache<Box<str>, Answer<Mx>>,
+        pub ptr: DummyCache<IpAddr, Answer<Box<str>>>,
+        pub ipv4: DummyCache<Box<str>, Answer<Ipv4Addr>>,
+        pub ipv6: DummyCache<Box<str>, Answer<Ipv6Addr>>,
     }
 
     impl DummyCaches {
@@ -366,10 +376,10 @@ pub(crate) mod test {
         ) {
             self.ipv4.insert(
                 name.to_fqdn().into_owned().into_boxed_str(),
-                RecordSet {
+                Ok(RecordSet {
                     records: Arc::from(value.into_boxed_slice()),
                     dnssec_status: DnssecStatus::Indeterminate,
-                },
+                }),
                 valid_until,
             );
         }
@@ -382,10 +392,10 @@ pub(crate) mod test {
         ) {
             self.ipv6.insert(
                 name.to_fqdn().into_owned().into_boxed_str(),
-                RecordSet {
+                Ok(RecordSet {
                     records: Arc::from(value.into_boxed_slice()),
                     dnssec_status: DnssecStatus::Indeterminate,
-                },
+                }),
                 valid_until,
             );
         }
@@ -393,10 +403,10 @@ pub(crate) mod test {
         pub fn ptr_add(&self, name: IpAddr, value: Vec<Box<str>>, valid_until: std::time::Instant) {
             self.ptr.insert(
                 name,
-                RecordSet {
+                Ok(RecordSet {
                     records: Arc::from(value.into_boxed_slice()),
                     dnssec_status: DnssecStatus::Indeterminate,
-                },
+                }),
                 valid_until,
             );
         }
@@ -404,10 +414,10 @@ pub(crate) mod test {
         pub fn mx_add(&self, name: impl ToFqdn, value: Vec<Mx>, valid_until: std::time::Instant) {
             self.mx.insert(
                 name.to_fqdn().into_owned().into_boxed_str(),
-                RecordSet {
+                Ok(RecordSet {
                     records: Arc::from(value.into_boxed_slice()),
                     dnssec_status: DnssecStatus::Indeterminate,
-                },
+                }),
                 valid_until,
             );
         }
@@ -419,10 +429,10 @@ pub(crate) mod test {
 
     impl DnsCache for DummyCaches {
         type Txt = DummyCache<Box<str>, TxtRecord>;
-        type Mx = DummyCache<Box<str>, RecordSet<Mx>>;
-        type Ipv4 = DummyCache<Box<str>, RecordSet<Ipv4Addr>>;
-        type Ipv6 = DummyCache<Box<str>, RecordSet<Ipv6Addr>>;
-        type Ptr = DummyCache<IpAddr, RecordSet<Box<str>>>;
+        type Mx = DummyCache<Box<str>, Answer<Mx>>;
+        type Ipv4 = DummyCache<Box<str>, Answer<Ipv4Addr>>;
+        type Ipv6 = DummyCache<Box<str>, Answer<Ipv6Addr>>;
+        type Ptr = DummyCache<IpAddr, Answer<Box<str>>>;
 
         fn txt(&self) -> Option<&Self::Txt> {
             Some(&self.txt)

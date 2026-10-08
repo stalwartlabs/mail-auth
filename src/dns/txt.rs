@@ -22,8 +22,10 @@ use std::sync::Arc;
 /// parses the TXT answer into the record type the caller asked for and caches
 /// the outcome as a `TxtRecord`, so a cache hit skips both the query and the
 /// parse. When no TXT record of the requested type parses, the error is
-/// cached as [`TxtRecord::Error`]; DNS query failures are not cached. Each record type converts into its variant with
-/// `From`, which lets cache implementations pre-populate entries.
+/// cached as [`TxtRecord::Error`], and so is a negative answer (`NXDOMAIN` or
+/// NODATA) that carries an SOA record; resolver failures are not cached. Each
+/// record type converts into its variant with `From`, which lets cache
+/// implementations pre-populate entries.
 ///
 /// [`ResolverCache`]: super::ResolverCache
 /// [`DnsCache`]: super::DnsCache
@@ -46,8 +48,8 @@ pub enum TxtRecord {
     MtaSts(Arc<MtaStsRecord>),
     /// An SMTP TLS Reporting record (RFC 8460 Section 3).
     TlsRpt(Arc<TlsRptRecord>),
-    /// No TXT record at the name parsed as the requested type. Holds the
-    /// error returned to the caller.
+    /// No TXT record at the name parsed as the requested type, or the name
+    /// has no TXT records. Holds the error returned to the caller.
     Error(Error),
 }
 

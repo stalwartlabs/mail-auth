@@ -23,15 +23,27 @@
 //! parsed, as [`TxtRecord`] values. [`NoCache`] disables caching and is the
 //! default.
 //!
+//! Negative answers (RFC 2308) are cached too: a name that does not exist
+//! (`NXDOMAIN`) or has no records of the requested type (NODATA) is stored as
+//! [`TxtRecord::Error`] in the TXT cache and as `Err(`[`Negative`]`)` in the
+//! other caches, until the negative TTL of the answer expires. That TTL is the
+//! SOA-derived value of RFC 2308 Section 5, capped by
+//! [`MessageAuthenticator::with_max_negative_ttl`](crate::MessageAuthenticator::with_max_negative_ttl).
+//! Answers without an SOA record and resolver failures are never cached.
+//!
 //! The lookup helpers on `MessageAuthenticator` (`txt_lookup`, `mx_lookup`,
 //! `ipv4_lookup`, `ipv6_lookup`, `ip_lookup`, `ptr_lookup`, `exists`) are
 //! public so that applications can reuse the resolver and caches for their
 //! own queries.
 
-use crate::Instant;
+use crate::{DnsError, Error, Instant};
 #[cfg(not(feature = "dns-doh"))]
-use hickory_resolver::proto::op::ResponseCode;
-use std::{borrow::Cow, net::IpAddr, sync::Arc};
+pub(crate) use hickory_resolver::proto::op::ResponseCode;
+use std::{
+    borrow::Cow,
+    net::{IpAddr, Ipv4Addr},
+    sync::Arc,
+};
 
 pub mod cache;
 #[cfg(feature = "dns-doh")]
@@ -39,19 +51,23 @@ mod doh;
 #[cfg(not(feature = "dns-doh"))]
 mod hickory;
 mod lookup;
+mod query;
 mod txt;
 
 pub use cache::{DnsCache, NoCache, Parameters, ResolverCache};
 #[cfg(feature = "dns-doh")]
 pub use doh::DohResolver;
 #[cfg(any(test, feature = "test"))]
-pub use lookup::mock_resolve;
+pub use query::mock_resolve;
+pub(crate) use query::{QueryError, QueryResult};
 pub use txt::{TxtRecord, TxtRecordParser, UnwrapTxtRecord};
 
 #[cfg(not(feature = "dns-doh"))]
 pub(crate) const DNS_RCODE_NXDOMAIN: ResponseCode = ResponseCode::NXDomain;
 #[cfg(feature = "dns-doh")]
 pub(crate) const DNS_RCODE_NXDOMAIN: u16 = 3;
+#[cfg(feature = "dns-doh")]
+pub(crate) type ResponseCode = u16;
 
 /// Address families queried by
 /// [`MessageAuthenticator::ip_lookup`](crate::MessageAuthenticator::ip_lookup),
@@ -78,6 +94,34 @@ pub struct RecordSet<T> {
     pub records: Arc<[T]>,
     /// DNSSEC validation state of the answer.
     pub dnssec_status: DnssecStatus,
+}
+
+/// A cached negative answer (RFC 2308): the name does not exist (`NXDOMAIN`),
+/// or it has no records of the requested type (NODATA).
+///
+/// The MX, A, AAAA and PTR caches of a [`DnsCache`] hold
+/// `Result<RecordSet<T>, Negative>`. The lookup helpers store `Err(Negative)`
+/// only for answers that carry an SOA record, and return a cached `Err` as
+/// [`DnsError::RecordNotFound`] with the same response code, exactly as the
+/// query would.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Negative {
+    /// The response code of the answer: `NXDOMAIN`, or `NOERROR` for NODATA.
+    #[cfg(not(feature = "dns-doh"))]
+    pub code: ResponseCode,
+    /// The numeric response code of the answer: 3 for `NXDOMAIN`, 0 for
+    /// NODATA.
+    #[cfg(feature = "dns-doh")]
+    pub code: u16,
+}
+
+const _: () =
+    assert!(size_of::<Result<RecordSet<Ipv4Addr>, Negative>>() == size_of::<RecordSet<Ipv4Addr>>());
+
+impl From<Negative> for Error {
+    fn from(negative: Negative) -> Self {
+        Error::Dns(DnsError::RecordNotFound(negative.code))
+    }
 }
 
 /// A group of MX records (RFC 5321 Section 5.1) that share a preference

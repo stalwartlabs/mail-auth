@@ -17,6 +17,8 @@ This release reorganizes the public API. Most changes are renames and moves; the
 - `DomainKey::is_testing()` (`t=y`) and `DomainKey::requires_strict_identity()` (`t=s`).
 - `DkimSigner::template()`.
 - `dns::has_valid_labels()`.
+- Negative DNS caching (RFC 2308): `NXDOMAIN` and NODATA answers that carry an SOA record are cached for their negative TTL, capped by `MessageAuthenticator::with_max_negative_ttl` (one hour by default; `Duration::ZERO` disables it). Answers without an SOA and resolver failures are not cached. The TXT cache stores them as `TxtRecord::Error`, the other caches as `Err(Negative)`.
+- `dns::Negative`, the cached negative answer, with `impl From<Negative> for Error`.
 - `SpfParameters` is `Copy`, so the same value can be passed to `verify_spf` and to `with_spf_result`/`ReceivedSpf::new`.
 - `impl From<&Dkim2Dsn> for Parameters`, so `verify_dkim2_dsn(&dsn, envelope)` works without a cache like the other verifiers.
 - `Dkim2Error::RecipeSyntax`, returned by `Recipe::to_json`, `Recipe::from_json` and `MessageInstance::parse` for an invalid recipe. `Dkim2Error` is exhaustive, so a `match` over it needs a new arm.
@@ -30,6 +32,8 @@ This release reorganizes the public API. Most changes are renames and moves; the
 - Replaced `base64` with `encodify` for better performance and reduced memory usage.
 - UTF-8 validation uses `simdutf8` for DKIM and DKIM2 `Display` output, ARF report parsing and generation, and DKIM2, DMARC and MTA-STS tag values. Lossy conversions validate with SIMD first and fall back to `String::from_utf8_lossy` only for invalid input.
 - The `common` module is gone. Its contents moved to `dns`, `crypto`, `headers`, `message`, `auth_results`, `iprev` and `dkim`. DMARC aggregate report types moved to `report::dmarc` and ARF types to `report::arf`.
+- The `DnsCache` MX, A, AAAA and PTR caches hold `Result<RecordSet<T>, Negative>` instead of `RecordSet<T>`, and the lookup helpers take caches of that value type. A cached `Err(Negative)` is returned as `DnsError::RecordNotFound` with its response code.
+- `MessageAuthenticator::exists` answers `false` without querying when the caches hold negative or empty answers for both A and AAAA, and no longer answers `true` for a cached empty answer.
 - Every verifier takes `Parameters<'x, P, C: DnsCache>` with a single cache type parameter. `Parameters::params` is now `input`, and the five `cache_*` fields are replaced by `cache: Option<&C>`.
 - Parsed DNS TXT record types carry a `Record` suffix (`SpfRecord`, `DmarcRecord`, `DkimReportRecord`, `AtpsRecord`, `MtaStsRecord`, `TlsRptRecord`).
 - `SpfResult` displays lowercase RFC 7208 tokens (`softfail`, `temperror`) and implements `FromStr`. Text built with `{result}`, such as an SMTP reply, changes accordingly.
@@ -138,6 +142,7 @@ re-exports `DnsCache`, `NoCache` and `ArcResult`.
 | `RecordSet::rrset` | `RecordSet::records` |
 | `Parameters::params` | `Parameters::input` |
 | `Parameters::{cache_txt, cache_mx, cache_ptr, cache_ipv4, cache_ipv6}` | `Parameters::cache` |
+| MX, A, AAAA and PTR cache values `RecordSet<T>` | `Result<RecordSet<T>, Negative>` (wrap stored records in `Ok`) |
 | `MessageAuthenticator.0` | `MessageAuthenticator::resolver()` (both backends) |
 | `DkimSigner::template` | `DkimSigner::template()` |
 | `Dkim2Dsn::raw` | `Dkim2Dsn::dsn` |

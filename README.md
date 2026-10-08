@@ -238,23 +238,28 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
 
 Every verifier accepts either its input alone or a `Parameters` value that also
 carries a DNS cache. Implement `DnsCache` once on the type that owns your
-per-record-type caches:
+per-record-type caches. Negative answers (`NXDOMAIN` and NODATA, RFC 2308) are
+cached as well: as `TxtRecord::Error` in the TXT cache and as `Err(Negative)`
+in the others, for the negative TTL of the answer capped by
+`MessageAuthenticator::with_max_negative_ttl` (one hour by default):
 
 ```rust
+    type Answer<T> = Result<RecordSet<T>, Negative>;
+
     struct Caches {
         txt: MyCache<Box<str>, TxtRecord>,
-        mx: MyCache<Box<str>, RecordSet<Mx>>,
-        ipv4: MyCache<Box<str>, RecordSet<Ipv4Addr>>,
-        ipv6: MyCache<Box<str>, RecordSet<Ipv6Addr>>,
-        ptr: MyCache<IpAddr, RecordSet<Box<str>>>,
+        mx: MyCache<Box<str>, Answer<Mx>>,
+        ipv4: MyCache<Box<str>, Answer<Ipv4Addr>>,
+        ipv6: MyCache<Box<str>, Answer<Ipv6Addr>>,
+        ptr: MyCache<IpAddr, Answer<Box<str>>>,
     }
 
     impl DnsCache for Caches {
         type Txt = MyCache<Box<str>, TxtRecord>;
-        type Mx = MyCache<Box<str>, RecordSet<Mx>>;
-        type Ipv4 = MyCache<Box<str>, RecordSet<Ipv4Addr>>;
-        type Ipv6 = MyCache<Box<str>, RecordSet<Ipv6Addr>>;
-        type Ptr = MyCache<IpAddr, RecordSet<Box<str>>>;
+        type Mx = MyCache<Box<str>, Answer<Mx>>;
+        type Ipv4 = MyCache<Box<str>, Answer<Ipv4Addr>>;
+        type Ipv6 = MyCache<Box<str>, Answer<Ipv6Addr>>;
+        type Ptr = MyCache<IpAddr, Answer<Box<str>>>;
 
         fn txt(&self) -> Option<&Self::Txt> { Some(&self.txt) }
         fn mx(&self) -> Option<&Self::Mx> { Some(&self.mx) }

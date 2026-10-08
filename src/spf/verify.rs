@@ -7,7 +7,7 @@
 use super::{Macro, Mechanism, Qualifier, SpfIdentity, SpfRecord, Variables};
 use crate::DnsError;
 use crate::Instant;
-use crate::dns::{DnsCache, has_valid_labels};
+use crate::dns::{DnsCache, Negative, has_valid_labels};
 use crate::{
     Error, MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult,
     dns::cache::NoCache,
@@ -515,8 +515,8 @@ impl MessageAuthenticator {
         ip: IpAddr,
         ip4_mask: u32,
         ip6_mask: u128,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
-        cache_ipv6: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv4Addr>, Negative>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv6Addr>, Negative>>>,
     ) -> crate::Result<bool> {
         Ok(match ip {
             IpAddr::V4(ip) => self

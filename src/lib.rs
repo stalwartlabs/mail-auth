@@ -59,8 +59,8 @@ pub use dkim::{DkimOutput, DkimResult};
 pub use dkim2::{Dkim2Output, Dkim2Result};
 pub use dmarc::{DmarcOutput, DmarcResult};
 pub use dns::{
-    DnsCache, DnssecStatus, IpLookupStrategy, Mx, NoCache, Parameters, RecordSet, ResolverCache,
-    TxtRecord,
+    DnsCache, DnssecStatus, IpLookupStrategy, Mx, Negative, NoCache, Parameters, RecordSet,
+    ResolverCache, TxtRecord,
 };
 pub use error::{DnsError, Error, Result};
 pub use iprev::{IprevOutput, IprevResult};

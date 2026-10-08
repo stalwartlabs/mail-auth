@@ -7,8 +7,8 @@
 //! Cached DNS lookup helpers on [`MessageAuthenticator`].
 
 use super::{
-    DnsEntry, DnssecStatus, IpLookupStrategy, Mx, RecordSet, ResolverCache, ToFqdn, TxtRecord,
-    TxtRecordParser, UnwrapTxtRecord,
+    DnsEntry, DnssecStatus, IpLookupStrategy, Mx, Negative, RecordSet, ResolverCache, ToFqdn,
+    TxtRecord, TxtRecordParser, UnwrapTxtRecord,
 };
 use crate::{Error, MessageAuthenticator};
 use std::{
@@ -44,7 +44,8 @@ impl MessageAuthenticator {
     ///
     /// When `cache` is set, a cached entry is returned without querying, and
     /// the parse outcome (the record or the parse error) is stored after a
-    /// query.
+    /// query. A negative answer that carries an SOA record is stored as
+    /// [`TxtRecord::Error`] until its negative TTL expires.
     ///
     /// # Errors
     ///
@@ -65,15 +66,20 @@ impl MessageAuthenticator {
             return T::unwrap_txt(value);
         }
 
-        #[cfg(any(test, feature = "test"))]
-        if true {
-            return mock_resolve(key.as_ref());
-        }
-
         let DnsEntry {
             entry: records,
             expires,
-        } = self.query_txt(key.as_ref()).await?;
+        } = match self.resolve_txt(key.as_ref()).await {
+            Ok(entry) => entry,
+            Err(err) => {
+                return Err(self.cache_negative(
+                    err,
+                    cache,
+                    || key.into_owned().into_boxed_str(),
+                    |negative| TxtRecord::Error(negative.into()),
+                ));
+            }
+        };
 
         let mut result = Err(Error::Dns(crate::DnsError::InvalidRecordType));
         for record in &records {
@@ -96,7 +102,8 @@ impl MessageAuthenticator {
     ///
     /// Records are grouped by preference into [`Mx`] values sorted by
     /// ascending preference. When `cache` is set, it is consulted before and
-    /// updated after the query.
+    /// updated after the query; a negative answer that carries an SOA record
+    /// is stored as `Err(`[`Negative`]`)` until its negative TTL expires.
     ///
     /// # Errors
     ///
@@ -107,22 +114,27 @@ impl MessageAuthenticator {
     pub async fn mx_lookup(
         &self,
         key: impl ToFqdn,
-        cache: Option<&impl ResolverCache<Box<str>, RecordSet<Mx>>>,
+        cache: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Mx>, Negative>>>,
     ) -> crate::Result<RecordSet<Mx>> {
         let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
-            return Ok(value);
-        }
-
-        #[cfg(any(test, feature = "test"))]
-        if true {
-            return mock_resolve(key.as_ref());
+            return value.map_err(Error::from);
         }
 
         let DnsEntry {
             entry: mx_records,
             expires,
-        } = self.query_mx(key.as_ref()).await?;
+        } = match self.resolve_mx(key.as_ref()).await {
+            Ok(entry) => entry,
+            Err(err) => {
+                return Err(self.cache_negative(
+                    err,
+                    cache,
+                    || key.into_owned().into_boxed_str(),
+                    Err,
+                ));
+            }
+        };
 
         let mut records: Vec<(u16, Vec<Box<str>>)> = Vec::with_capacity(mx_records.len());
         for (preference, exchange) in mx_records {
@@ -147,14 +159,20 @@ impl MessageAuthenticator {
         };
 
         if let Some(cache) = cache {
-            cache.insert(key.into_owned().into_boxed_str(), records.clone(), expires);
+            cache.insert(
+                key.into_owned().into_boxed_str(),
+                Ok(records.clone()),
+                expires,
+            );
         }
 
         Ok(records)
     }
 
     /// Queries the A records of `key`. When `cache` is set, it is consulted
-    /// before and updated after the query.
+    /// before and updated after the query; a negative answer that carries an
+    /// SOA record is stored as `Err(`[`Negative`]`)` until its negative TTL
+    /// expires.
     ///
     /// # Errors
     ///
@@ -165,14 +183,24 @@ impl MessageAuthenticator {
     pub async fn ipv4_lookup(
         &self,
         key: impl ToFqdn,
-        cache: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
+        cache: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv4Addr>, Negative>>>,
     ) -> crate::Result<RecordSet<Ipv4Addr>> {
         let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
-            return Ok(value);
+            return value.map_err(Error::from);
         }
 
-        let ipv4_lookup = self.ipv4_lookup_raw(key.as_ref()).await?;
+        let ipv4_lookup = match self.resolve_ipv4(key.as_ref()).await {
+            Ok(entry) => entry,
+            Err(err) => {
+                return Err(self.cache_negative(
+                    err,
+                    cache,
+                    || key.into_owned().into_boxed_str(),
+                    Err,
+                ));
+            }
+        };
         let records = RecordSet {
             records: ipv4_lookup.entry,
             dnssec_status: DnssecStatus::Indeterminate,
@@ -181,7 +209,7 @@ impl MessageAuthenticator {
         if let Some(cache) = cache {
             cache.insert(
                 key.into_owned().into_boxed_str(),
-                records.clone(),
+                Ok(records.clone()),
                 ipv4_lookup.expires,
             );
         }
@@ -200,16 +228,13 @@ impl MessageAuthenticator {
     /// when the query fails, or [`Error::Parse`] when the name is not a valid
     /// DNS name.
     pub async fn ipv4_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<[Ipv4Addr]>>> {
-        #[cfg(any(test, feature = "test"))]
-        if true {
-            return mock_resolve(key);
-        }
-
-        self.query_ipv4(key).await
+        self.resolve_ipv4(key).await.map_err(Error::from)
     }
 
     /// Queries the AAAA records of `key`. When `cache` is set, it is consulted
-    /// before and updated after the query.
+    /// before and updated after the query; a negative answer that carries an
+    /// SOA record is stored as `Err(`[`Negative`]`)` until its negative TTL
+    /// expires.
     ///
     /// # Errors
     ///
@@ -220,14 +245,24 @@ impl MessageAuthenticator {
     pub async fn ipv6_lookup(
         &self,
         key: impl ToFqdn,
-        cache: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
+        cache: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv6Addr>, Negative>>>,
     ) -> crate::Result<RecordSet<Ipv6Addr>> {
         let key = key.to_fqdn();
         if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
-            return Ok(value);
+            return value.map_err(Error::from);
         }
 
-        let ipv6_lookup = self.ipv6_lookup_raw(key.as_ref()).await?;
+        let ipv6_lookup = match self.resolve_ipv6(key.as_ref()).await {
+            Ok(entry) => entry,
+            Err(err) => {
+                return Err(self.cache_negative(
+                    err,
+                    cache,
+                    || key.into_owned().into_boxed_str(),
+                    Err,
+                ));
+            }
+        };
         let records = RecordSet {
             records: ipv6_lookup.entry,
             dnssec_status: DnssecStatus::Indeterminate,
@@ -236,7 +271,7 @@ impl MessageAuthenticator {
         if let Some(cache) = cache {
             cache.insert(
                 key.into_owned().into_boxed_str(),
-                records.clone(),
+                Ok(records.clone()),
                 ipv6_lookup.expires,
             );
         }
@@ -255,12 +290,7 @@ impl MessageAuthenticator {
     /// when the query fails, or [`Error::Parse`] when the name is not a valid
     /// DNS name.
     pub async fn ipv6_lookup_raw(&self, key: &str) -> crate::Result<DnsEntry<Arc<[Ipv6Addr]>>> {
-        #[cfg(any(test, feature = "test"))]
-        if true {
-            return mock_resolve(key);
-        }
-
-        self.query_ipv6(key).await
+        self.resolve_ipv6(key).await.map_err(Error::from)
     }
 
     /// Resolves `key` to at most `max_results` IP addresses, querying A and
@@ -280,8 +310,8 @@ impl MessageAuthenticator {
         key: &str,
         mut strategy: IpLookupStrategy,
         max_results: usize,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
-        cache_ipv6: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv4Addr>, Negative>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv6Addr>, Negative>>>,
     ) -> crate::Result<Vec<IpAddr>> {
         loop {
             match strategy {
@@ -325,7 +355,8 @@ impl MessageAuthenticator {
 
     /// Queries the PTR records of `addr` (reverse DNS). Host names are
     /// returned lowercased. When `cache` is set, it is consulted before and
-    /// updated after the query.
+    /// updated after the query; a negative answer that carries an SOA record
+    /// is stored as `Err(`[`Negative`]`)` until its negative TTL expires.
     ///
     /// # Errors
     ///
@@ -335,25 +366,23 @@ impl MessageAuthenticator {
     pub async fn ptr_lookup(
         &self,
         addr: IpAddr,
-        cache: Option<&impl ResolverCache<IpAddr, RecordSet<Box<str>>>>,
+        cache: Option<&impl ResolverCache<IpAddr, Result<RecordSet<Box<str>>, Negative>>>,
     ) -> crate::Result<RecordSet<Box<str>>> {
         if let Some(value) = cache.as_ref().and_then(|c| c.get(&addr)) {
-            return Ok(value);
+            return value.map_err(Error::from);
         }
 
-        #[cfg(any(test, feature = "test"))]
-        if true {
-            return mock_resolve(&addr.to_string());
-        }
-
-        let DnsEntry { entry, expires } = self.query_ptr(addr).await?;
+        let DnsEntry { entry, expires } = match self.resolve_ptr(addr).await {
+            Ok(entry) => entry,
+            Err(err) => return Err(self.cache_negative(err, cache, || addr, Err)),
+        };
         let ptr = RecordSet {
             records: entry,
             dnssec_status: DnssecStatus::Indeterminate,
         };
 
         if let Some(cache) = cache {
-            cache.insert(addr, ptr.clone(), expires);
+            cache.insert(addr, Ok(ptr.clone()), expires);
         }
 
         Ok(ptr)
@@ -362,72 +391,47 @@ impl MessageAuthenticator {
     /// Returns `true` if `key` has at least one A or AAAA record, as needed by
     /// the SPF `exists` mechanism (RFC 7208 Section 5.7).
     ///
-    /// # Errors
-    ///
-    /// Returns [`Error::Dns`] with [`DnsError::Resolver`](crate::DnsError::Resolver)
-    /// when a query fails, or [`Error::Parse`] when the name is not a valid
-    /// DNS name. A name without records is not an error.
-    #[cfg(any(test, feature = "test"))]
-    pub async fn exists(
-        &self,
-        key: impl ToFqdn,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
-        cache_ipv6: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
-    ) -> crate::Result<bool> {
-        let key = key.to_fqdn();
-        match self.ipv4_lookup(key.as_ref(), cache_ipv4).await {
-            Ok(_) => Ok(true),
-            Err(Error::Dns(crate::DnsError::RecordNotFound(_))) => {
-                match self.ipv6_lookup(key.as_ref(), cache_ipv6).await {
-                    Ok(_) => Ok(true),
-                    Err(Error::Dns(crate::DnsError::RecordNotFound(_))) => Ok(false),
-                    Err(err) => Err(err),
-                }
-            }
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Returns `true` if `key` has at least one A or AAAA record, as needed by
-    /// the SPF `exists` mechanism (RFC 7208 Section 5.7).
-    ///
-    /// A cached A or AAAA entry for `key` answers `true` without querying.
-    /// Query results are not added to the caches.
+    /// Returns `true` without querying when a cache holds an A or AAAA answer
+    /// with records, and `false` without querying when the caches hold a
+    /// negative or empty answer for both types. Query results are not added
+    /// to the caches.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Dns`] with [`DnsError::Resolver`](crate::DnsError::Resolver)
     /// when a query fails, or [`Error::Parse`] when the name is not a valid
     /// DNS name. A name without records is not an error.
-    #[cfg(not(any(test, feature = "test")))]
     pub async fn exists(
         &self,
         key: impl ToFqdn,
-        cache_ipv4: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>>>,
-        cache_ipv6: Option<&impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>>>,
+        cache_ipv4: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv4Addr>, Negative>>>,
+        cache_ipv6: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv6Addr>, Negative>>>,
     ) -> crate::Result<bool> {
         let key = key.to_fqdn();
-
-        if cache_ipv4.is_some_and(|c| c.get::<str>(key.as_ref()).is_some())
-            || cache_ipv6.is_some_and(|c| c.get::<str>(key.as_ref()).is_some())
-        {
-            return Ok(true);
+        match cached_exists(key.as_ref(), cache_ipv4, cache_ipv6) {
+            Some(exists) => Ok(exists),
+            None => self.resolve_exists(key.as_ref()).await,
         }
-
-        self.query_exists(key.as_ref()).await
     }
 }
 
-#[cfg(any(test, feature = "test"))]
-#[doc(hidden)]
-pub fn mock_resolve<T>(domain: &str) -> crate::Result<T> {
-    Err(if domain.contains("_parse_error.") {
-        Error::Parse
-    } else if domain.contains("_invalid_record.") {
-        Error::Dns(crate::DnsError::InvalidRecordType)
-    } else if domain.contains("_dns_error.") {
-        Error::Dns(crate::DnsError::Resolver("".to_string()))
-    } else {
-        Error::Dns(crate::DnsError::RecordNotFound(super::DNS_RCODE_NXDOMAIN))
-    })
+fn cached_exists(
+    key: &str,
+    cache_ipv4: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv4Addr>, Negative>>>,
+    cache_ipv6: Option<&impl ResolverCache<Box<str>, Result<RecordSet<Ipv6Addr>, Negative>>>,
+) -> Option<bool> {
+    let ipv4 = cache_ipv4
+        .and_then(|cache| cache.get::<str>(key))
+        .map(|entry| entry.is_ok_and(|set| !set.records.is_empty()));
+    if ipv4 == Some(true) {
+        return Some(true);
+    }
+    let ipv6 = cache_ipv6
+        .and_then(|cache| cache.get::<str>(key))
+        .map(|entry| entry.is_ok_and(|set| !set.records.is_empty()));
+    match (ipv4, ipv6) {
+        (_, Some(true)) => Some(true),
+        (Some(false), Some(false)) => Some(false),
+        _ => None,
+    }
 }

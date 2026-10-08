@@ -10,9 +10,8 @@
 //! (`application/dns-json`) or as DNS wire format messages
 //! (`application/dns-message`, RFC 8484 Section 4.1).
 
-use super::{DnsEntry, ToReverseName};
-use crate::Instant;
-use crate::{Error, MessageAuthenticator};
+use super::{DnsEntry, QueryError, QueryResult, ToReverseName};
+use crate::{Error, Instant, MessageAuthenticator, authenticator::DEFAULT_MAX_NEGATIVE_TTL};
 use hickory_proto::op::{Message, Query, ResponseCode};
 use hickory_proto::rr::{Name, RData, RecordType};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -24,6 +23,7 @@ const DNS_TYPE_AAAA: u16 = 28;
 const DNS_TYPE_TXT: u16 = 16;
 const DNS_TYPE_MX: u16 = 15;
 const DNS_TYPE_PTR: u16 = 12;
+const DNS_TYPE_SOA: u16 = 6;
 
 const STATUS_NOERROR: u16 = 0;
 const STATUS_NXDOMAIN: u16 = 3;
@@ -61,9 +61,12 @@ struct DohResponse {
     status: u16,
     #[serde(rename = "Answer", default)]
     answer: Vec<DohAnswer>,
+    #[serde(rename = "Authority", default)]
+    authority: Vec<DohAnswer>,
 }
 
 #[derive(serde::Deserialize)]
+#[cfg_attr(test, derive(Debug, Clone))]
 struct DohAnswer {
     #[serde(rename = "type")]
     record_type: u16,
@@ -113,11 +116,14 @@ impl MessageAuthenticator {
     }
 
     fn new_doh_with_format(endpoint: impl Into<Box<str>>, format: DohFormat) -> Self {
-        MessageAuthenticator(DohResolver {
-            client: reqwest::Client::new(),
-            endpoint: endpoint.into(),
-            format,
-        })
+        MessageAuthenticator {
+            resolver: DohResolver {
+                client: reqwest::Client::new(),
+                endpoint: endpoint.into(),
+                format,
+            },
+            max_negative_ttl: DEFAULT_MAX_NEGATIVE_TTL,
+        }
     }
 
     /// Test support: returns [`new_doh_cloudflare`](Self::new_doh_cloudflare)
@@ -131,7 +137,7 @@ impl MessageAuthenticator {
         Ok(Self::new_doh_cloudflare())
     }
 
-    pub(crate) async fn query_txt(&self, name: &str) -> crate::Result<DnsEntry<Vec<Vec<u8>>>> {
+    pub(crate) async fn query_txt(&self, name: &str) -> QueryResult<Vec<Vec<u8>>> {
         let (records, expires) = self.doh_query(name, DNS_TYPE_TXT).await?;
         let entry = records
             .into_iter()
@@ -143,10 +149,7 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    pub(crate) async fn query_mx(
-        &self,
-        name: &str,
-    ) -> crate::Result<DnsEntry<Vec<(u16, Box<str>)>>> {
+    pub(crate) async fn query_mx(&self, name: &str) -> QueryResult<Vec<(u16, Box<str>)>> {
         let (records, expires) = self.doh_query(name, DNS_TYPE_MX).await?;
         let entry = records
             .into_iter()
@@ -158,7 +161,7 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    pub(crate) async fn query_ipv4(&self, name: &str) -> crate::Result<DnsEntry<Arc<[Ipv4Addr]>>> {
+    pub(crate) async fn query_ipv4(&self, name: &str) -> QueryResult<Arc<[Ipv4Addr]>> {
         let (records, expires) = self.doh_query(name, DNS_TYPE_A).await?;
         let entry: Arc<[Ipv4Addr]> = records
             .into_iter()
@@ -171,7 +174,7 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    pub(crate) async fn query_ipv6(&self, name: &str) -> crate::Result<DnsEntry<Arc<[Ipv6Addr]>>> {
+    pub(crate) async fn query_ipv6(&self, name: &str) -> QueryResult<Arc<[Ipv6Addr]>> {
         let (records, expires) = self.doh_query(name, DNS_TYPE_AAAA).await?;
         let entry: Arc<[Ipv6Addr]> = records
             .into_iter()
@@ -184,7 +187,7 @@ impl MessageAuthenticator {
         Ok(DnsEntry { entry, expires })
     }
 
-    pub(crate) async fn query_ptr(&self, addr: IpAddr) -> crate::Result<DnsEntry<Arc<[Box<str>]>>> {
+    pub(crate) async fn query_ptr(&self, addr: IpAddr) -> QueryResult<Arc<[Box<str>]>> {
         let name = match addr {
             IpAddr::V4(_) => format!("{}.in-addr.arpa", addr.to_reverse_name()),
             IpAddr::V6(_) => format!("{}.ip6.arpa", addr.to_reverse_name()),
@@ -203,14 +206,12 @@ impl MessageAuthenticator {
     pub(crate) async fn query_exists(&self, name: &str) -> crate::Result<bool> {
         match self.doh_query(name, DNS_TYPE_A).await {
             Ok(_) => Ok(true),
-            Err(Error::Dns(crate::DnsError::RecordNotFound(_))) => {
-                match self.doh_query(name, DNS_TYPE_AAAA).await {
-                    Ok(_) => Ok(true),
-                    Err(Error::Dns(crate::DnsError::RecordNotFound(_))) => Ok(false),
-                    Err(err) => Err(err),
-                }
-            }
-            Err(err) => Err(err),
+            Err(QueryError::NotFound { .. }) => match self.doh_query(name, DNS_TYPE_AAAA).await {
+                Ok(_) => Ok(true),
+                Err(QueryError::NotFound { .. }) => Ok(false),
+                Err(QueryError::Other(err)) => Err(err),
+            },
+            Err(QueryError::Other(err)) => Err(err),
         }
     }
 
@@ -218,8 +219,8 @@ impl MessageAuthenticator {
         &self,
         name: &str,
         record_type: u16,
-    ) -> crate::Result<(Vec<DohRecord>, Instant)> {
-        match self.0.format {
+    ) -> Result<(Vec<DohRecord>, Instant), QueryError> {
+        match self.resolver.format {
             DohFormat::Json => self.doh_query_json(name, record_type).await,
             DohFormat::Wire => self.doh_query_wire(name, record_type).await,
         }
@@ -229,11 +230,11 @@ impl MessageAuthenticator {
         &self,
         name: &str,
         record_type: u16,
-    ) -> crate::Result<(Vec<DohRecord>, Instant)> {
+    ) -> Result<(Vec<DohRecord>, Instant), QueryError> {
         let response = self
-            .0
+            .resolver
             .client
-            .get(self.0.endpoint.as_ref())
+            .get(self.resolver.endpoint.as_ref())
             .query(&[("name", name), ("type", &record_type.to_string())])
             .header(reqwest::header::ACCEPT, "application/dns-json")
             .send()
@@ -244,10 +245,15 @@ impl MessageAuthenticator {
 
         match body.status {
             STATUS_NOERROR => {}
-            STATUS_NXDOMAIN => return Err(record_not_found()),
+            STATUS_NXDOMAIN => {
+                return Err(record_not_found(
+                    STATUS_NXDOMAIN,
+                    json_negative_ttl(&body.authority),
+                ));
+            }
             code => {
-                return Err(Error::Dns(crate::DnsError::Resolver(format!(
-                    "DoH server returned status {code}"
+                return Err(QueryError::Other(Error::Dns(crate::DnsError::Resolver(
+                    format!("DoH server returned status {code}"),
                 ))));
             }
         }
@@ -261,14 +267,14 @@ impl MessageAuthenticator {
             }
         }
 
-        finalize(records, min_ttl)
+        finalize(records, min_ttl, || json_negative_ttl(&body.authority))
     }
 
     async fn doh_query_wire(
         &self,
         name: &str,
         record_type: u16,
-    ) -> crate::Result<(Vec<DohRecord>, Instant)> {
+    ) -> Result<(Vec<DohRecord>, Instant), QueryError> {
         let mut message = Message::query();
         message.metadata.recursion_desired = true;
         message.add_query(Query::query(
@@ -278,9 +284,9 @@ impl MessageAuthenticator {
         let request = message.to_vec().map_err(resolver_error)?;
 
         let response = self
-            .0
+            .resolver
             .client
-            .post(self.0.endpoint.as_ref())
+            .post(self.resolver.endpoint.as_ref())
             .header(reqwest::header::CONTENT_TYPE, "application/dns-message")
             .header(reqwest::header::ACCEPT, "application/dns-message")
             .body(request)
@@ -292,10 +298,15 @@ impl MessageAuthenticator {
 
         match message.metadata.response_code {
             ResponseCode::NoError => {}
-            ResponseCode::NXDomain => return Err(record_not_found()),
+            ResponseCode::NXDomain => {
+                return Err(record_not_found(
+                    STATUS_NXDOMAIN,
+                    wire_negative_ttl(&message),
+                ));
+            }
             code => {
-                return Err(Error::Dns(crate::DnsError::Resolver(format!(
-                    "DoH server returned {code}"
+                return Err(QueryError::Other(Error::Dns(crate::DnsError::Resolver(
+                    format!("DoH server returned {code}"),
                 ))));
             }
         }
@@ -326,13 +337,17 @@ impl MessageAuthenticator {
             records.push(record);
         }
 
-        finalize(records, min_ttl)
+        finalize(records, min_ttl, || wire_negative_ttl(&message))
     }
 }
 
-fn finalize(records: Vec<DohRecord>, min_ttl: u32) -> crate::Result<(Vec<DohRecord>, Instant)> {
+fn finalize(
+    records: Vec<DohRecord>,
+    min_ttl: u32,
+    negative_ttl: impl FnOnce() -> Option<u32>,
+) -> Result<(Vec<DohRecord>, Instant), QueryError> {
     if records.is_empty() {
-        return Err(record_not_found());
+        return Err(record_not_found(STATUS_NOERROR, negative_ttl()));
     }
     let ttl = if min_ttl == u32::MAX { 0 } else { min_ttl };
     Ok((records, Instant::now() + Duration::from_secs(ttl as u64)))
@@ -358,12 +373,35 @@ fn parse_json_record(record_type: u16, data: &str) -> Option<DohRecord> {
     }
 }
 
-fn record_not_found() -> Error {
-    Error::Dns(crate::DnsError::RecordNotFound(STATUS_NXDOMAIN))
+fn record_not_found(code: u16, negative_ttl: Option<u32>) -> QueryError {
+    QueryError::NotFound { code, negative_ttl }
 }
 
-fn resolver_error(err: impl std::fmt::Display) -> Error {
-    Error::Dns(crate::DnsError::Resolver(err.to_string()))
+fn json_negative_ttl(authority: &[DohAnswer]) -> Option<u32> {
+    let soa = authority
+        .iter()
+        .find(|record| record.record_type == DNS_TYPE_SOA)?;
+    Some(
+        soa.data
+            .split_ascii_whitespace()
+            .next_back()
+            .and_then(|minimum| minimum.parse::<u32>().ok())
+            .map_or(soa.ttl, |minimum| soa.ttl.min(minimum)),
+    )
+}
+
+fn wire_negative_ttl(message: &Message) -> Option<u32> {
+    message
+        .authorities
+        .iter()
+        .find_map(|record| match &record.data {
+            RData::SOA(soa) => Some(record.ttl.min(soa.minimum)),
+            _ => None,
+        })
+}
+
+fn resolver_error(err: impl std::fmt::Display) -> QueryError {
+    QueryError::Other(Error::Dns(crate::DnsError::Resolver(err.to_string())))
 }
 
 fn parse_txt_data(data: &str) -> Vec<u8> {
@@ -397,8 +435,108 @@ fn parse_txt_data(data: &str) -> Vec<u8> {
 
 #[cfg(test)]
 mod test {
+    use super::{
+        DNS_TYPE_SOA, DohAnswer, DohRecord, QueryError, STATUS_NOERROR, finalize,
+        json_negative_ttl, wire_negative_ttl,
+    };
     use crate::MessageAuthenticator;
+    use hickory_proto::{
+        op::Message,
+        rr::{Name, RData, Record, rdata::SOA},
+    };
     use std::net::{IpAddr, Ipv4Addr};
+
+    const DNS_TYPE_NS: u16 = 2;
+
+    fn json_record(record_type: u16, ttl: u32, data: &str) -> DohAnswer {
+        DohAnswer {
+            record_type,
+            ttl,
+            data: data.to_string(),
+        }
+    }
+
+    fn wire_message(authorities: impl IntoIterator<Item = Record>) -> Message {
+        let mut message = Message::query();
+        message.authorities.extend(authorities);
+        message
+    }
+
+    fn soa_record(ttl: u32, minimum: u32) -> Record {
+        let name = Name::from_ascii("example.org.").expect("valid name");
+        Record::from_rdata(
+            name.clone(),
+            ttl,
+            RData::SOA(SOA::new(
+                name.clone(),
+                name,
+                1,
+                7200,
+                3600,
+                1209600,
+                minimum,
+            )),
+        )
+    }
+
+    // The JSON negative TTL is min(SOA TTL, SOA MINIMUM), or the TTL when MINIMUM is unreadable.
+    #[test]
+    fn json_negative_ttl_from_soa() {
+        let soa = "ns.example.org. host.example.org. 1 7200 3600 1209600 300";
+        let ns = json_record(DNS_TYPE_NS, 1800, "ns.example.org.");
+
+        for (authority, expected) in [
+            (vec![json_record(DNS_TYPE_SOA, 1800, soa)], Some(300)),
+            (vec![json_record(DNS_TYPE_SOA, 100, soa)], Some(100)),
+            (
+                vec![ns.clone(), json_record(DNS_TYPE_SOA, 1800, soa)],
+                Some(300),
+            ),
+            (
+                vec![json_record(
+                    DNS_TYPE_SOA,
+                    1800,
+                    "ns.example.org. host.example.org. 1 7200 3600 1209600 x",
+                )],
+                Some(1800),
+            ),
+            (vec![json_record(DNS_TYPE_SOA, 1800, "")], Some(1800)),
+            (vec![ns], None),
+            (vec![], None),
+        ] {
+            assert_eq!(json_negative_ttl(&authority), expected, "{authority:?}");
+        }
+    }
+
+    // The wire negative TTL is min(SOA TTL, SOA MINIMUM) from the authority section.
+    #[test]
+    fn wire_negative_ttl_from_soa() {
+        assert_eq!(
+            wire_negative_ttl(&wire_message([soa_record(1800, 300)])),
+            Some(300)
+        );
+        assert_eq!(
+            wire_negative_ttl(&wire_message([soa_record(100, 300)])),
+            Some(100)
+        );
+        assert_eq!(wire_negative_ttl(&wire_message([])), None);
+    }
+
+    // An empty NOERROR answer is NODATA, not NXDOMAIN, and keeps its negative TTL.
+    #[test]
+    fn empty_answer_is_nodata() {
+        assert!(matches!(
+            finalize(vec![], u32::MAX, || Some(300)),
+            Err(QueryError::NotFound {
+                code: STATUS_NOERROR,
+                negative_ttl: Some(300)
+            })
+        ));
+        assert!(matches!(
+            finalize(vec![DohRecord::A(Ipv4Addr::LOCALHOST)], 60, || None),
+            Ok((records, _)) if records.len() == 1
+        ));
+    }
 
     fn providers() -> Vec<(&'static str, MessageAuthenticator)> {
         vec![
