@@ -263,21 +263,20 @@ impl CanonicalState {
                 self.last_ch = last_ch;
             }
 
+            // Line breaks and WSP are held back until further content follows
+            // (RFC 6376, Section 3.4.4). Trailing WSP is thereby dropped from
+            // every line, so that a line consisting solely of WSP becomes an
+            // empty line and, at the end of the body, is ignored like any
+            // other empty line. WSP that precedes content is still emitted
+            // as a single SP by way of `last_ch`.
             let mut consumed = 0;
             let mut last_ch = self.last_ch;
             let mut breaks = self.crlf_seq;
-            let mut pending = 0;
-            let mut has_wsp = false;
 
             for &ch in tail {
                 match ch {
-                    b'\n' => pending += 1,
-                    b' ' | b'\t' => {
-                        breaks += pending;
-                        pending = 0;
-                        has_wsp = true;
-                    }
-                    b'\r' => {}
+                    b'\n' => breaks += 1,
+                    b' ' | b'\t' | b'\r' => {}
                     _ => break,
                 }
                 consumed += 1;
@@ -285,13 +284,7 @@ impl CanonicalState {
             }
 
             if consumed != 0 {
-                if has_wsp {
-                    write_crlf_run(writer, breaks);
-                    self.crlf_seq = pending;
-                    self.is_empty = false;
-                } else {
-                    self.crlf_seq = breaks + pending;
-                }
+                self.crlf_seq = breaks;
                 self.last_ch = last_ch;
             }
 
