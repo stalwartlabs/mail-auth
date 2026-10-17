@@ -23,6 +23,7 @@ pub mod dmarc;
 pub mod dns;
 mod error;
 pub mod headers;
+mod heap;
 pub mod iprev;
 pub mod message;
 pub mod mta_sts;

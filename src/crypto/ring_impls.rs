@@ -8,7 +8,7 @@
 
 use super::{
     Algorithm, CryptoError, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey,
-    VerifyingKey,
+    VerifyingKey, rsa_private_key_heap_size,
 };
 use crate::{
     Error, Result,
@@ -29,6 +29,8 @@ use crypto_backend::signature::{
 };
 use rustls_pki_types::{PrivateKeyDer, PrivatePkcs1KeyDer, PrivatePkcs8KeyDer, pem::PemObject};
 use std::marker::PhantomData;
+
+const ED25519_PRIVATE_KEY_HEAP_SIZE: usize = 112;
 
 /// An RSA private key for `rsa-sha256` signing (RFC 6376 Section 3.3.2).
 ///
@@ -145,6 +147,10 @@ impl SigningKey for RsaKey<Sha256> {
     fn algorithm(&self) -> Algorithm {
         Algorithm::RsaSha256
     }
+
+    fn heap_size(&self) -> usize {
+        rsa_private_key_heap_size(self.inner.public_key().modulus_len())
+    }
 }
 
 /// An Ed25519 private key for `ed25519-sha256` signing (RFC 8463).
@@ -234,6 +240,10 @@ impl SigningKey for Ed25519Key {
 
     fn algorithm(&self) -> Algorithm {
         Algorithm::Ed25519Sha256
+    }
+
+    fn heap_size(&self) -> usize {
+        ED25519_PRIVATE_KEY_HEAP_SIZE
     }
 }
 
@@ -366,6 +376,10 @@ impl VerifyingKey for RsaPublicKey {
     fn public_key_bits(&self) -> usize {
         rsa_modulus_bits(&self.key).unwrap_or_default()
     }
+
+    fn heap_size(&self) -> usize {
+        self.key.capacity()
+    }
 }
 
 pub(crate) struct Ed25519PublicKey {
@@ -411,6 +425,10 @@ impl VerifyingKey for Ed25519PublicKey {
         self.inner
             .verify(hasher.complete().as_ref(), signature)
             .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
+    }
+
+    fn heap_size(&self) -> usize {
+        self.inner.as_ref().len()
     }
 }
 

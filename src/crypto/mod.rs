@@ -96,6 +96,12 @@ pub trait SigningKey {
 
     /// Returns the signature algorithm written to the `a=` tag.
     fn algorithm(&self) -> Algorithm;
+
+    /// Approximate heap memory owned by the key, in bytes, for weighing
+    /// cache entries that hold it.
+    fn heap_size(&self) -> usize {
+        0
+    }
 }
 
 /// A concrete DKIM signing key, holding either an RSA or an Ed25519 key.
@@ -128,6 +134,20 @@ impl SigningKey for DkimKey {
             DkimKey::Ed25519(key) => key.algorithm(),
         }
     }
+
+    fn heap_size(&self) -> usize {
+        match self {
+            DkimKey::Rsa(key) => key.heap_size(),
+            DkimKey::Ed25519(key) => key.heap_size(),
+        }
+    }
+}
+
+#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
+pub(crate) const fn rsa_private_key_heap_size(modulus_len: usize) -> usize {
+    const BASE: usize = 768;
+    const PER_MODULUS_BYTE: usize = 8;
+    BASE + PER_MODULUS_BYTE * modulus_len
 }
 
 #[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
@@ -180,6 +200,12 @@ pub trait VerifyingKey {
     /// minimum key size checks apply to RSA keys only.
     fn public_key_bits(&self) -> usize {
         usize::MAX
+    }
+
+    /// Approximate heap memory owned by the key, in bytes, for weighing
+    /// cache entries that hold it.
+    fn heap_size(&self) -> usize {
+        0
     }
 }
 

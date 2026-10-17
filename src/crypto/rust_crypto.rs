@@ -9,7 +9,7 @@
 
 use super::{
     Algorithm, CryptoError, HashContext, HashImpl, HashOutput, Sha1, Sha256, SigningKey,
-    VerifyingKey,
+    VerifyingKey, rsa_private_key_heap_size,
 };
 use crate::{
     Error, Result,
@@ -110,6 +110,10 @@ impl SigningKey for RsaKey<Sha256> {
 
     fn algorithm(&self) -> Algorithm {
         Algorithm::RsaSha256
+    }
+
+    fn heap_size(&self) -> usize {
+        rsa_private_key_heap_size(self.inner.size())
     }
 }
 
@@ -283,6 +287,10 @@ impl VerifyingKey for RsaPublicKey {
 
     fn public_key_bits(&self) -> usize {
         self.inner.n().bits()
+    }
+
+    fn heap_size(&self) -> usize {
+        self.inner.n().bits().div_ceil(8) + self.inner.e().bits().div_ceil(8)
     }
 }
 
