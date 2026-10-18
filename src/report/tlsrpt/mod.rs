@@ -14,8 +14,11 @@
 //! documentation also gives.
 
 use mail_parser::DateTime;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use std::net::IpAddr;
+use serde::{
+    Deserialize, Deserializer, Serialize, Serializer,
+    de::{self, Visitor},
+};
+use std::{fmt, net::IpAddr};
 
 mod generate;
 mod parse;
@@ -113,8 +116,11 @@ pub struct FailureDetails {
     #[serde(rename = "result-type")]
     pub result_type: FailureType,
 
-    /// IP address of the sending MTA (`sending-mta-ip`).
+    /// IP address of the sending MTA (`sending-mta-ip`). An empty or
+    /// unparseable address becomes `None`.
     #[serde(rename = "sending-mta-ip")]
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_ip")]
     pub sending_mta_ip: Option<IpAddr>,
 
     /// Host name of the receiving MX (`receiving-mx-hostname`).
@@ -125,8 +131,11 @@ pub struct FailureDetails {
     #[serde(rename = "receiving-mx-helo")]
     pub receiving_mx_helo: Option<String>,
 
-    /// IP address of the receiving MX (`receiving-ip`).
+    /// IP address of the receiving MX (`receiving-ip`). An empty or
+    /// unparseable address becomes `None`.
     #[serde(rename = "receiving-ip")]
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_ip")]
     pub receiving_ip: Option<IpAddr>,
 
     /// Number of sessions that failed this way (`failed-session-count`).
@@ -234,6 +243,39 @@ where
         DateTime::parse_rfc3339(Deserialize::deserialize(deserializer)?)
             .unwrap_or_else(|| DateTime::from_timestamp(0)),
     )
+}
+
+fn deserialize_ip<'de, D>(deserializer: D) -> Result<Option<IpAddr>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    deserializer.deserialize_option(IpVisitor)
+}
+
+struct IpVisitor;
+
+impl<'de> Visitor<'de> for IpVisitor {
+    type Value = Option<IpAddr>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("an IP address string or null")
+    }
+
+    fn visit_str<E: de::Error>(self, value: &str) -> Result<Self::Value, E> {
+        Ok(value.parse().ok())
+    }
+
+    fn visit_none<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_unit<E: de::Error>(self) -> Result<Self::Value, E> {
+        Ok(None)
+    }
+
+    fn visit_some<D: Deserializer<'de>>(self, deserializer: D) -> Result<Self::Value, D::Error> {
+        deserializer.deserialize_str(self)
+    }
 }
 
 fn serialize_datetime<S>(datetime: &DateTime, serializer: S) -> Result<S::Ok, S::Error>

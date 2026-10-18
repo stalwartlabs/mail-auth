@@ -184,6 +184,54 @@ mod tests {
     }
 
     #[test]
+    fn tlsrpt_parse_lenient_ip() {
+        // Empty, malformed, null and missing addresses become None; valid ones still parse.
+        for (fields, sending_mta_ip, receiving_ip) in [
+            (
+                r#""sending-mta-ip":"","receiving-ip":"192.0.2.25","#,
+                None,
+                Some("192.0.2.25"),
+            ),
+            (
+                r#""sending-mta-ip":"2001:db8::1","receiving-ip":"","#,
+                Some("2001:db8::1"),
+                None,
+            ),
+            (
+                r#""sending-mta-ip":"bogus","receiving-ip":"999.1.1.1","#,
+                None,
+                None,
+            ),
+            (r#""sending-mta-ip":null,"receiving-ip":null,"#, None, None),
+            ("", None, None),
+        ] {
+            let report = format!(
+                concat!(
+                    r#"{{"report-id":"1","date-range":"#,
+                    r#"{{"start-datetime":"2023-01-01T00:00:00Z","end-datetime":"2023-01-02T00:00:00Z"}},"#,
+                    r#""policies":[{{"policy":{{"policy-type":"sts"}},"summary":{{}},"#,
+                    r#""failure-details":[{{"result-type":"validation-failure",{}"failed-session-count":9}}]}}]}}"#
+                ),
+                fields
+            );
+            let rpt = TlsReport::parse_json(report.as_bytes())
+                .unwrap_or_else(|err| panic!("Failed to parse {fields}: {err:?}"));
+            let details = &rpt.policies[0].failure_details[0];
+            assert_eq!(
+                details.sending_mta_ip,
+                sending_mta_ip.map(|ip| ip.parse().unwrap()),
+                "{fields}"
+            );
+            assert_eq!(
+                details.receiving_ip,
+                receiving_ip.map(|ip| ip.parse().unwrap()),
+                "{fields}"
+            );
+            assert_eq!(details.failed_session_count, 9);
+        }
+    }
+
+    #[test]
     fn tlsrpt_parse_zip_forged_size() {
         let archive = zip("report.json", REPORT.as_bytes(), None, Some(u32::MAX));
         let message = message_with_attachment("application/tlsrpt+zip", "report.zip", &archive);
