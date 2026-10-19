@@ -12,16 +12,14 @@ This release reorganizes the public API and updates DKIM2 to draft-ietf-dkim-dki
 - DKIM2: SHA-512 `Message-Instance` hashes (`Dkim2Signer::hashes`), `MessageAuthenticator::verify_dkim2_provisionally`, `Dkim2Signer::out_of_band_arrangement` and `Hop::exploded` (new `Hop::Exploded` variant) to flag single-recipient copies of an exploded message.
 - `DnsCache` trait: one implementation supplies all record caches to every verifier through `Parameters::with_cache`.
 - Negative DNS caching (RFC 2308), capped by `MessageAuthenticator::with_max_negative_ttl`.
-- `report::ReportEnvelope` and `AuthenticatedMessage` accessor methods.
+- `AuthenticatedMessage` accessor methods.
 - Documentation on every public item.
 
 ### Changed
 - Bump `mail-parser` to 1.0.
-- The `common` module is gone; its contents moved to `dns`, `crypto`, `headers`, `message`, `auth_results`, `iprev` and `dkim`. DMARC aggregate report types moved to `report::dmarc` and ARF types to `report::arf`.
+- The `common` module is gone; its contents moved to `dns`, `crypto`, `headers`, `message`, `auth_results`, `iprev` and `dkim`.
 - Verifiers take `Parameters<'x, P, C: DnsCache>`; `Parameters::params` is now `input` and the `cache_*` fields are replaced by `cache`. MX, A, AAAA and PTR caches hold `Result<RecordSet<T>, Negative>`.
-- Renamed types and variants, including the `Record` suffix on parsed DNS record types (`SpfRecord`, `DmarcRecord`, ...), `Txt` to `TxtRecord`, `MX` to `Mx`, `Error::ParseError` to `Error::Parse` and `report::Error` to `report::ReportError`.
-- Report types have public fields and no getters or setters; their serde representation changed, so stored `AggregateReport` and `FeedbackReport` data must be migrated.
-- `write_rfc5322` and `to_rfc5322` take a `&ReportEnvelope`; `AggregateReport::parse_xml` and `FeedbackReport::parse_arf` return `Result<_, ReportError>`; `FeedbackReport::parse_rfc5322` takes `max_size`.
+- Renamed types and variants, including the `Record` suffix on parsed DNS record types (`SpfRecord`, `DmarcRecord`, ...), `Txt` to `TxtRecord`, `MX` to `Mx`, `Error::ParseError` to `Error::Parse`.
 - SPF: `SpfParameters::{verify_ehlo, verify_mail_from, verify}` are now `{helo, mail_from, helo_and_mail_from}`, `with_spf_result` and `ReceivedSpf::new` take `SpfParameters`, and `SpfResult` displays lowercase tokens.
 - `verify_dmarc_report_address` is now `authorized_report_addresses` and returns a `Result`.
 - `DkimSigner` and `ArcSealer` no longer implement `Default`, `expiration` takes a `Duration`, and the signer typestate markers moved to the `signer` module (`Done` is now `Ready`).
@@ -33,12 +31,11 @@ This release reorganizes the public API and updates DKIM2 to draft-ietf-dkim-dki
 - The `rkyv` feature.
 - The `donotmodify` and `donotexplode` DKIM2 flags.
 - The `Version` enum and `version` fields of `SpfRecord`, `DmarcRecord` and `AtpsRecord`.
-- Report getters and `with_*` setters, `report::Alignment`, `report::Disposition` and `Report::add_record`.
+- The `report` module and feature (DMARC aggregate, ARF and TLS-RPT report parsing and generation), together with the `flate2` and `zip` re-exports.
 - Public constructors of `DkimOutput`, `ArcOutput` and `DmarcOutput` (use `From<DkimResult>` and `From<ArcResult>`).
 - Public fields of `AuthenticatedMessage`, `MessageAuthenticator`, `DkimSigner`, `Dkim2Signer` and `DomainKey`; use the accessors, and `retain_dkim_signatures` to filter signatures before verification.
 
 ### Fixed
-- DMARC aggregate report parsing skips unknown elements under `<feedback>` instead of ending early.
 
 ## [0.13.3] - 2026-09-18
 

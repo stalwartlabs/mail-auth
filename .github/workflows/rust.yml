@@ -24,12 +24,12 @@ jobs:
       - name: cargo fmt -- --check
         run: cargo fmt --all -- --check
       - name: clippy (aws-lc-rs / dns-hickory)
-        run: cargo clippy --no-default-features --features aws-lc-rs,report,generate,arc -- -D warnings
+        run: cargo clippy --no-default-features --features aws-lc-rs,generate,arc -- -D warnings
       - name: clippy (rust-crypto / dns-doh)
-        run: cargo clippy --no-default-features --features dns-doh,rust-crypto,report,generate,arc -- -D warnings
+        run: cargo clippy --no-default-features --features dns-doh,rust-crypto,generate,arc -- -D warnings
       - name: Build
         run: cargo build --verbose
       - name: Run tests (aws-lc-rs)
         run: cargo test --verbose
       - name: Run tests (dns-doh / rust-crypto)
-        run: cargo test --verbose --lib --no-default-features --features dns-doh,rust-crypto,report,generate,arc
+        run: cargo test --verbose --lib --no-default-features --features dns-doh,rust-crypto,generate,arc

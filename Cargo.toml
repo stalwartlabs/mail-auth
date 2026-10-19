@@ -16,21 +16,18 @@ resolver = "2"
 doctest = false
 
 [features]
-default = ["aws-lc-rs", "report", "dns-hickory"]
+default = ["aws-lc-rs", "dns-hickory"]
 aws-lc-rs = ["dep:aws-lc-rs", "dep:aws-lc-sys", "dns-hickory", "hickory-resolver/tls-aws-lc-rs", "hickory-resolver/dnssec-aws-lc-rs", "hickory-resolver/rustls-platform-verifier"]
 rust-crypto = ["rsa", "rand", "ed25519-dalek", "sha1", "sha2", "ml-dsa"]
 generate = ["rsa", "rand"]
 dns-hickory = ["dep:hickory-resolver"]
 dns-doh = ["dep:reqwest", "dep:web-time", "dep:hickory-proto"]
 arc = []
-report = ["quick-xml", "zip"]
 test = []
 
 [dependencies]
-flate2 = "1.1"
 encodify = "1.0"
 mail-parser = { version = "1.0", features = ["full_encoding"] }
-quick-xml = { version = "0.42", optional = true }
 hashify =  { version = "0.3" }
 idna = "1.1"
 memchr = "2.7"
@@ -49,15 +46,12 @@ serde_json = "1.0"
 similar = "3"
 hickory-resolver = { version = "0.26", optional = true }
 hickory-proto = { version = "0.26", optional = true }
-zip = { version = "8.5", optional = true, default-features = false, features = ["deflate-flate2"] }
 rand = { version = "0.10", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-mail-builder = { version = "2.0" }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "webpki-roots", "http2", "json", "query"], optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-mail-builder = { version = "2.0", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["json", "query"], optional = true }
 hickory-proto = { version = "0.26", optional = true, features = ["wasm-bindgen"] }
 getrandom = { version = "0.2", features = ["js"] }
@@ -70,27 +64,11 @@ tempfile = "3"
 
 [[example]]
 name = "arc_seal"
-required-features = ["arc"]
+required-features = ["arc", "aws-lc-rs"]
 
 [[example]]
 name = "arc_verify"
-required-features = ["arc"]
-
-[[example]]
-name = "report_arf_generate"
-required-features = ["report"]
-
-[[example]]
-name = "report_arf_parse"
-required-features = ["report"]
-
-[[example]]
-name = "report_dmarc_generate"
-required-features = ["report"]
-
-[[example]]
-name = "report_dmarc_parse"
-required-features = ["report"]
+required-features = ["arc", "aws-lc-rs"]
 
 [[example]]
 name = "dkim_verify"
@@ -108,5 +86,4 @@ required-features = ["aws-lc-rs"]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
 
 [patch.crates-io]
-mail-builder = { path = "../mail-builder" }
 mail-parser = { path = "../mail-parser" }
