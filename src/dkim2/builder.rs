@@ -107,7 +107,8 @@ impl Dkim2Signer<Ready> {
     /// The `exploded` flag is not allowed on the first signature of a
     /// message (§12.5). It is added automatically to a later signature
     /// whose [`Hop`](super::Hop) has more than one `RCPT TO`; a Forwarder that
-    /// sends separate copies to several recipients must set it itself.
+    /// sends separate copies to several recipients marks each copy's hop with
+    /// [`Hop::exploded`](super::Hop::exploded) instead.
     pub fn flags(mut self, flags: impl IntoIterator<Item = Flag>) -> Self {
         for flag in flags {
             if !self.flags.contains(&flag) {

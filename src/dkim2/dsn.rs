@@ -131,6 +131,10 @@ pub enum Dkim2DsnFailure {
     /// The DSN signer is not a recipient of the returned message, or the
     /// returned message was not last signed by the receiving system.
     NotAligned,
+    /// A DKIM2 chain of the DSN or of the returned message could not be
+    /// verified because of a temporary DNS error (§13.2); the DSN should be
+    /// rejected temporarily so that the sender retries.
+    TempError,
 }
 
 impl std::fmt::Display for Dkim2DsnFailure {
@@ -144,6 +148,9 @@ impl std::fmt::Display for Dkim2DsnFailure {
             Dkim2DsnFailure::ReturnedChainFailed => "Returned message signature chain failed",
             Dkim2DsnFailure::NotAligned => {
                 "DSN signer is not aligned with the returned message recipient"
+            }
+            Dkim2DsnFailure::TempError => {
+                "DKIM2 chain could not be verified due to a temporary DNS error"
             }
         })
     }
@@ -316,8 +323,10 @@ impl MessageAuthenticator {
             )
             .await;
         let dsn_result = dsn_output.result;
-        if !matches!(dsn_result, Dkim2Result::Pass) {
-            return Err(Dkim2DsnFailure::DsnChainFailed);
+        match dsn_result {
+            Dkim2Result::Pass => {}
+            Dkim2Result::TempError(_) => return Err(Dkim2DsnFailure::TempError),
+            _ => return Err(Dkim2DsnFailure::DsnChainFailed),
         }
 
         let dsn_signing_domain = dsn_message
@@ -342,9 +351,11 @@ impl MessageAuthenticator {
             )
             .await
             .result;
-        if !matches!(returned_result, Dkim2Result::Pass) {
-            return Err(Dkim2DsnFailure::ReturnedChainFailed);
-        };
+        match returned_result {
+            Dkim2Result::Pass => {}
+            Dkim2Result::TempError(_) => return Err(Dkim2DsnFailure::TempError),
+            _ => return Err(Dkim2DsnFailure::ReturnedChainFailed),
+        }
 
         let aligned = match (&dsn_signing_domain, &returned_top) {
             (Some(dsn_domain), Some((returned_domain, _, rcpt_to))) => {
@@ -390,11 +401,11 @@ where
 mod test {
     use super::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput, Signature, dsn_return_path};
     use crate::{
-        MessageAuthenticator,
+        DnsError, Error, MessageAuthenticator,
         crypto::Ed25519Key,
         dkim::DomainKey,
         dkim2::{ChainBinding, Dkim2Signer, Envelope, Hop},
-        dns::cache::test::DummyCaches,
+        dns::{TxtRecord, cache::test::DummyCaches},
         parse::TxtRecordParser,
     };
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
@@ -527,8 +538,14 @@ mod test {
     }
 
     async fn verify(dsn_bytes: &[u8]) -> Result<Dkim2DsnOutput, Dkim2DsnFailure> {
+        verify_with(dsn_bytes, load_caches()).await
+    }
+
+    async fn verify_with(
+        dsn_bytes: &[u8],
+        caches: DummyCaches,
+    ) -> Result<Dkim2DsnOutput, Dkim2DsnFailure> {
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = load_caches();
         let dsn = Dkim2Dsn::parse(dsn_bytes).expect("parse DSN");
         let params = caches.parameters(&dsn);
         let envelope = Envelope::new("<>", ["sender@test1.dkim2.com"]);
@@ -616,6 +633,25 @@ mod test {
 
         let output = verify(&dsn_signed).await;
         assert_eq!(output, Err(Dkim2DsnFailure::ReturnedNotSigned));
+    }
+
+    // A temporary DNS failure on either chain is reported as a temporary error, not a forgery.
+    #[tokio::test]
+    async fn verify_dsn_temporary_dns_failure() {
+        let dsn_signed = make_dsn(&signed_returned(), "message/rfc822", true);
+        for domain in ["test2.dkim2.com", "test1.dkim2.com"] {
+            let caches = load_caches();
+            caches.txt_add(
+                format!("ed25519._domainkey.{domain}."),
+                TxtRecord::Error(Error::Dns(DnsError::Resolver("timeout".to_string()))),
+                Instant::now() + Duration::new(3600, 0),
+            );
+            assert_eq!(
+                verify_with(&dsn_signed, caches).await,
+                Err(Dkim2DsnFailure::TempError),
+                "{domain}"
+            );
+        }
     }
 
     #[tokio::test]

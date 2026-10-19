@@ -9,7 +9,7 @@ This release reorganizes the public API and updates DKIM2 to draft-ietf-dkim-dki
 ### Added
 - DKIM2: updated to [draft-ietf-dkim-dkim2-spec-07](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07) (from -04), with stricter parsing, chain of custody and `From` checks, and more detailed errors.
 - DKIM2: `mldsa44-ed25519-sha512` post-quantum composite algorithm (`crypto::MlDsa44Ed25519Key`, `DkimKeyPair::generate_mldsa44_ed25519`).
-- DKIM2: SHA-512 `Message-Instance` hashes (`Dkim2Signer::hashes`), `MessageAuthenticator::verify_dkim2_provisionally` and `Dkim2Signer::out_of_band_arrangement`.
+- DKIM2: SHA-512 `Message-Instance` hashes (`Dkim2Signer::hashes`), `MessageAuthenticator::verify_dkim2_provisionally`, `Dkim2Signer::out_of_band_arrangement` and `Hop::exploded` (new `Hop::Exploded` variant) to flag single-recipient copies of an exploded message.
 - `DnsCache` trait: one implementation supplies all record caches to every verifier through `Parameters::with_cache`.
 - Negative DNS caching (RFC 2308), capped by `MessageAuthenticator::with_max_negative_ttl`.
 - `report::ReportEnvelope` and `AuthenticatedMessage` accessor methods.

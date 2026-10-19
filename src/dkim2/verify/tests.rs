@@ -263,6 +263,61 @@ async fn sign_then_verify_multi_hop() {
     assert_eq!(output.chain().len(), 2);
 }
 
+// An exploded hop sets the exploded flag on single-recipient copies, but never on i=1.
+#[tokio::test]
+async fn exploded_hop_flag() {
+    let original = original();
+    let sign1 = signer("test1.dkim2.com")
+        .sign_at(
+            &original,
+            Hop::real("sender@test1.dkim2.com", ["list@test2.dkim2.com"]).exploded(),
+            None,
+            NOW,
+        )
+        .unwrap();
+    assert!(sign1.signature.flags.is_empty());
+    let message1 = prepend(&sign1, &original);
+    let parsed1 = AuthenticatedMessage::parse(&message1).unwrap();
+    let proof = verify(
+        &parsed1,
+        "sender@test1.dkim2.com",
+        &["list@test2.dkim2.com"],
+        Verification::Full,
+    )
+    .await;
+    assert_eq!(proof.result(), &Dkim2Result::Pass, "{:?}", proof.error());
+
+    for (hop, flags) in [
+        (
+            Hop::real("relay@test2.dkim2.com", ["recipient@example.com"]).exploded(),
+            vec![Flag::Exploded],
+        ),
+        (
+            Hop::real("relay@test2.dkim2.com", ["recipient@example.com"]),
+            vec![],
+        ),
+    ] {
+        let sign2 = signer("test2.dkim2.com")
+            .sign_at(&message1, hop, Some(&proof), NOW)
+            .unwrap();
+        assert_eq!(sign2.signature.flags, flags);
+        let message2 = prepend(&sign2, &message1);
+        let parsed2 = AuthenticatedMessage::parse(&message2).unwrap();
+        let output = verify(
+            &parsed2,
+            "relay@test2.dkim2.com",
+            &["recipient@example.com"],
+            Verification::Full,
+        )
+        .await;
+        assert_eq!(output.result(), &Dkim2Result::Pass, "{:?}", output.error());
+    }
+    assert_eq!(
+        Hop::imaginary("test3.dkim2.com").exploded(),
+        Hop::imaginary("test3.dkim2.com")
+    );
+}
+
 // Signing a message with DKIM2 header fields needs a passing full verification of that message.
 #[tokio::test]
 async fn signer_requires_validity_proof() {

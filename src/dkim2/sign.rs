@@ -59,7 +59,8 @@ where
 /// Next hop of a signed message, which a signature binds to for the chain
 /// of custody (§12.2 and §12.3).
 ///
-/// Build it with [`Hop::real`] or [`Hop::imaginary`].
+/// Build it with [`Hop::real`] or [`Hop::imaginary`], and mark a real hop
+/// that is one of several copies with [`Hop::exploded`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Hop<A, R, I>
 where
@@ -70,6 +71,12 @@ where
     /// The message is sent over SMTP with this envelope. The signature
     /// records it in the `mf=` and `rt=` tags.
     Real(Envelope<A, R>),
+    /// As [`Hop::Real`], for one of several copies of a message that an
+    /// intermediary sends to more than one address (§12.5). The signature
+    /// gets the `exploded` flag even when this envelope has a single `RCPT
+    /// TO`, except on the first signature (`i=1`), where the flag is not
+    /// allowed and is left out.
+    Exploded(Envelope<A, R>),
     /// The message moves to another domain without an SMTP transaction. The
     /// signature records the next domain in the `nd=` tag.
     Imaginary {
@@ -91,6 +98,23 @@ where
     /// `mail_from` for a null reverse-path, as in a DSN.
     pub fn real(mail_from: A, rcpt_to: R) -> Self {
         Hop::Real(Envelope::new(mail_from, rcpt_to))
+    }
+}
+
+impl<A, R, I> Hop<A, R, I>
+where
+    A: AsRef<str>,
+    R: IntoIterator<Item: AsRef<str>>,
+    I: Into<String>,
+{
+    /// Marks a real hop as one of several copies of an exploded message
+    /// (§12.5), turning [`Hop::Real`] into [`Hop::Exploded`]. Other hops are
+    /// returned unchanged.
+    pub fn exploded(self) -> Self {
+        match self {
+            Hop::Real(envelope) => Hop::Exploded(envelope),
+            hop => hop,
+        }
     }
 }
 
@@ -491,8 +515,12 @@ impl Dkim2Signer<Ready> {
                 flags.push(flag);
             }
         }
+        let (hop, exploded) = match hop {
+            Hop::Exploded(envelope) => (Hop::Real(envelope), true),
+            hop => (hop, false),
+        };
         let chain = match hop {
-            Hop::Real(envelope) => {
+            Hop::Real(envelope) | Hop::Exploded(envelope) => {
                 let rcpt_to = envelope
                     .rcpt_to
                     .into_iter()
@@ -506,7 +534,8 @@ impl Dkim2Signer<Ready> {
                 } else if !rcpt_to.iter().all(|rcpt| is_forward_path(rcpt)) {
                     return Err(Error::Dkim2(Dkim2Error::SignatureSyntax(next_i)));
                 }
-                if next_i > 1 && rcpt_to.len() > 1 && !flags.contains(&Flag::Exploded) {
+                if next_i > 1 && (exploded || rcpt_to.len() > 1) && !flags.contains(&Flag::Exploded)
+                {
                     flags.push(Flag::Exploded);
                 }
                 ChainBinding::Envelope {
