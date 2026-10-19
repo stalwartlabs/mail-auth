@@ -14,6 +14,7 @@ use crate::AuthenticatedMessage;
 use crate::dkim2::Dkim2Error;
 use crate::dkim2::canonicalize::{cmp_ignore_ascii_case, is_non_signed_header};
 use similar::{Algorithm, DiffOp, capture_diff_slices};
+use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
@@ -27,7 +28,9 @@ mod serde;
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Recipe {
     /// Header recipes (JSON key `h`), one per changed header field name.
-    /// Header fields not listed are kept unchanged (§5.1).
+    /// Header fields not listed are kept unchanged (§5.1). Names are unique;
+    /// recipes for header fields excluded from signing (§4) are dropped when
+    /// parsed and refused when signing.
     pub headers: Vec<HeaderRecipe>,
     /// Body recipe (JSON key `b`) (§5.2).
     pub body: BodyRecipe,
@@ -37,7 +40,8 @@ pub struct Recipe {
 /// (§5.1).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct HeaderRecipe {
-    /// Header field name, compared case-insensitively.
+    /// Header field name, compared case-insensitively and serialized in
+    /// lowercase.
     pub name: String,
     /// Steps that emit the previous instances. Empty means that all
     /// instances of this header field are removed.
@@ -60,7 +64,11 @@ pub enum BodyRecipe {
 ///
 /// Body lines are numbered top down, starting at 1 for the first body line.
 /// Header field instances are numbered bottom up, starting at 1 for the last
-/// instance of the name in the header block.
+/// instance of the name in the header block. A Signer's copy ranges start
+/// at 1 or more, end at or after their start and start after the end of
+/// every preceding copy step; when applied, other ranges are clamped so that
+/// no line or instance is copied twice. Data lines must not contain CR or
+/// LF.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Step {
     /// `c`: emit the current lines or header instances numbered `start` to
@@ -71,8 +79,11 @@ pub enum Step {
         /// Last line or instance number (1-based, inclusive).
         end: u32,
     },
-    /// `d`: emit these literal body lines or header field values.
+    /// `d`: emit these literal body lines or header field values (UTF-8).
     Data(Vec<String>),
+    /// `u`: emit these literal body lines or header field values, for data
+    /// that is not valid UTF-8. Serialized as base64.
+    Bytes(Vec<Vec<u8>>),
 }
 
 struct LowerHeader<'x>(&'x [u8]);
@@ -128,11 +139,19 @@ impl Recipe {
     ///
     /// Header fields excluded from DKIM2 hashing (§4) are ignored. Header
     /// field names in the result are lowercase. The body recipe is
-    /// [`BodyRecipe::None`] when both bodies are identical.
+    /// [`BodyRecipe::None`] when both bodies are identical, and
+    /// [`BodyRecipe::Unreconstructable`] when the bodies differ and the
+    /// original body has a bare CR or LF, which a recipe cannot recreate.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Dkim2Error::HeaderNotRepresentable`] when a header field
+    /// value that the recipe must recreate has a bare CR or LF outside
+    /// folding, since header recipes cannot be null.
     pub fn diff(
         original: &AuthenticatedMessage<'_>,
         modified: &AuthenticatedMessage<'_>,
-    ) -> Recipe {
+    ) -> crate::Result<Recipe> {
         let mut header_diffs: BTreeMap<LowerHeader<'_>, HeaderDiff> = BTreeMap::new();
 
         for (name, value) in &original.headers {
@@ -160,7 +179,7 @@ impl Recipe {
                 values.original.reverse();
                 values.modified.reverse();
 
-                let steps = diff_steps(&values.original, &values.modified);
+                let steps = diff_steps(&values.original, &values.modified, is_folded_value)?;
                 headers.push(HeaderRecipe {
                     name: std::str::from_utf8(header.0)
                         .map(str::to_ascii_lowercase)
@@ -174,13 +193,15 @@ impl Recipe {
         let mod_body = modified.raw_body();
         let body = if orig_body == mod_body {
             BodyRecipe::None
+        } else if has_bare_line_break(orig_body) {
+            BodyRecipe::Unreconstructable
         } else {
             let orig_lines = body_lines(orig_body);
             let mod_lines = body_lines(mod_body);
-            BodyRecipe::Steps(diff_steps(&orig_lines, &mod_lines))
+            BodyRecipe::Steps(diff_steps(&orig_lines, &mod_lines, |_| true)?)
         };
 
-        Recipe { headers, body }
+        Ok(Recipe { headers, body })
     }
 
     /// Applies this recipe to the current header fields and body, returning
@@ -192,9 +213,23 @@ impl Recipe {
     ///
     /// # Errors
     ///
-    /// Returns [`Dkim2Error::Modified`] if the body recipe is
+    /// Returns [`Dkim2Error::BodyUnreconstructable`] if the body recipe is
     /// [`BodyRecipe::Unreconstructable`].
     pub fn apply(&self, headers: &[(&[u8], &[u8])], body: &[u8]) -> crate::Result<Vec<u8>> {
+        if matches!(self.body, BodyRecipe::Unreconstructable) {
+            return Err(crate::Error::Dkim2(Dkim2Error::BodyUnreconstructable));
+        }
+        let mut out = Vec::with_capacity(headers_len(headers) + body.len());
+        self.apply_headers(headers, &mut out);
+        if let BodyRecipe::Steps(steps) = &self.body {
+            apply_body_recipe(&body_lines(body), steps, &mut out);
+        } else {
+            out.extend_from_slice(body);
+        }
+        Ok(out)
+    }
+
+    pub(crate) fn apply_headers(&self, headers: &[(&[u8], &[u8])], out: &mut Vec<u8>) {
         let mut header_apply: BTreeMap<LowerHeader<'_>, HeaderApply> = BTreeMap::new();
 
         for (name, value) in headers {
@@ -214,7 +249,6 @@ impl Recipe {
                 .recipe = Some(recipe);
         }
 
-        let mut out = Vec::new();
         for (name, apply) in header_apply {
             let header_values = if let Some(recipe) = apply.recipe {
                 apply_header_recipe(&apply.current, &recipe.steps)
@@ -231,42 +265,129 @@ impl Recipe {
         }
 
         out.extend_from_slice(b"\r\n");
-
-        match &self.body {
-            BodyRecipe::None => {
-                out.extend_from_slice(body);
-            }
-            BodyRecipe::Unreconstructable => {
-                return Err(crate::Error::Dkim2(Dkim2Error::Modified));
-            }
-            BodyRecipe::Steps(steps) => {
-                let lines = body_lines(body);
-                apply_body_recipe(&lines, steps, &mut out);
-            }
-        }
-
-        Ok(out)
     }
 
     /// Appends the JSON encoding of this recipe (§5) to `out`.
     ///
     /// # Errors
     ///
-    /// Returns [`Dkim2Error::RecipeSyntax`] if serialization fails.
+    /// Returns [`Dkim2Error::RecipeSyntax`] if the recipe fails
+    /// [`validate`](Self::validate) or serialization fails.
     pub fn to_json(&self, out: &mut Vec<u8>) -> crate::Result<()> {
+        self.validate()?;
+        self.write_json(out)
+    }
+
+    pub(crate) fn write_json(&self, out: &mut Vec<u8>) -> crate::Result<()> {
         serde_json::to_writer(out, self).map_err(|_| crate::Error::Dkim2(Dkim2Error::RecipeSyntax))
     }
 
-    /// Parses a recipe from its JSON encoding (§5). Unknown keys, and steps
-    /// that are not a `c` or `d` object, are ignored.
+    /// Parses a recipe from its JSON encoding (§5).
+    ///
+    /// Parsing is lenient where it cannot change what the recipe
+    /// reconstructs: unknown top-level keys, unknown step keys and steps that
+    /// are not objects are ignored, header field names are matched without
+    /// regard to case and stored in lowercase, recipes for header fields
+    /// excluded from signing (§4) are dropped, empty arrays are accepted,
+    /// `u` values are decoded leniently, and copy ranges are only bounded
+    /// when applied. It is strict about what could make a reconstruction
+    /// ambiguous or inject header fields: header field names must be RFC 5322
+    /// field names and unique, data must not contain CR or LF, and a step
+    /// must not hold more than one of `c`, `d` or `u`. Use
+    /// [`validate`](Self::validate) for the strict rules a Signer follows.
     ///
     /// # Errors
     ///
-    /// Returns [`Dkim2Error::RecipeSyntax`] if `bytes` is not a JSON object
-    /// or does not match the recipe structure.
+    /// Returns [`Dkim2Error::RecipeSyntax`] if `bytes` is not valid JSON or
+    /// breaks one of the strict rules.
     pub fn from_json(bytes: &[u8]) -> crate::Result<Recipe> {
         serde_json::from_slice(bytes).map_err(|_| crate::Error::Dkim2(Dkim2Error::RecipeSyntax))
     }
+
+    /// Checks the rules of §5 that a Signer must follow and the structure of
+    /// [`Recipe`] does not enforce: at least one header or body recipe,
+    /// unique header field names that are RFC 5322 field names and are
+    /// signed (§4), copy ranges that start at 1 or more, end at or after
+    /// their start and ascend, and non-empty data steps without CR or LF.
+    /// The signers and [`to_json`](Self::to_json) apply it;
+    /// [`from_json`](Self::from_json) is more lenient.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Dkim2Error::RecipeSyntax`] when a rule is broken.
+    pub fn validate(&self) -> crate::Result<()> {
+        let valid = (!self.headers.is_empty() || !matches!(self.body, BodyRecipe::None))
+            && self.headers.iter().all(|header| {
+                is_field_name(header.name.as_bytes())
+                    && !is_non_signed_header(header.name.as_bytes())
+                    && valid_steps(&header.steps)
+            })
+            && unique_names(&self.headers, &[])
+            && match &self.body {
+                BodyRecipe::Steps(steps) => valid_steps(steps),
+                BodyRecipe::None | BodyRecipe::Unreconstructable => true,
+            };
+        if valid {
+            Ok(())
+        } else {
+            Err(crate::Error::Dkim2(Dkim2Error::RecipeSyntax))
+        }
+    }
+}
+
+pub(super) fn is_field_name(name: &[u8]) -> bool {
+    !name.is_empty() && name.iter().all(|&ch| ch.is_ascii_graphic() && ch != b':')
+}
+
+pub(super) fn unique_names(headers: &[HeaderRecipe], others: &[String]) -> bool {
+    let count = headers.len() + others.len();
+    let names = || {
+        headers
+            .iter()
+            .map(|header| header.name.as_bytes())
+            .chain(others.iter().map(String::as_bytes))
+    };
+    if count <= UNIQUE_SCAN_LIMIT {
+        names().enumerate().all(|(pos, name)| {
+            names()
+                .skip(pos + 1)
+                .all(|other| !other.eq_ignore_ascii_case(name))
+        })
+    } else {
+        let mut sorted = names().map(LowerHeader::new).collect::<Vec<_>>();
+        sorted.sort_unstable();
+        sorted.windows(2).all(|pair| pair.first() != pair.last())
+    }
+}
+
+const UNIQUE_SCAN_LIMIT: usize = 16;
+
+fn valid_steps(steps: &[Step]) -> bool {
+    let mut last_end = 0;
+    steps.iter().all(|step| match step {
+        Step::Copy { start, end } => {
+            let valid = *start > last_end && start <= end;
+            last_end = *end;
+            valid
+        }
+        Step::Data(values) => {
+            !values.is_empty()
+                && values
+                    .iter()
+                    .all(|value| !serde::has_line_break(value.as_bytes()))
+        }
+        Step::Bytes(values) => {
+            !values.is_empty() && values.iter().all(|value| !serde::has_line_break(value))
+        }
+    })
+}
+
+pub(crate) fn headers_len(headers: &[(&[u8], &[u8])]) -> usize {
+    headers
+        .iter()
+        .map(|(name, value)| name.len() + value.len() + 4)
+        .sum::<usize>()
+        + 2
 }
 
 pub(crate) fn body_lines(body: &[u8]) -> Vec<&[u8]> {
@@ -290,15 +411,15 @@ pub(crate) fn body_lines(body: &[u8]) -> Vec<&[u8]> {
 
 pub(crate) fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step]) -> Vec<&'x [u8]> {
     let mut emitted: Vec<&'x [u8]> = Vec::new();
+    let mut next = 1;
 
     for step in steps {
         match step {
             Step::Copy { start, end } => {
-                let high = (*end).min(instances.len() as u32);
-                for i in *start..=high {
+                for number in copy_range(*start, *end, instances.len(), &mut next) {
                     if let Some(line) = instances
                         .len()
-                        .checked_sub(i as usize)
+                        .checked_sub(number)
                         .and_then(|idx| instances.get(idx))
                     {
                         emitted.push(*line);
@@ -306,9 +427,10 @@ pub(crate) fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step])
                 }
             }
             Step::Data(values) => {
-                for value in values {
-                    emitted.push(value.as_bytes());
-                }
+                emitted.extend(values.iter().map(String::as_bytes));
+            }
+            Step::Bytes(values) => {
+                emitted.extend(values.iter().map(Vec::as_slice));
             }
         }
     }
@@ -319,23 +441,27 @@ pub(crate) fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step])
 
 pub(crate) fn apply_body_recipe(lines: &[&[u8]], steps: &[Step], out: &mut Vec<u8>) {
     let mark = out.len();
+    let mut next = 1;
 
     for step in steps {
         match step {
             Step::Copy { start, end } => {
-                let high = (*end).min(lines.len() as u32);
-                for i in *start..=high {
-                    if let Some(idx) = (i as usize).checked_sub(1)
-                        && let Some(line) = lines.get(idx)
-                    {
-                        out.extend_from_slice(line);
-                        out.extend_from_slice(b"\r\n");
-                    }
+                for line in copy_range(*start, *end, lines.len(), &mut next)
+                    .filter_map(|number| lines.get(number - 1))
+                {
+                    out.extend_from_slice(line);
+                    out.extend_from_slice(b"\r\n");
                 }
             }
             Step::Data(values) => {
                 for value in values {
                     out.extend_from_slice(value.as_bytes());
+                    out.extend_from_slice(b"\r\n");
+                }
+            }
+            Step::Bytes(values) => {
+                for value in values {
+                    out.extend_from_slice(value);
                     out.extend_from_slice(b"\r\n");
                 }
             }
@@ -347,17 +473,45 @@ pub(crate) fn apply_body_recipe(lines: &[&[u8]], steps: &[Step], out: &mut Vec<u
     }
 }
 
-fn diff_steps(original: &[&[u8]], modified: &[&[u8]]) -> Vec<Step> {
-    let mut steps: Vec<Step> = Vec::new();
-    let mut data: Vec<String> = Vec::new();
+fn copy_range(
+    start: u32,
+    end: u32,
+    available: usize,
+    next: &mut usize,
+) -> std::ops::RangeInclusive<usize> {
+    let first = usize::try_from(start).unwrap_or(usize::MAX).max(*next);
+    let last = usize::try_from(end).unwrap_or(usize::MAX).min(available);
+    if first <= last {
+        *next = last + 1;
+    }
+    first..=last
+}
+
+fn has_bare_line_break(value: &[u8]) -> bool {
+    memchr::memchr2_iter(b'\r', b'\n', value).any(|pos| match value.get(pos) {
+        Some(b'\r') => value.get(pos + 1) != Some(&b'\n'),
+        _ => pos.checked_sub(1).and_then(|prev| value.get(prev)) != Some(&b'\r'),
+    })
+}
+
+fn is_folded_value(value: &[u8]) -> bool {
+    !has_bare_line_break(value)
+        && memchr::memchr_iter(b'\n', value)
+            .all(|pos| matches!(value.get(pos + 1), Some(b' ' | b'\t')))
+}
+
+fn diff_steps(
+    original: &[&[u8]],
+    modified: &[&[u8]],
+    representable: fn(&[u8]) -> bool,
+) -> crate::Result<Vec<Step>> {
+    let mut steps = DataSteps::default();
 
     for op in capture_diff_slices(Algorithm::Myers, modified, original) {
         match op {
             DiffOp::Equal { old_index, len, .. } => {
-                if !data.is_empty() {
-                    steps.push(Step::Data(std::mem::take(&mut data)));
-                }
-                steps.push(Step::Copy {
+                steps.flush();
+                steps.steps.push(Step::Copy {
                     start: old_index as u32 + 1,
                     end: (old_index + len) as u32,
                 });
@@ -368,31 +522,66 @@ fn diff_steps(original: &[&[u8]], modified: &[&[u8]]) -> Vec<Step> {
             | DiffOp::Replace {
                 new_index, new_len, ..
             } => {
-                for line in &original[new_index..new_index + new_len] {
-                    data.push(unfold_lossy(line));
+                for line in original.iter().skip(new_index).take(new_len) {
+                    if !representable(line) {
+                        return Err(crate::Error::Dkim2(Dkim2Error::HeaderNotRepresentable));
+                    }
+                    steps.push(unfold(line));
                 }
             }
             DiffOp::Delete { .. } => {}
         }
     }
-    if !data.is_empty() {
-        steps.push(Step::Data(data));
-    }
-    steps
+    steps.flush();
+    Ok(steps.steps)
 }
 
-pub(crate) fn unfold_lossy(value: &[u8]) -> String {
+#[derive(Default)]
+struct DataSteps {
+    steps: Vec<Step>,
+    text: Vec<String>,
+    bytes: Vec<Vec<u8>>,
+}
+
+impl DataSteps {
+    fn push(&mut self, line: Cow<'_, [u8]>) {
+        match String::from_utf8(line.into_owned()) {
+            Ok(text) => {
+                if !self.bytes.is_empty() {
+                    self.steps
+                        .push(Step::Bytes(std::mem::take(&mut self.bytes)));
+                }
+                self.text.push(text);
+            }
+            Err(err) => {
+                if !self.text.is_empty() {
+                    self.steps.push(Step::Data(std::mem::take(&mut self.text)));
+                }
+                self.bytes.push(err.into_bytes());
+            }
+        }
+    }
+
+    fn flush(&mut self) {
+        if !self.text.is_empty() {
+            self.steps.push(Step::Data(std::mem::take(&mut self.text)));
+        }
+        if !self.bytes.is_empty() {
+            self.steps
+                .push(Step::Bytes(std::mem::take(&mut self.bytes)));
+        }
+    }
+}
+
+pub(crate) fn unfold(value: &[u8]) -> Cow<'_, [u8]> {
     if memchr::memchr2(b'\r', b'\n', value).is_none() {
-        return lossy_string(value.to_vec());
+        return Cow::Borrowed(value);
     }
 
     let mut result = Vec::with_capacity(value.len());
     let mut last_is_crlf = false;
-    let mut rest = value;
 
-    loop {
-        let split_at = memchr::memchr2(b'\r', b'\n', rest).unwrap_or(rest.len());
-        let (run, tail) = rest.split_at(split_at);
+    for run in value.split(|&ch| matches!(ch, b'\r' | b'\n')) {
         if let Some((&first, others)) = run.split_first() {
             if last_is_crlf && !first.is_ascii_whitespace() && !result.is_empty() {
                 result.push(b' ');
@@ -400,21 +589,10 @@ pub(crate) fn unfold_lossy(value: &[u8]) -> String {
             result.push(first);
             result.extend_from_slice(others);
         }
-        match tail.split_first() {
-            Some((_, next)) => {
-                last_is_crlf = true;
-                rest = next;
-            }
-            None => break,
-        }
+        last_is_crlf = true;
     }
 
-    lossy_string(result)
-}
-
-fn lossy_string(bytes: Vec<u8>) -> String {
-    String::from_utf8(bytes)
-        .unwrap_or_else(|err| String::from_utf8_lossy(err.as_bytes()).into_owned())
+    Cow::Owned(result)
 }
 
 #[cfg(test)]

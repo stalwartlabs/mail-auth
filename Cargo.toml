@@ -17,9 +17,8 @@ doctest = false
 
 [features]
 default = ["aws-lc-rs", "report", "dns-hickory"]
-aws-lc-rs = ["dep:aws-lc-rs", "dns-hickory", "hickory-resolver/tls-aws-lc-rs", "hickory-resolver/dnssec-aws-lc-rs", "hickory-resolver/rustls-platform-verifier"]
-ring = ["dep:ring", "dns-hickory", "hickory-resolver/tls-ring", "hickory-resolver/dnssec-ring", "hickory-resolver/rustls-platform-verifier"]
-rust-crypto = ["rsa", "rand", "ed25519-dalek", "sha1", "sha2"]
+aws-lc-rs = ["dep:aws-lc-rs", "dep:aws-lc-sys", "dns-hickory", "hickory-resolver/tls-aws-lc-rs", "hickory-resolver/dnssec-aws-lc-rs", "hickory-resolver/rustls-platform-verifier"]
+rust-crypto = ["rsa", "rand", "ed25519-dalek", "sha1", "sha2", "ml-dsa"]
 generate = ["rsa", "rand"]
 dns-hickory = ["dep:hickory-resolver"]
 dns-doh = ["dep:reqwest", "dep:web-time", "dep:hickory-proto"]
@@ -36,12 +35,13 @@ hashify =  { version = "0.3" }
 idna = "1.1"
 memchr = "2.7"
 simdutf8 = "0.1.5"
-aws-lc-rs = { version = "1", optional = true }
-ring = { version = "0.17", optional = true }
+aws-lc-rs = { version = "1.18.2", optional = true }
+aws-lc-sys = { version = "0.46", optional = true }
 rsa = { version = "0.9.8", optional = true, features = ["getrandom"] }
 ed25519-dalek = { version = "3", optional = true, features = ["pkcs8", "alloc"] }
 sha1 = { version = "0.11", optional = true }
 sha2 = { version = "0.11", optional = true }
+ml-dsa = { version = "0.1.1", optional = true, default-features = false, features = ["alloc", "rand_core"] }
 rustls-pki-types = "1.15"
 web-time = { version = "1", optional = true }
 serde = { version = "1.0", features = ["derive"] }
@@ -91,6 +91,18 @@ required-features = ["report"]
 [[example]]
 name = "report_dmarc_parse"
 required-features = ["report"]
+
+[[example]]
+name = "dkim_verify"
+required-features = ["aws-lc-rs"]
+
+[[example]]
+name = "dmarc_verify"
+required-features = ["aws-lc-rs"]
+
+[[example]]
+name = "spf_verify"
+required-features = ["aws-lc-rs"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }

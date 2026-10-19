@@ -12,10 +12,10 @@
 
 use crate::{
     AuthenticatedMessage, Dkim2Result, MessageAuthenticator,
-    crypto::{Ed25519Key, RsaKey, Sha256},
+    crypto::{DkimKey, Ed25519Key, MlDsa44Ed25519Key, RsaKey, Sha256},
     dkim::DomainKey,
     dkim2::{
-        Dkim2Signer, Envelope, Hop, sign::Dkim2Signed,
+        Dkim2Signer, Envelope, Hop, Verification, sign::Dkim2Signed,
         verify::test_reverse_path::LenientReversePath,
     },
     dns::cache::test::DummyCaches,
@@ -250,6 +250,13 @@ func main() {
 enum Alg {
     Ed25519,
     Rsa,
+    MlDsa44Ed25519,
+}
+
+impl Alg {
+    fn supported_by(self, im: Im) -> bool {
+        !matches!(self, Alg::MlDsa44Ed25519) || im == Im::Rust
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -303,6 +310,26 @@ fn load_ed25519(domain: &str, selector: &str) -> Ed25519Key {
         panic!("expected PKCS8 key");
     };
     Ed25519Key::from_pkcs8_maybe_unchecked_der(der.secret_pkcs8_der()).unwrap()
+}
+
+fn load_mldsa(domain: &str, selector: &str) -> MlDsa44Ed25519Key {
+    let pem = std::fs::read(resource(&[
+        "keys",
+        &format!("{selector}._domainkey.{domain}.pem"),
+    ]))
+    .unwrap();
+    let PrivateKeyDer::Pkcs8(der) = PrivateKeyDer::from_pem_slice(&pem).unwrap() else {
+        panic!("expected PKCS8 key");
+    };
+    MlDsa44Ed25519Key::from_pkcs8_der(der.secret_pkcs8_der()).unwrap()
+}
+
+fn load_key(hop: &HopSpec) -> DkimKey {
+    match hop.alg {
+        Alg::Ed25519 => load_ed25519(hop.domain, hop.selector).into(),
+        Alg::Rsa => load_rsa(hop.domain, hop.selector).into(),
+        Alg::MlDsa44Ed25519 => load_mldsa(hop.domain, hop.selector).into(),
+    }
 }
 
 fn load_rsa(domain: &str, selector: &str) -> RsaKey<Sha256> {
@@ -399,19 +426,12 @@ fn key_path(hop: &HopSpec) -> String {
 }
 
 fn rust_sign(message: &[u8], hop: &HopSpec) -> Vec<u8> {
-    let envelope = Hop::real(hop.mail_from, hop.rcpt_to);
-    let signed = match hop.alg {
-        Alg::Ed25519 => Dkim2Signer::from_key(load_ed25519(hop.domain, hop.selector))
-            .domain(hop.domain)
-            .selector(hop.selector)
-            .sign_at(message, envelope, TS)
-            .unwrap(),
-        Alg::Rsa => Dkim2Signer::from_key(load_rsa(hop.domain, hop.selector))
-            .domain(hop.domain)
-            .selector(hop.selector)
-            .sign_at(message, envelope, TS)
-            .unwrap(),
-    };
+    let signed = Dkim2Signer::from_key(load_key(hop))
+        .domain(hop.domain)
+        .selector(hop.selector)
+        .out_of_band_arrangement()
+        .sign_at(message, Hop::real(hop.mail_from, hop.rcpt_to), None, TS)
+        .unwrap();
     prepend(&signed, message, false)
 }
 
@@ -428,7 +448,14 @@ async fn rust_verify(
     let params = caches.parameters(&parsed);
     let envelope = Envelope::new(mail_from, rcpt_to);
     let output = resolver
-        .verify_dkim2_(&parsed, envelope, params.txt_cache(), NOW, true)
+        .verify_dkim2_(
+            &parsed,
+            envelope,
+            params.txt_cache(),
+            NOW,
+            true,
+            Verification::Full,
+        )
         .await;
     let ok = *output.result() == Dkim2Result::Pass;
     let detail = if ok {
@@ -718,10 +745,17 @@ async fn dkim2_interop_matrix() {
             mail_from: "sender@test1.dkim2.com",
             rcpt_to: &["recipient@example.com"],
         },
+        HopSpec {
+            domain: "test1.dkim2.com",
+            selector: "mldsa44",
+            alg: Alg::MlDsa44Ed25519,
+            mail_from: "sender@test1.dkim2.com",
+            rcpt_to: &["recipient@example.com"],
+        },
     ];
 
     for hop in &single_hops {
-        for signer in ALL {
+        for signer in ALL.into_iter().filter(|im| hop.alg.supported_by(*im)) {
             idx += 1;
             let Some(signed) = sign_hop(&container, work.path(), idx, signer, &original, hop).await
             else {
@@ -732,7 +766,7 @@ async fn dkim2_interop_matrix() {
                 ));
                 continue;
             };
-            for verifier in ALL {
+            for verifier in ALL.into_iter().filter(|im| hop.alg.supported_by(*im)) {
                 idx += 1;
                 let (ok, detail) = verify_msg(
                     &container,
@@ -938,15 +972,17 @@ fn alg_tag(alg: Alg) -> &'static str {
     match alg {
         Alg::Ed25519 => "ed25519",
         Alg::Rsa => "rsa",
+        Alg::MlDsa44Ed25519 => "mldsa44-ed25519",
     }
 }
 
 /// TEMPORARY exclusion: skip PhoenixDKIM verifying a chain that carries a Go- or
 /// Python-produced re-sign.
 ///
-/// draft-ietf-dkim-dkim2-spec §9.1 says a forwarder that leaves the hashes
-/// unchanged SHOULD NOT add a new Message-Instance. mail-auth (and PhoenixDKIM's
-/// own signer) honour this; the Go and Python references instead add a
+/// draft-ietf-dkim-dkim2-spec-07 §12.1 says that adding a Message-Instance
+/// without recipes when the hashes are unchanged is not forbidden but pointless.
+/// mail-auth (and PhoenixDKIM's own signer) do not add one; the Go and Python
+/// references instead add a
 /// recipe-less Message-Instance (m>=2) on every re-sign, and PhoenixDKIM's
 /// verifier rejects any non-first Message-Instance without a recipe (PERMERROR).
 /// The clash is purely Go/Python producer x PhoenixDKIM verifier and does not
@@ -973,6 +1009,7 @@ fn recipe_hop2(alg: Alg) -> HopSpec {
         selector: match alg {
             Alg::Ed25519 => "ed25519",
             Alg::Rsa => "sel1",
+            Alg::MlDsa44Ed25519 => "mldsa44",
         },
         alg,
         mail_from: "relay@test1.dkim2.com",
@@ -1008,19 +1045,18 @@ fn assemble(headers: &[&str], body: &[&str]) -> Vec<u8> {
 /// mail-auth signs the modified message at hop 2, computing the recipe by
 /// diffing the pristine hop-1 message against the modified one.
 fn rust_recipe_sign(signed1: &[u8], inflight: &[u8], hop: &HopSpec) -> Vec<u8> {
-    let envelope = Hop::real(hop.mail_from, hop.rcpt_to);
-    let signed = match hop.alg {
-        Alg::Ed25519 => Dkim2Signer::from_key(load_ed25519(hop.domain, hop.selector))
-            .domain(hop.domain)
-            .selector(hop.selector)
-            .sign_revised_at(signed1, inflight, envelope, TS)
-            .unwrap(),
-        Alg::Rsa => Dkim2Signer::from_key(load_rsa(hop.domain, hop.selector))
-            .domain(hop.domain)
-            .selector(hop.selector)
-            .sign_revised_at(signed1, inflight, envelope, TS)
-            .unwrap(),
-    };
+    let signed = Dkim2Signer::from_key(load_key(hop))
+        .domain(hop.domain)
+        .selector(hop.selector)
+        .out_of_band_arrangement()
+        .sign_revised_at(
+            signed1,
+            inflight,
+            Hop::real(hop.mail_from, hop.rcpt_to),
+            None,
+            TS,
+        )
+        .unwrap();
     prepend(&signed, inflight, false)
 }
 

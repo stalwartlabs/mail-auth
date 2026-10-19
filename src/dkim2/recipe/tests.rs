@@ -42,14 +42,8 @@ fn to_json_byte_equality() {
         b"{\"h\":{\"subject\":[{\"d\":[\" Simple test message\"]}]}}"
     );
 
-    let r4 = r_headers(
-        "authentication-results",
-        vec![Step::Copy { start: 1, end: 3 }],
-    );
-    assert_eq!(
-        json(&r4),
-        b"{\"h\":{\"authentication-results\":[{\"c\":[1,3]}]}}"
-    );
+    let r4 = r_headers("comments", vec![Step::Copy { start: 1, end: 3 }]);
+    assert_eq!(json(&r4), b"{\"h\":{\"comments\":[{\"c\":[1,3]}]}}");
 }
 
 #[test]
@@ -58,7 +52,7 @@ fn from_json_round_trips() {
         b"{\"h\":{\"list-unsubscribe\":[]}}",
         b"{\"b\":[{\"c\":[1,1]}]}",
         b"{\"h\":{\"subject\":[{\"d\":[\" Simple test message\"]}]}}",
-        b"{\"h\":{\"authentication-results\":[{\"c\":[1,3]}]}}",
+        b"{\"h\":{\"comments\":[{\"c\":[1,3]}]}}",
     ];
     for case in cases {
         let recipe = Recipe::from_json(case).unwrap();
@@ -79,10 +73,11 @@ fn from_json_body_null_unreconstructable() {
 }
 
 #[test]
-fn from_json_ignores_z_step() {
-    let recipe = Recipe::from_json(b"{\"b\":[{\"c\":[1,2]},{\"z\":true}]}").unwrap();
+fn from_json_ignores_unknown_step() {
     assert_eq!(
-        recipe.body,
+        Recipe::from_json(b"{\"b\":[{\"c\":[1,2]},{\"z\":true}]}")
+            .unwrap()
+            .body,
         BodyRecipe::Steps(vec![Step::Copy { start: 1, end: 2 }])
     );
 }
@@ -90,7 +85,7 @@ fn from_json_ignores_z_step() {
 fn diff_bytes(original: &[u8], modified: &[u8]) -> Recipe {
     let o = crate::AuthenticatedMessage::parse(original).unwrap();
     let m = crate::AuthenticatedMessage::parse(modified).unwrap();
-    Recipe::diff(&o, &m)
+    Recipe::diff(&o, &m).unwrap()
 }
 
 fn apply_bytes(recipe: &Recipe, message: &[u8]) -> crate::Result<Vec<u8>> {
@@ -249,7 +244,7 @@ fn apply_header_oracles() {
         ),
         (
             "no_change",
-            br#"{}"#,
+            br#"{"h":{"keywords":[]}}"#,
             &[("comment", "two"), ("subject", "one"), ("subject", "three")],
         ),
     ];
@@ -363,7 +358,7 @@ fn assert_chain_reconstructs(versions: &[&[u8]], via_json: bool) {
         .windows(2)
         .map(|pair| {
             let recipe = diff_bytes(pair[0], pair[1]);
-            if via_json {
+            if via_json && (!recipe.headers.is_empty() || recipe.body != BodyRecipe::None) {
                 Recipe::from_json(&json(&recipe)).unwrap()
             } else {
                 recipe
@@ -697,12 +692,13 @@ fn data_strings_never_contain_crlf() {
 }
 
 #[test]
-fn unfold_lossy_replaces_terminators_with_space() {
-    assert_eq!(unfold_lossy(b"one\r\n two"), "one two");
-    assert_eq!(unfold_lossy(b"alpha\r\nbeta"), "alpha beta");
-    assert_eq!(unfold_lossy(b"lone\rcr"), "lone cr");
-    assert_eq!(unfold_lossy(b"lone\nlf"), "lone lf");
-    assert_eq!(unfold_lossy(b"no terminators"), "no terminators");
+fn unfold_replaces_terminators_with_space() {
+    assert_eq!(unfold(b"one\r\n two").as_ref(), b"one two");
+    assert_eq!(unfold(b"alpha\r\nbeta").as_ref(), b"alpha beta");
+    assert_eq!(unfold(b"lone\rcr").as_ref(), b"lone cr");
+    assert_eq!(unfold(b"lone\nlf").as_ref(), b"lone lf");
+    assert_eq!(unfold(b"no terminators").as_ref(), b"no terminators");
+    assert_eq!(unfold(b"bin\xff\r\n ary").as_ref(), b"bin\xff ary");
 }
 
 /// A folded header reconstructed from a "d" step must hash identically to the
@@ -762,7 +758,245 @@ fn recipe_json_errors_are_recipe_syntax() {
         );
     }
     assert_eq!(
-        MessageInstance::parse(b"m=2; r=bm90IGpzb24=;").unwrap_err(),
-        Error::Dkim2(Dkim2Error::RecipeSyntax)
+        MessageInstance::parse(b"m=2; h=sha256:QQ==:QQ==; r=bm90IGpzb24=;").unwrap_err(),
+        Error::Dkim2(Dkim2Error::InvalidJson(2))
+    );
+}
+
+// Rules whose breach could make a reconstruction ambiguous or inject header fields stay errors.
+#[test]
+fn from_json_strict_rules() {
+    for invalid in [
+        &br#"{"h":{"subject":[]},"h":{"to":[]}}"#[..],
+        br#"{"b":[],"b":null}"#,
+        br#"{"h":{"subject":[],"subject":[]}}"#,
+        br#"{"h":{"From":[],"from":[]}}"#,
+        br#"{"h":{"received":[],"Received":[]}}"#,
+        br#"{"b":[{"c":[1,2],"d":["x"]}]}"#,
+        br#"{"b":[{"u":["YQ=="],"d":["x"]}]}"#,
+        br#"{"b":[{"d":["a\r\nb"]}]}"#,
+        br#"{"b":[{"d":["a\nb"]}]}"#,
+        br#"{"b":[{"u":["YQ0K"]}]}"#,
+        br#"{"b":[{"u":["!!!"]}]}"#,
+        br#"{"h":{"from ":[]}}"#,
+        br#"{"h":{" from":[]}}"#,
+        br#"{"h":{"subject\r\nbcc":[]}}"#,
+        br#"{"h":{"sub:ject":[]}}"#,
+        br#"{"h":{"":[]}}"#,
+        br#"{"b":[{"c":[-1,2]}]}"#,
+        br#"{"b":[{"c":[1]}]}"#,
+    ] {
+        assert!(
+            Recipe::from_json(invalid).is_err(),
+            "{}",
+            String::from_utf8_lossy(invalid)
+        );
+    }
+}
+
+// Deviations that cannot change what is reconstructed are accepted when parsing.
+#[test]
+fn from_json_lenient_rules() {
+    for (input, expected) in [
+        (&b"{}"[..], Recipe::default()),
+        (br#"{"h":{}}"#, Recipe::default()),
+        (br#"{"H":{"subject":[]},"Z":1,"z":1,"z":2}"#, Recipe::default()),
+        (
+            br#"{"h":{"Subject":[{"c":[1,1]}]}}"#,
+            r_headers("subject", vec![Step::Copy { start: 1, end: 1 }]),
+        ),
+        (
+            br#"{"h":{"received":[],"Received-SPF":[{"d":["x"]}],"x-mailer":[],"to":[]}}"#,
+            r_headers("to", vec![]),
+        ),
+        (
+            br#"{"b":[{"c":[0,1]},{"c":[2,1]},{"c":[1,3]},{"c":[3,4]},{"c":[1,2,3]},{"c":[1,4294967296]}]}"#,
+            Recipe {
+                headers: vec![],
+                body: BodyRecipe::Steps(vec![
+                    Step::Copy { start: 0, end: 1 },
+                    Step::Copy { start: 2, end: 1 },
+                    Step::Copy { start: 1, end: 3 },
+                    Step::Copy { start: 3, end: 4 },
+                    Step::Copy { start: 1, end: 2 },
+                    Step::Copy {
+                        start: 1,
+                        end: u32::MAX,
+                    },
+                ]),
+            },
+        ),
+        (
+            br#"{"b":[{"z":true},{"x":1,"c":[1,2]},{},1,"x",[9],null,{"d":[]},{"u":[]}]}"#,
+            Recipe {
+                headers: vec![],
+                body: BodyRecipe::Steps(vec![
+                    Step::Copy { start: 1, end: 2 },
+                    Step::Data(vec![]),
+                    Step::Bytes(vec![]),
+                ]),
+            },
+        ),
+        (
+            br#"{"b":[{"u":["YQ","Y Q = =","YR=="]}]}"#,
+            Recipe {
+                headers: vec![],
+                body: BodyRecipe::Steps(vec![Step::Bytes(vec![
+                    b"a".to_vec(),
+                    b"a".to_vec(),
+                    b"a".to_vec(),
+                ])]),
+            },
+        ),
+    ] {
+        assert_eq!(
+            Recipe::from_json(input).unwrap(),
+            expected,
+            "{}",
+            String::from_utf8_lossy(input)
+        );
+    }
+
+    let recipe =
+        Recipe::from_json(br#"{"z":1,"b":[{"c":[1,2]},{"u":["/w=="]},{"c":[4,4]}]}"#).unwrap();
+    assert_eq!(
+        json(&recipe),
+        br#"{"b":[{"c":[1,2]},{"u":["/w=="]},{"c":[4,4]}]}"#
+    );
+}
+
+// Copy ranges are clamped and never re-emit a line, so application stays linear.
+#[test]
+fn apply_bounds_copy_ranges() {
+    let message = b"From: a\r\n\r\nl1\r\nl2\r\nl3\r\n";
+    let body = |steps: Vec<Step>| {
+        let recipe = Recipe {
+            headers: vec![],
+            body: BodyRecipe::Steps(steps),
+        };
+        let out = apply_bytes(&recipe, message).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        text.split_once("\r\n\r\n").unwrap().1.to_string()
+    };
+    assert_eq!(body(vec![Step::Copy { start: 0, end: 2 }]), "l1\r\nl2\r\n");
+    assert_eq!(body(vec![Step::Copy { start: 3, end: 2 }]), "\r\n");
+    assert_eq!(
+        body(vec![
+            Step::Copy { start: 1, end: 2 },
+            Step::Copy {
+                start: 1,
+                end: u32::MAX
+            },
+            Step::Copy {
+                start: 1,
+                end: u32::MAX
+            },
+        ]),
+        "l1\r\nl2\r\nl3\r\n"
+    );
+
+    let headers = b"Comments: 1\r\nComments: 2\r\nComments: 3\r\n\r\nbody\r\n";
+    let recipe = Recipe {
+        headers: vec![HeaderRecipe {
+            name: "comments".to_string(),
+            steps: vec![
+                Step::Copy { start: 0, end: 1 },
+                Step::Copy { start: 1, end: 9 },
+                Step::Copy { start: 1, end: 9 },
+            ],
+        }],
+        body: BodyRecipe::None,
+    };
+    let out = String::from_utf8(apply_bytes(&recipe, headers).unwrap()).unwrap();
+    assert_eq!(
+        out.to_ascii_lowercase().matches("comments:").count(),
+        3,
+        "{out}"
+    );
+}
+
+// Changed lines that are not UTF-8 are recorded in u steps, the others in d steps.
+#[test]
+fn diff_uses_u_steps_for_binary_lines() {
+    let original: &[u8] = b"From: a\r\nSubject: caf\xe9\r\n\r\none\r\nt\xffo\r\nthree\r\nfour\r\n";
+    let modified: &[u8] = b"From: a\r\nSubject: new\r\n\r\none\r\nTWO\r\nTHREE\r\nfour\r\n";
+    let recipe = diff_bytes(original, modified);
+    assert_eq!(
+        recipe.headers[0].steps,
+        vec![Step::Bytes(vec![b"caf\xe9".to_vec()])]
+    );
+    assert_eq!(
+        recipe.body,
+        BodyRecipe::Steps(vec![
+            Step::Copy { start: 1, end: 1 },
+            Step::Bytes(vec![b"t\xffo".to_vec()]),
+            Step::Data(vec!["three".to_string()]),
+            Step::Copy { start: 4, end: 4 },
+        ])
+    );
+    let reparsed = Recipe::from_json(&json(&recipe)).unwrap();
+    assert_eq!(reparsed, recipe);
+    let reconstructed = apply_bytes(&reparsed, modified).unwrap();
+    assert_eq!(signed_hashes(&reconstructed), signed_hashes(original));
+}
+
+#[test]
+fn validate_rejects_invalid_caller_recipes() {
+    for recipe in [
+        Recipe::default(),
+        r_headers("received", vec![]),
+        r_headers("subject", vec![Step::Data(vec![])]),
+        r_headers("subject", vec![Step::Data(vec!["a\nb".to_string()])]),
+        r_headers("subject", vec![Step::Bytes(vec![b"a\rb".to_vec()])]),
+        r_headers("subject", vec![Step::Copy { start: 2, end: 1 }]),
+        r_headers("from ", vec![]),
+        r_headers("x y", vec![]),
+        Recipe {
+            headers: vec![
+                HeaderRecipe {
+                    name: "Subject".to_string(),
+                    steps: vec![],
+                },
+                HeaderRecipe {
+                    name: "subject".to_string(),
+                    steps: vec![],
+                },
+            ],
+            body: BodyRecipe::None,
+        },
+    ] {
+        assert!(recipe.validate().is_err(), "{recipe:?}");
+        assert!(recipe.to_json(&mut Vec::new()).is_err(), "{recipe:?}");
+    }
+    assert_eq!(
+        json(&r_headers("List-Id", vec![])),
+        b"{\"h\":{\"list-id\":[]}}"
+    );
+}
+
+// Field names with whitespace before the colon group and sort like the trimmed name.
+#[test]
+fn chain_header_names_with_whitespace() {
+    assert_chain(&[
+        b"From: a\r\nTo: r\r\nSubject\t: A\r\nSubject: B\r\nComments: c\r\n\r\nbody\r\n",
+        b"From: a\r\nTo: r\r\nSubject: A\r\nSubject\t: B\r\nComments: c\r\n\r\nbody\r\n",
+        b"From: a\r\nTo: r\r\nSubject : A\r\nSubject: C\r\nComments: c\r\n\r\nbody\r\n",
+    ]);
+}
+
+// A leniently parsed recipe is written back as parsed instead of being dropped.
+#[test]
+fn message_instance_keeps_lenient_recipe() {
+    use crate::dkim2::MessageInstance;
+
+    let mut header = b"m=2; h=sha256:QQ==:QQ==; r=".to_vec();
+    encodify::base64::STANDARD.encode_append(br#"{"b":[{"c":[3,1]},{"d":[]}]}"#, &mut header);
+    let instance = MessageInstance::parse(&header).unwrap();
+    assert!(instance.recipe.as_ref().unwrap().validate().is_err());
+    let written = instance.to_string();
+    assert!(written.contains("r="), "{written}");
+    assert_eq!(
+        MessageInstance::parse(written.as_bytes()).unwrap(),
+        instance
     );
 }

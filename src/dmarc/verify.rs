@@ -10,7 +10,9 @@ use crate::dns::{DnsCache, Negative};
 use crate::{
     AuthenticatedMessage, Dkim2Result, DkimOutput, DkimResult, DmarcOutput, DmarcResult, Error,
     MessageAuthenticator, Parameters, RecordSet, ResolverCache, SpfOutput, SpfResult, TxtRecord,
-    dkim2::Dkim2Output, dns::cache::NoCache, dns::to_a_label,
+    dkim2::{Dkim2Output, Verification},
+    dns::cache::NoCache,
+    dns::to_a_label,
 };
 use std::{borrow::Cow, net::Ipv4Addr, sync::Arc};
 
@@ -214,7 +216,9 @@ impl MessageAuthenticator {
                 _ => None,
             })
             .chain(dkim2_output.and_then(|o| {
-                o.chain
+                (o.verification() == Verification::Full)
+                    .then_some(o)?
+                    .chain
                     .iter()
                     .find(|link| link.signature.i == 1)
                     .and_then(|link| match (&o.result, &link.result) {

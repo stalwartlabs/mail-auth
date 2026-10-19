@@ -28,3 +28,7 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[patch.crates-io]
+mail-builder = { git = "https://github.com/stalwartlabs/mail-builder", rev = "1c656529be65c32b5bbb70257310703e06a8a5d1" }
+mail-parser = { git = "https://github.com/stalwartlabs/mail-parser", rev = "14e535a6271fe1a988c69a7f44ce52ac178765c8" }

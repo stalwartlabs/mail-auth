@@ -1,7 +1,7 @@
 # mail-auth playground
 
 A static, browser-only demo of [mail-auth](https://github.com/stalwartlabs/mail-auth):
-DKIM, DKIM2 and DMARC compiled to WebAssembly. All signing happens client-side;
+DKIM, DKIM2 (draft-ietf-dkim-dkim2-spec-07) and DMARC compiled to WebAssembly. All signing happens client-side;
 no message or key ever leaves the page.
 
 This is a standalone crate (its own workspace) that depends on the parent
@@ -9,7 +9,8 @@ This is a standalone crate (its own workspace) that depends on the parent
 
 ## Layout
 
-- `src/lib.rs`: `wasm-bindgen` exports over the mail-auth API.
+- `src/`: `wasm-bindgen` exports over the mail-auth API (key generation and
+  loading, DKIM and DKIM2 signing, verification, offline DNS records).
 - `site/`: static `index.html`, `style.css` and JS glue. The build copies the
   generated `pkg/` next to these files.
 - `build.sh`: runs `wasm-pack` and assembles `dist/`.

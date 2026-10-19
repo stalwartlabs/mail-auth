@@ -4,17 +4,20 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! DKIM1 key pair generation (feature `generate`).
+//! DKIM and DKIM2 key pair generation (feature `generate`).
 
 use crate::crypto::CryptoError;
-use crate::{Error, crypto::Ed25519Key};
+use crate::{
+    Error,
+    crypto::{Ed25519Key, MlDsa44Ed25519Key},
+};
 use encodify::base64;
 use rsa::{
     RsaPrivateKey, RsaPublicKey,
     pkcs1::{EncodeRsaPrivateKey, EncodeRsaPublicKey},
 };
 
-/// A freshly generated DKIM1 signing key pair.
+/// A freshly generated DKIM or DKIM2 signing key pair.
 ///
 /// The private key is loaded into a signing key such as
 /// [`RsaKey`](crate::crypto::RsaKey) or [`Ed25519Key`]; the public key is
@@ -70,12 +73,32 @@ impl DkimKeyPair {
         })
     }
 
-    /// Returns the public key: PKCS#1 DER for RSA, raw 32 bytes for Ed25519.
+    /// Generates an ML-DSA-44/Ed25519 composite key pair for the DKIM2-only
+    /// `mldsa44-ed25519-sha512` algorithm, published with
+    /// `k=mldsa44-ed25519-sha512`. The private key is encoded as PKCS #8 DER;
+    /// the public key is the raw 1344-byte composite key.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Crypto`] when key generation fails.
+    pub fn generate_mldsa44_ed25519() -> crate::Result<Self> {
+        let pkcs8_der = MlDsa44Ed25519Key::generate_pkcs8()?;
+        let public_key = MlDsa44Ed25519Key::from_pkcs8_der(&pkcs8_der)?.public_key()?;
+
+        Ok(DkimKeyPair {
+            private_key: pkcs8_der,
+            public_key,
+        })
+    }
+
+    /// Returns the public key: PKCS#1 DER for RSA, raw 32 bytes for Ed25519,
+    /// raw 1344 bytes for ML-DSA-44/Ed25519.
     pub fn public_key(&self) -> &[u8] {
         &self.public_key
     }
 
-    /// Returns the private key: PKCS#1 DER for RSA, PKCS#8 DER for Ed25519.
+    /// Returns the private key: PKCS#1 DER for RSA, PKCS#8 DER for Ed25519
+    /// and ML-DSA-44/Ed25519.
     pub fn private_key(&self) -> &[u8] {
         &self.private_key
     }
@@ -178,5 +201,54 @@ mod test {
             Ok(()),
         )
         .await;
+    }
+
+    // Generated composite keys sign DKIM2 messages and are rejected by the DKIM1 signer.
+    #[test]
+    fn mldsa44_ed25519_generate() {
+        use crate::{
+            crypto::{Algorithm, DkimKey, MlDsa44Ed25519Key, SigningKey, VerifyingKeyType},
+            dkim::DkimError,
+        };
+
+        let pair = DkimKeyPair::generate_mldsa44_ed25519().unwrap();
+        assert_eq!(pair.public_key().len(), 1344);
+        let record = format!(
+            "v=DKIM1; k=mldsa44-ed25519-sha512; p={}",
+            pair.encoded_public_key()
+        );
+        DomainKey::parse(record.as_bytes()).unwrap();
+
+        let key = MlDsa44Ed25519Key::from_pkcs8_der(pair.private_key()).unwrap();
+        let signature = key.sign(b"input".as_slice()).unwrap();
+        VerifyingKeyType::MlDsa44Ed25519
+            .verifying_key(pair.public_key())
+            .unwrap()
+            .verify_bytes(b"input", &signature, Algorithm::MlDsa44Ed25519Sha512)
+            .unwrap();
+
+        let key = DkimKey::from(MlDsa44Ed25519Key::from_pkcs8_der(pair.private_key()).unwrap());
+        assert_eq!(
+            DkimSigner::from_key(key)
+                .domain("example.com")
+                .selector("pq")
+                .headers(["From"])
+                .sign(b"From: a@example.com\r\n\r\nbody\r\n")
+                .unwrap_err(),
+            crate::Error::Dkim(DkimError::UnsupportedAlgorithm)
+        );
+
+        let ed25519 = Ed25519Key::from_pkcs8_der(&Ed25519Key::generate_pkcs8().unwrap()).unwrap();
+        assert_eq!(
+            DkimSigner::from_key(ed25519)
+                .domain("example.com")
+                .selector("ed")
+                .headers(["From"])
+                .atps("example.org")
+                .atps_hash(crate::crypto::HashAlgorithm::Sha512)
+                .sign(b"From: a@example.com\r\n\r\nbody\r\n")
+                .unwrap_err(),
+            crate::Error::Dkim(DkimError::UnsupportedAlgorithm)
+        );
     }
 }

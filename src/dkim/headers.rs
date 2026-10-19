@@ -6,7 +6,7 @@
 
 //! Serialization of a DKIM1 [`Signature`] as a `DKIM-Signature` header.
 
-use super::{Algorithm, Canonicalization, HashAlgorithm, Signature};
+use super::{Canonicalization, HashAlgorithm, Signature};
 use crate::{
     headers::{HEADER_CAPACITY, HeaderWriter, IntegerBuffer, Writer},
     utf8::to_str_lossy,
@@ -35,11 +35,7 @@ impl Signature {
         };
         writer.write(header);
         writer.write(b"v=1; a=");
-        writer.write(match self.a {
-            Algorithm::RsaSha256 => b"rsa-sha256",
-            Algorithm::RsaSha1 => b"rsa-sha1",
-            Algorithm::Ed25519Sha256 => b"ed25519-sha256",
-        });
+        writer.write(self.a.name().as_bytes());
         for (tag, value) in [(&b"; s="[..], &self.s), (&b"; d="[..], &self.d)] {
             writer.write(tag);
             writer.write(value.as_bytes());
@@ -56,7 +52,7 @@ impl Signature {
             writer.write(match self.atpsh {
                 Some(HashAlgorithm::Sha256) => b"sha256",
                 Some(HashAlgorithm::Sha1) => b"sha1",
-                _ => b"none",
+                Some(HashAlgorithm::Sha512) | None => b"none",
             });
         }
         if self.r {

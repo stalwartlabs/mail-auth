@@ -7,6 +7,7 @@
   <title>mail-auth playground</title>
   <meta name="description"
     content="Sign and verify DKIM, DKIM2, SPF and DMARC entirely in your browser via WebAssembly." />
+  <link rel="icon" href="data:," />
   <link rel="stylesheet" href="./style.css" />
 </head>
 
@@ -36,7 +37,106 @@
       <div class="context-strip" data-context="signing"></div>
 
       <div class="card">
+        <h2>DKIM2 signature options <span class="card-tag">draft-ietf-dkim-dkim2-spec-07</span></h2>
+        <p class="card-sub">
+          Apply to both cards below. See the
+          <a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07" target="_blank" rel="noopener">DKIM2 specification (-07)</a>
+          for the details.
+        </p>
+        <div class="grid two">
+          <label>
+            Message-Instance hashes <span class="hint">h= (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-3.1" target="_blank" rel="noopener">§3.1</a>, <a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-9.3" target="_blank" rel="noopener">§9.3</a>)</span>
+            <select id="d2-hashes">
+              <option value="sha256">SHA-256</option>
+              <option value="sha512">SHA-512</option>
+              <option value="sha256,sha512">SHA-256 and SHA-512</option>
+            </select>
+          </label>
+          <label>
+            Nonce <span class="hint">n=, optional (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-10.3" target="_blank" rel="noopener">§10.3</a>)</span>
+            <input id="d2-nonce" type="text" value="" placeholder="opaque value, at most 64 characters" />
+          </label>
+        </div>
+        <fieldset class="checks">
+          <legend>Flags (f=, <a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-10.10" target="_blank" rel="noopener">§10.10</a>)</legend>
+          <label class="check"><input type="checkbox" id="d2-flag-feedback" /> feedback</label>
+          <label class="check"><input type="checkbox" id="d2-flag-feedhere" /> feedhere</label>
+          <label class="check"><input type="checkbox" id="d2-flag-exploded" /> exploded</label>
+        </fieldset>
+        <p class="card-sub note-sub">
+          <code>exploded</code> must not be set on the first signature (i=1). It is added
+          automatically when a later signature is sent to more than one recipient
+          (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-12.5" target="_blank" rel="noopener">§12.5</a>).
+        </p>
+
+        <div class="field">
+          <div class="label-row"><label>Next hop</label></div>
+          <div class="segmented" id="d2-hopmode">
+            <button class="seg active" data-hopmode="smtp">SMTP (mf=, rt=)</button>
+            <button class="seg" data-hopmode="imaginary">Imaginary hop (nd=)</button>
+          </div>
+        </div>
+        <div data-hoppane="imaginary" hidden>
+          <label>
+            Next domain <span class="hint">nd=; the next signature must use exactly this d= (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-12.3" target="_blank" rel="noopener">§12.3</a>)</span>
+            <input id="d2-nd" type="text" value="example.org" />
+          </label>
+          <p class="card-sub note-sub">
+            The envelope fields below are ignored. A message whose most recent signature
+            carries <code>nd=</code> is not a Validly Signed DKIM2 Message, so verifying it
+            fails and the next signer needs an out-of-band arrangement.
+          </p>
+        </div>
+
+        <div class="field">
+          <div class="label-row">
+            <label>Messages that already carry DKIM2 header fields
+              <span class="hint">(<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-12" target="_blank" rel="noopener">§12</a>)</span></label>
+          </div>
+          <div class="segmented" id="d2-gate">
+            <button class="seg active" data-gate="verify">Verify first</button>
+            <button class="seg" data-gate="out-of-band">Out-of-band arrangement</button>
+          </div>
+        </div>
+        <div data-gatepane="verify">
+          <p class="card-sub note-sub">
+            A Signer must not sign a message that already has DKIM2 header fields unless it
+            is a Validly Signed DKIM2 Message. The message is first fully verified against
+            the envelope it was received with, using the DNS source from Settings.
+          </p>
+          <div class="grid two">
+            <label>
+              Received with MAIL FROM
+              <input id="d2-recv-mailfrom" type="text" value="alice@example.com" />
+            </label>
+            <label>
+              Received with RCPT TO <span class="hint">comma-separated</span>
+              <input id="d2-recv-rcpt" type="text" value="friends@example.com" />
+            </label>
+          </div>
+        </div>
+        <div data-gatepane="out-of-band" hidden>
+          <p class="card-sub note-sub">
+            The received message is signed without being verified, as allowed by an
+            out-of-band arrangement (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-12.3" target="_blank" rel="noopener">§12.3</a>).
+            Chain of custody, <code>mf=</code>/<code>d=</code> and <code>exploded</code> checks
+            still apply.
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
         <h2>Single hop</h2>
+        <p class="card-sub">
+          Signs the message as it is. A new message gets <code>i=1</code> and a
+          Message-Instance with <code>m=1</code>; its From header field must be Authentic, so
+          the From domain, like the MAIL FROM domain, must be the signing domain or a
+          subdomain of it (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-11" target="_blank" rel="noopener">§11</a>,
+          <a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-12.2" target="_blank" rel="noopener">§12.2</a>,
+          <a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-12.4" target="_blank" rel="noopener">§12.4</a>). A message that
+          already carries DKIM2 header fields gets the next <code>i=</code>, subject to the
+          option above.
+        </p>
         <div class="grid two">
           <label>
             MAIL FROM
@@ -44,7 +144,7 @@
           </label>
           <label>
             RCPT TO <span class="hint">comma-separated</span>
-            <input id="d2-rcpt" type="text" value="bob@example.net" />
+            <input id="d2-rcpt" type="text" value="friends@example.com" />
           </label>
         </div>
         <label>
@@ -56,6 +156,7 @@
           <button class="btn primary" id="d2-sign">Sign</button>
         </div>
         <div class="error" id="d2-error" hidden></div>
+        <div class="note" id="d2-validity" hidden></div>
         <div class="output-block" hidden id="d2-output-wrap">
           <div class="output-head">
             <span>Signed message</span>
@@ -66,12 +167,29 @@
       </div>
 
       <div class="card">
-        <h2>Multihop / revised</h2>
+        <h2>Forwarder / Reviser</h2>
         <p class="card-sub">
-          A forwarder changes a message and re-signs it, recording a recipe
-          that lets a verifier reconstruct the previous instance. Uses the key,
-          domain, selector and envelope above.
+          A Forwarder re-signs a received message; a Reviser also changes it and adds a
+          Message-Instance whose recipe (<code>r=</code>) lets a Verifier recreate the
+          previous instance (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-5" target="_blank" rel="noopener">§5</a>,
+          <a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-12.1" target="_blank" rel="noopener">§12.1</a>). Lines that are not
+          valid UTF-8 are recorded with <code>u</code> steps. To keep the chain of custody, the
+          MAIL FROM domain must be an <code>rt=</code> domain of the received signature or a
+          subdomain of one, and the signing domain must be the MAIL FROM domain or a parent
+          of it (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-7.1" target="_blank" rel="noopener">§7.1</a>,
+          <a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-12.2" target="_blank" rel="noopener">§12.2</a>). Uses the key,
+          domain and selector from Settings.
         </p>
+        <div class="grid two">
+          <label>
+            MAIL FROM
+            <input id="d2-fwd-mailfrom" type="text" value="friends-bounces@example.com" />
+          </label>
+          <label>
+            RCPT TO <span class="hint">comma-separated</span>
+            <input id="d2-fwd-rcpt" type="text" value="bob@example.net, carol@example.org" />
+          </label>
+        </div>
         <div class="grid two">
           <div class="field">
             <div class="label-row">
@@ -94,16 +212,17 @@
           <button class="btn primary" id="d2-revise">Compute recipe &amp; sign</button>
         </div>
         <div class="error" id="d2-rev-error" hidden></div>
+        <div class="note" id="d2-rev-validity" hidden></div>
         <div class="output-block" hidden id="d2-recipe-wrap">
           <div class="output-head">
-            <span>Recipe (JSON)</span>
+            <span>New Message-Instance (r= recipe decoded)</span>
             <button class="btn ghost copy" data-copy="d2-recipe">Copy</button>
           </div>
           <pre class="output" id="d2-recipe"></pre>
         </div>
         <div class="output-block" hidden id="d2-revout-wrap">
           <div class="output-head">
-            <span>New instance</span>
+            <span>Signed message</span>
             <button class="btn ghost copy" data-copy="d2-revout">Copy</button>
           </div>
           <pre class="output" id="d2-revout"></pre>
@@ -115,6 +234,11 @@
       <div class="context-strip" data-context="signing"></div>
       <div class="card">
         <h2>Sign with DKIM1</h2>
+        <div class="note" id="d1-algo-note" hidden>
+          The active key uses mldsa44-ed25519-sha512, which is defined for DKIM2 only
+          (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-3.4" target="_blank" rel="noopener">draft-ietf-dkim-dkim2-spec-07 §3.4</a>).
+          Select an RSA or Ed25519 key in Settings to sign with DKIM1.
+        </div>
         <label>
           Headers to sign <span class="hint">comma-separated, in order</span>
           <input id="d1-headers" type="text" value="From, To, Subject, Date" />
@@ -150,6 +274,14 @@
           <label class="check"><input type="checkbox" id="v-dmarc" checked /> DMARC</label>
         </fieldset>
 
+        <label>
+          DKIM2 verification
+          <select id="v-dkim2-mode">
+            <option value="full">Full: Validly Signed DKIM2 Message (§14)</option>
+            <option value="provisional">Provisional: most recent signature only (§13.1)</option>
+          </select>
+        </label>
+
         <div class="grid two">
           <label>
             Remote IP
@@ -166,8 +298,8 @@
             <input id="v-mailfrom" type="text" value="alice@example.com" />
           </label>
           <label>
-            RCPT TO <span class="hint">comma-separated; DKIM2 envelope</span>
-            <input id="v-rcpt" type="text" value="bob@example.net" />
+            RCPT TO <span class="hint">comma-separated; matched against rt= of the most recent DKIM2 signature</span>
+            <input id="v-rcpt" type="text" value="friends@example.com" />
           </label>
         </div>
         <label>
@@ -176,6 +308,7 @@
         </label>
         <div class="actions">
           <button class="btn sample" data-sample="v-message">Load sample</button>
+          <button class="btn sample" id="v-last" disabled>Load last signed</button>
           <button class="btn primary" id="v-run">Verify</button>
         </div>
         <div class="error" id="v-error" hidden></div>
@@ -208,6 +341,7 @@
             <select id="s-paste-algo">
               <option value="rsa">RSA</option>
               <option value="ed25519">Ed25519</option>
+              <option value="mldsa44-ed25519-sha512">ML-DSA-44 + Ed25519 (DKIM2 only)</option>
             </select>
           </label>
           <label>
@@ -226,9 +360,10 @@
               <select id="s-gen-algo">
                 <option value="ed25519">Ed25519</option>
                 <option value="rsa">RSA</option>
+                <option value="mldsa44-ed25519-sha512">ML-DSA-44 + Ed25519 (DKIM2 only)</option>
               </select>
             </label>
-            <label>
+            <label id="s-gen-bits-wrap">
               RSA bits
               <select id="s-gen-bits">
                 <option>2048</option>
@@ -241,6 +376,16 @@
             <button class="btn primary" id="s-generate">Generate</button>
           </div>
         </div>
+
+        <p class="card-sub note-sub">
+          <code>mldsa44-ed25519-sha512</code> is the post-quantum composite of ML-DSA-44 and
+          Ed25519 defined for DKIM2 only
+          (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07#section-3.4" target="_blank" rel="noopener">draft-ietf-dkim-dkim2-spec-07 §3.4</a>).
+          Its key record uses <code>k=mldsa44-ed25519-sha512</code> with the 1344-byte composite
+          public key in <code>p=</code>
+          (<a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-dns-01" target="_blank" rel="noopener">draft-ietf-dkim-dkim2-dns-01</a>),
+          split into several strings because a TXT string holds at most 255 bytes.
+        </p>
 
         <div class="error" id="s-error" hidden></div>
 
@@ -307,10 +452,16 @@ example.com TXT v=spf1 ip4:192.0.2.0/24 -all
 _dmarc.example.com TXT v=DMARC1; p=reject"></textarea>
           </label>
           <p class="card-sub">
-            Offline mode answers every lookup from these records only. Anything
-            not listed fails instead of touching the network.
+            Offline mode answers every lookup from these records only. Names
+            that are not listed are answered as non-existent (NXDOMAIN); the
+            network is never used.
           </p>
         </div>
+        <label class="check check-row">
+          <input type="checkbox" id="s-local-key" checked />
+          Answer the active key's record locally
+          <span class="hint">so signatures made here verify without publishing the key</span>
+        </label>
         <div class="actions">
           <button class="btn primary" id="s-save-dns">Save DNS source</button>
         </div>
@@ -320,7 +471,8 @@ _dmarc.example.com TXT v=DMARC1; p=reject"></textarea>
   </main>
 
   <footer class="footer">
-    Everything runs client-side via WebAssembly.
+    Everything runs client-side via WebAssembly. DKIM2 follows
+    <a href="https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-07">draft-ietf-dkim-dkim2-spec-07</a>.
     <a href="https://github.com/stalwartlabs/mail-auth">mail-auth</a> on GitHub.
   </footer>
 

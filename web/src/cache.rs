@@ -16,22 +16,27 @@ use mail_auth::dkim::DomainKey;
 use mail_auth::dmarc::DmarcRecord;
 use mail_auth::dns::TxtRecordParser;
 use mail_auth::spf::SpfRecord;
-use mail_auth::{DnsCache, DnssecStatus, Mx, RecordSet, ResolverCache, TxtRecord};
-use std::borrow::Borrow;
+use mail_auth::{DnsCache, DnssecStatus, Mx, Negative, RecordSet, ResolverCache, TxtRecord};
+use std::borrow::{Borrow, Cow};
 use std::collections::HashMap;
 use std::hash::Hash;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Mutex;
 use web_time::Instant;
 
+type Answer<T> = Result<RecordSet<T>, Negative>;
+
 #[derive(Default)]
 pub struct OfflineCache {
     txt: Mutex<HashMap<Box<str>, TxtRecord>>,
-    mx: Mutex<HashMap<Box<str>, RecordSet<Mx>>>,
-    ipv4: Mutex<HashMap<Box<str>, RecordSet<Ipv4Addr>>>,
-    ipv6: Mutex<HashMap<Box<str>, RecordSet<Ipv6Addr>>>,
-    ptr: Mutex<HashMap<IpAddr, RecordSet<Box<str>>>>,
+    mx: Mutex<HashMap<Box<str>, Answer<Mx>>>,
+    ipv4: Mutex<HashMap<Box<str>, Answer<Ipv4Addr>>>,
+    ipv6: Mutex<HashMap<Box<str>, Answer<Ipv6Addr>>>,
+    ptr: Mutex<HashMap<IpAddr, Answer<Box<str>>>>,
+    nxdomain: bool,
 }
+
+const NXDOMAIN: Negative = Negative { code: 3 };
 
 fn fqdn(name: &str) -> Box<str> {
     let lower = name.to_lowercase();
@@ -42,16 +47,26 @@ fn fqdn(name: &str) -> Box<str> {
     }
 }
 
-fn record_set<T>(items: Vec<T>) -> RecordSet<T> {
-    RecordSet {
+fn record_set<T>(items: Vec<T>) -> Answer<T> {
+    Ok(RecordSet {
         records: items.into(),
         dnssec_status: DnssecStatus::Insecure,
-    }
+    })
 }
 
 impl OfflineCache {
-    pub fn from_records(text: &str) -> Result<Self, String> {
-        let cache = OfflineCache::default();
+    pub fn offline() -> Self {
+        OfflineCache {
+            nxdomain: true,
+            ..Default::default()
+        }
+    }
+
+    fn missing<T>(&self) -> Option<Answer<T>> {
+        self.nxdomain.then_some(Err(NXDOMAIN))
+    }
+
+    pub fn add_records(&self, text: &str) -> Result<(), String> {
         for (line_no, raw) in text.lines().enumerate() {
             let line = raw.trim();
             if line.is_empty() || line.starts_with('#') {
@@ -64,9 +79,9 @@ impl OfflineCache {
             if name.is_empty() || rtype.is_empty() || value.is_empty() {
                 return Err(format!("Line {}: expected `name TYPE value`", line_no + 1));
             }
-            cache.add_record(line_no + 1, name, &rtype, value)?;
+            self.add_record(line_no + 1, name, &rtype, value)?;
         }
-        Ok(cache)
+        Ok(())
     }
 
     fn add_record(
@@ -78,7 +93,8 @@ impl OfflineCache {
     ) -> Result<(), String> {
         match rtype {
             "TXT" => {
-                let value = value.trim().trim_matches('"');
+                let value = unquote_txt(value);
+                let value = value.as_ref();
                 let txt: TxtRecord = if name.contains("._domainkey.") {
                     DomainKey::parse(value.as_bytes()).into()
                 } else if name.to_ascii_lowercase().starts_with("_dmarc.") {
@@ -119,6 +135,7 @@ impl OfflineCache {
                 let key = fqdn(name);
                 let mut existing: Vec<Mx> = map
                     .get(&key)
+                    .and_then(|r| r.as_ref().ok())
                     .map(|r| r.records.to_vec())
                     .unwrap_or_default();
                 existing.push(mx);
@@ -137,6 +154,34 @@ impl OfflineCache {
         }
         Ok(())
     }
+}
+
+fn unquote_txt(value: &str) -> Cow<'_, str> {
+    let value = value.trim();
+    let grouped = value
+        .strip_prefix('(')
+        .and_then(|value| value.strip_suffix(')'))
+        .map_or(value, str::trim);
+    if !grouped.starts_with('"') {
+        return Cow::Borrowed(value);
+    }
+    let value = grouped;
+    let mut joined = String::with_capacity(value.len());
+    let mut in_quotes = false;
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' => in_quotes = !in_quotes,
+            '\\' if in_quotes => {
+                if let Some(next) = chars.next() {
+                    joined.push(next);
+                }
+            }
+            _ if in_quotes => joined.push(ch),
+            _ => {}
+        }
+    }
+    Cow::Owned(joined)
 }
 
 fn parse_list<T: std::str::FromStr>(
@@ -161,7 +206,12 @@ impl ResolverCache<Box<str>, TxtRecord> for OfflineCache {
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.txt.lock().unwrap().get(name).cloned()
+        self.txt
+            .lock()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .or_else(|| self.nxdomain.then(|| TxtRecord::Error(NXDOMAIN.into())))
     }
     fn remove<Q>(&self, name: &Q) -> Option<TxtRecord>
     where
@@ -175,82 +225,102 @@ impl ResolverCache<Box<str>, TxtRecord> for OfflineCache {
     }
 }
 
-impl ResolverCache<Box<str>, RecordSet<Mx>> for OfflineCache {
-    fn get<Q>(&self, name: &Q) -> Option<RecordSet<Mx>>
+impl ResolverCache<Box<str>, Answer<Mx>> for OfflineCache {
+    fn get<Q>(&self, name: &Q) -> Option<Answer<Mx>>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.mx.lock().unwrap().get(name).cloned()
+        self.mx
+            .lock()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .or_else(|| self.missing())
     }
-    fn remove<Q>(&self, name: &Q) -> Option<RecordSet<Mx>>
+    fn remove<Q>(&self, name: &Q) -> Option<Answer<Mx>>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.mx.lock().unwrap().remove(name)
     }
-    fn insert(&self, key: Box<str>, value: RecordSet<Mx>, _valid_until: Instant) {
+    fn insert(&self, key: Box<str>, value: Answer<Mx>, _valid_until: Instant) {
         self.mx.lock().unwrap().insert(key, value);
     }
 }
 
-impl ResolverCache<Box<str>, RecordSet<Ipv4Addr>> for OfflineCache {
-    fn get<Q>(&self, name: &Q) -> Option<RecordSet<Ipv4Addr>>
+impl ResolverCache<Box<str>, Answer<Ipv4Addr>> for OfflineCache {
+    fn get<Q>(&self, name: &Q) -> Option<Answer<Ipv4Addr>>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.ipv4.lock().unwrap().get(name).cloned()
+        self.ipv4
+            .lock()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .or_else(|| self.missing())
     }
-    fn remove<Q>(&self, name: &Q) -> Option<RecordSet<Ipv4Addr>>
+    fn remove<Q>(&self, name: &Q) -> Option<Answer<Ipv4Addr>>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.ipv4.lock().unwrap().remove(name)
     }
-    fn insert(&self, key: Box<str>, value: RecordSet<Ipv4Addr>, _valid_until: Instant) {
+    fn insert(&self, key: Box<str>, value: Answer<Ipv4Addr>, _valid_until: Instant) {
         self.ipv4.lock().unwrap().insert(key, value);
     }
 }
 
-impl ResolverCache<Box<str>, RecordSet<Ipv6Addr>> for OfflineCache {
-    fn get<Q>(&self, name: &Q) -> Option<RecordSet<Ipv6Addr>>
+impl ResolverCache<Box<str>, Answer<Ipv6Addr>> for OfflineCache {
+    fn get<Q>(&self, name: &Q) -> Option<Answer<Ipv6Addr>>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.ipv6.lock().unwrap().get(name).cloned()
+        self.ipv6
+            .lock()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .or_else(|| self.missing())
     }
-    fn remove<Q>(&self, name: &Q) -> Option<RecordSet<Ipv6Addr>>
+    fn remove<Q>(&self, name: &Q) -> Option<Answer<Ipv6Addr>>
     where
         Box<str>: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.ipv6.lock().unwrap().remove(name)
     }
-    fn insert(&self, key: Box<str>, value: RecordSet<Ipv6Addr>, _valid_until: Instant) {
+    fn insert(&self, key: Box<str>, value: Answer<Ipv6Addr>, _valid_until: Instant) {
         self.ipv6.lock().unwrap().insert(key, value);
     }
 }
 
-impl ResolverCache<IpAddr, RecordSet<Box<str>>> for OfflineCache {
-    fn get<Q>(&self, name: &Q) -> Option<RecordSet<Box<str>>>
+impl ResolverCache<IpAddr, Answer<Box<str>>> for OfflineCache {
+    fn get<Q>(&self, name: &Q) -> Option<Answer<Box<str>>>
     where
         IpAddr: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
-        self.ptr.lock().unwrap().get(name).cloned()
+        self.ptr
+            .lock()
+            .unwrap()
+            .get(name)
+            .cloned()
+            .or_else(|| self.missing())
     }
-    fn remove<Q>(&self, name: &Q) -> Option<RecordSet<Box<str>>>
+    fn remove<Q>(&self, name: &Q) -> Option<Answer<Box<str>>>
     where
         IpAddr: Borrow<Q>,
         Q: Hash + Eq + ?Sized,
     {
         self.ptr.lock().unwrap().remove(name)
     }
-    fn insert(&self, key: IpAddr, value: RecordSet<Box<str>>, _valid_until: Instant) {
+    fn insert(&self, key: IpAddr, value: Answer<Box<str>>, _valid_until: Instant) {
         self.ptr.lock().unwrap().insert(key, value);
     }
 }

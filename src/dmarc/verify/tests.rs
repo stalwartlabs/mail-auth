@@ -500,13 +500,17 @@ async fn dmarc_verify_dkim2() {
             ..Default::default()
         };
         let dkim2 = Dkim2Output {
-            result: dkim2_result.clone(),
             chain: vec![ChainLink {
                 signature: &signature,
                 instance: None,
-                result: dkim2_result,
+                result: dkim2_result.clone(),
                 custody_ok: true,
             }],
+            ..Dkim2Output::from(dkim2_result.clone())
+        };
+        let provisional = Dkim2Output {
+            verification: crate::dkim2::Verification::Provisional,
+            ..dkim2.clone()
         };
         let spf = SpfOutput {
             result: SpfResult::None,
@@ -525,6 +529,19 @@ async fn dmarc_verify_dkim2() {
             .await;
         assert_eq!(result.dkim_result, expect_dkim);
         assert_eq!(result.policy, policy);
+
+        let result = resolver
+            .verify_dmarc(
+                caches.parameters(
+                    DmarcParameters::new(&auth_message, &[], "example.org", &spf)
+                        .with_dkim2_output(&provisional),
+                ),
+            )
+            .await;
+        assert!(
+            !matches!(result.dkim_result, DmarcResult::Pass),
+            "a provisional DKIM2 pass must not align"
+        );
     }
 }
 

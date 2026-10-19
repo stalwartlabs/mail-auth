@@ -7,7 +7,6 @@
 use super::{ChainValidation, Seal, SealedSet, Signature};
 use crate::{
     AuthenticationResults,
-    crypto::Algorithm,
     dkim::Canonicalization,
     headers::{HeaderWriter, IntegerBuffer, Writer, write_integer},
 };
@@ -27,11 +26,7 @@ impl Signature {
         writer.write(b"i=");
         write_integer(writer, self.i as u64);
         writer.write(b"; a=");
-        writer.write(match self.a {
-            Algorithm::RsaSha256 => b"rsa-sha256",
-            Algorithm::RsaSha1 => b"rsa-sha1",
-            Algorithm::Ed25519Sha256 => b"ed25519-sha256",
-        });
+        writer.write(self.a.name().as_bytes());
         for (tag, value) in [(&b"; s="[..], &self.s), (&b"; d="[..], &self.d)] {
             writer.write(tag);
             writer.write(value.as_bytes());
@@ -107,11 +102,7 @@ impl Seal {
         writer.write(b"i=");
         write_integer(writer, self.i as u64);
         writer.write(b"; a=");
-        writer.write(match self.a {
-            Algorithm::RsaSha256 => b"rsa-sha256",
-            Algorithm::RsaSha1 => b"rsa-sha1",
-            Algorithm::Ed25519Sha256 => b"ed25519-sha256",
-        });
+        writer.write(self.a.name().as_bytes());
         for (tag, value) in [(&b"; s="[..], &self.s), (&b"; d="[..], &self.d)] {
             writer.write(tag);
             writer.write(value.as_bytes());

@@ -387,10 +387,8 @@ impl<'x> AuthenticatedMessage<'x> {
             self.aar_headers.sort_unstable_by_key(|h| h.header.i);
         }
 
-        if !self.has_dkim2_errors {
-            self.dkim2_signatures.sort_unstable_by_key(|h| h.header.i);
-            self.dkim2_instances.sort_unstable_by_key(|h| h.header.m);
-        }
+        self.dkim2_signatures.sort_unstable_by_key(|h| h.header.i);
+        self.dkim2_instances.sort_unstable_by_key(|h| h.header.m);
 
         self
     }
@@ -462,16 +460,14 @@ impl<'x> AuthenticatedMessage<'x> {
         &self.dkim_headers
     }
 
-    /// Returns the `DKIM2-Signature` headers that parsed successfully. They
-    /// are sorted by signature sequence number (`i=` tag) unless a DKIM2 header failed
-    /// to parse.
+    /// Returns the `DKIM2-Signature` headers that parsed successfully, sorted
+    /// by signature sequence number (`i=` tag).
     pub fn dkim2_signatures(&self) -> &[Header<'x, dkim2::Signature>] {
         &self.dkim2_signatures
     }
 
-    /// Returns the `Message-Instance` headers that parsed successfully. They
-    /// are sorted by revision number (`m=` tag) unless a DKIM2 header failed
-    /// to parse.
+    /// Returns the `Message-Instance` headers that parsed successfully,
+    /// sorted by revision number (`m=` tag).
     pub fn dkim2_instances(&self) -> &[Header<'x, dkim2::MessageInstance>] {
         &self.dkim2_instances
     }

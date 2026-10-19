@@ -81,15 +81,7 @@ impl MessageAuthenticator {
             }
         };
 
-        let mut result = Err(Error::Dns(crate::DnsError::InvalidRecordType));
-        for record in &records {
-            result = T::parse(record);
-            if result.is_ok() {
-                break;
-            }
-        }
-
-        let result: TxtRecord = result.into();
+        let result: TxtRecord = T::parse_records(&records).into();
 
         if let Some(cache) = cache {
             cache.insert(key.into_owned().into_boxed_str(), result.clone(), expires);

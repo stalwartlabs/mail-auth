@@ -15,8 +15,8 @@ use crate::{
 };
 use std::{mem::size_of, sync::Arc};
 
-#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
-use crate::dkim2::{Dkim2Signer, Flag, KeyEntry};
+#[cfg(any(feature = "aws-lc-rs", feature = "rust-crypto"))]
+use crate::dkim2::{Dkim2Hash, Dkim2Signer, Flag, KeyEntry};
 
 pub(crate) trait HeapSize {
     fn heap_size(&self) -> usize;
@@ -197,7 +197,7 @@ impl<T: SigningKey, State> DkimSigner<T, State> {
     }
 }
 
-#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
+#[cfg(any(feature = "aws-lc-rs", feature = "rust-crypto"))]
 impl<State> Dkim2Signer<State> {
     /// Approximate heap memory owned by this signer, in bytes: the domain,
     /// selectors, flags, nonce and private key material.
@@ -209,13 +209,14 @@ impl<State> Dkim2Signer<State> {
                 .map(|entry| entry.key.heap_size() + entry.selector.heap_size())
                 .sum::<usize>()
             + self.domain.heap_size()
+            + self.hashes.capacity() * size_of::<Dkim2Hash>()
             + self.flags.capacity() * size_of::<Flag>()
             + self.nonce.heap_size()
     }
 }
 
 #[cfg(test)]
-#[cfg(any(feature = "ring", feature = "aws-lc-rs", feature = "rust-crypto"))]
+#[cfg(any(feature = "aws-lc-rs", feature = "rust-crypto"))]
 mod test {
     use crate::{
         Error,

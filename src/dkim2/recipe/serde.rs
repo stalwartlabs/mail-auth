@@ -5,10 +5,19 @@
  */
 
 //! JSON encoding of [`Recipe`] (§5), with the compact key names `h`, `b`,
-//! `c` and `d`.
+//! `c`, `d` and `u`. Encoding is canonical; decoding is lenient where it
+//! cannot change what a recipe reconstructs, and strict about header field
+//! names, unique names, CR or LF in data and steps with more than one of
+//! `c`, `d` or `u`.
 
-use crate::dkim2::recipe::{BodyRecipe, HeaderRecipe, Recipe, Step};
-use serde::de::{Deserialize, Deserializer, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor};
+use crate::dkim2::{
+    canonicalize::is_non_signed_header,
+    recipe::{BodyRecipe, HeaderRecipe, Recipe, Step},
+};
+use encodify::base64;
+use serde::de::{
+    Deserialize, Deserializer, Error as _, IgnoredAny, MapAccess, SeqAccess, Unexpected, Visitor,
+};
 use serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
 use std::borrow::Cow;
 use std::fmt;
@@ -39,7 +48,12 @@ impl Serialize for HeaderMapRef<'_> {
     fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         let mut map = serializer.serialize_map(Some(self.0.len()))?;
         for header in self.0 {
-            map.serialize_entry(header.name.as_str(), &StepsRef(&header.steps))?;
+            let name = if header.name.bytes().any(|ch| ch.is_ascii_uppercase()) {
+                Cow::Owned(header.name.to_ascii_lowercase())
+            } else {
+                Cow::Borrowed(header.name.as_str())
+            };
+            map.serialize_entry(name.as_ref(), &StepsRef(&header.steps))?;
         }
         map.end()
     }
@@ -65,8 +79,24 @@ impl Serialize for StepRef<'_> {
         match self.0 {
             Step::Copy { start, end } => map.serialize_entry("c", &[*start, *end])?,
             Step::Data(values) => map.serialize_entry("d", values)?,
+            Step::Bytes(values) => map.serialize_entry("u", &Base64Lines(values))?,
         }
         map.end()
+    }
+}
+
+struct Base64Lines<'x>(&'x [Vec<u8>]);
+
+impl Serialize for Base64Lines<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        let mut encoded = String::new();
+        for line in self.0 {
+            encoded.clear();
+            base64::STANDARD.encode_append(line, &mut encoded);
+            seq.serialize_element(&encoded)?;
+        }
+        seq.end()
     }
 }
 
@@ -74,6 +104,11 @@ impl<'de> Deserialize<'de> for Recipe {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         deserializer.deserialize_map(RecipeVisitor)
     }
+}
+
+#[cold]
+fn duplicate_key<E: serde::de::Error>(key: &str) -> E {
+    E::custom(format_args!("duplicate key {key:?}"))
 }
 
 struct RecipeVisitor;
@@ -86,23 +121,27 @@ impl<'de> Visitor<'de> for RecipeVisitor {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Recipe, A::Error> {
-        let mut headers = Vec::new();
-        let mut body = BodyRecipe::None;
-        while let Some(key) = map.next_key::<Cow<str>>()? {
+        let mut headers = None;
+        let mut body = None;
+        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
             match key.as_ref() {
-                "h" => headers = map.next_value::<HeaderMap>()?.0,
-                "b" => {
-                    body = match map.next_value::<Option<Steps>>()? {
+                "h" if headers.is_none() => headers = Some(map.next_value::<HeaderMap>()?.0),
+                "b" if body.is_none() => {
+                    body = Some(match map.next_value::<Option<Steps>>()? {
                         None => BodyRecipe::Unreconstructable,
                         Some(steps) => BodyRecipe::Steps(steps.0),
-                    };
+                    });
                 }
+                "h" | "b" => return Err(duplicate_key(&key)),
                 _ => {
                     map.next_value::<IgnoredAny>()?;
                 }
             }
         }
-        Ok(Recipe { headers, body })
+        Ok(Recipe {
+            headers: headers.unwrap_or_default(),
+            body: body.unwrap_or_default(),
+        })
     }
 }
 
@@ -124,13 +163,28 @@ impl<'de> Visitor<'de> for HeaderMapVisitor {
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<HeaderMap, A::Error> {
-        let mut headers = Vec::new();
-        while let Some(name) = map.next_key::<String>()? {
+        let mut headers: Vec<HeaderRecipe> = Vec::new();
+        let mut ignored: Vec<String> = Vec::new();
+        while let Some(mut name) = map.next_key::<String>()? {
+            if !super::is_field_name(name.as_bytes()) {
+                return Err(A::Error::invalid_value(
+                    Unexpected::Str(&name),
+                    &"a header field name",
+                ));
+            }
+            name.make_ascii_lowercase();
             let steps = map.next_value::<Steps>()?;
-            headers.push(HeaderRecipe {
-                name,
-                steps: steps.0,
-            });
+            if is_non_signed_header(name.as_bytes()) {
+                ignored.push(name);
+            } else {
+                headers.push(HeaderRecipe {
+                    name,
+                    steps: steps.0,
+                });
+            }
+        }
+        if !super::unique_names(&headers, &ignored) {
+            return Err(duplicate_key("h"));
         }
         Ok(HeaderMap(headers))
     }
@@ -154,15 +208,15 @@ impl<'de> Visitor<'de> for StepsVisitor {
     }
 
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Steps, A::Error> {
-        let mut steps = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+        let mut steps = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(MAX_PREALLOCATED));
         while let Some(StepEntry(step)) = seq.next_element::<StepEntry>()? {
-            if let Some(step) = step {
-                steps.push(step);
-            }
+            steps.extend(step);
         }
         Ok(Steps(steps))
     }
 }
+
+const MAX_PREALLOCATED: usize = 64;
 
 struct StepEntry(Option<Step>);
 
@@ -178,35 +232,28 @@ impl<'de> Visitor<'de> for StepEntryVisitor {
     type Value = StepEntry;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a recipe step")
+        f.write_str("a recipe step object with at most one of \"c\", \"d\" or \"u\"")
     }
 
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<StepEntry, A::Error> {
-        let mut copy: Option<(u32, u32)> = None;
-        let mut data: Option<Vec<String>> = None;
-        while let Some(key) = map.next_key::<Cow<str>>()? {
-            match key.as_ref() {
-                "c" if copy.is_none() => {
-                    if let CopyField::Range(start, end) = map.next_value::<CopyField>()? {
-                        copy = Some((start, end));
-                    }
+        let mut step = None;
+        while let Some(key) = map.next_key::<Cow<'de, str>>()? {
+            let parsed = match key.as_ref() {
+                "c" => {
+                    let CopyRange(start, end) = map.next_value()?;
+                    Step::Copy { start, end }
                 }
-                "d" if data.is_none() => {
-                    if let DataField::Values(values) = map.next_value::<DataField>()? {
-                        data = Some(values);
-                    }
-                }
+                "d" => Step::Data(map.next_value::<DataLines>()?.0),
+                "u" => Step::Bytes(map.next_value::<Base64Data>()?.0),
                 _ => {
                     map.next_value::<IgnoredAny>()?;
+                    continue;
                 }
+            };
+            if step.replace(parsed).is_some() {
+                return Err(A::Error::invalid_length(2, &self));
             }
         }
-
-        let step = if let Some((start, end)) = copy {
-            Some(Step::Copy { start, end })
-        } else {
-            data.map(Step::Data)
-        };
         Ok(StepEntry(step))
     }
 
@@ -244,68 +291,32 @@ impl<'de> Visitor<'de> for StepEntryVisitor {
     }
 }
 
-enum CopyField {
-    Range(u32, u32),
-    Other,
-}
+struct CopyRange(u32, u32);
 
-impl<'de> Deserialize<'de> for CopyField {
+impl<'de> Deserialize<'de> for CopyRange {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(CopyFieldVisitor)
+        deserializer.deserialize_seq(CopyRangeVisitor)
     }
 }
 
-struct CopyFieldVisitor;
+struct CopyRangeVisitor;
 
-impl<'de> Visitor<'de> for CopyFieldVisitor {
-    type Value = CopyField;
+impl<'de> Visitor<'de> for CopyRangeVisitor {
+    type Value = CopyRange;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("a [start, end] array")
+        f.write_str("a [start, end] array of non-negative integers")
     }
 
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<CopyField, A::Error> {
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<CopyRange, A::Error> {
         let start = seq
             .next_element::<CopyIndex>()?
-            .ok_or_else(|| serde::de::Error::invalid_length(0, &self))?;
+            .ok_or_else(|| A::Error::invalid_length(0, &self))?;
         let end = seq
             .next_element::<CopyIndex>()?
-            .ok_or_else(|| serde::de::Error::invalid_length(1, &self))?;
+            .ok_or_else(|| A::Error::invalid_length(1, &self))?;
         while seq.next_element::<IgnoredAny>()?.is_some() {}
-        Ok(CopyField::Range(start.0, end.0))
-    }
-
-    fn visit_bool<E>(self, _: bool) -> Result<CopyField, E> {
-        Ok(CopyField::Other)
-    }
-
-    fn visit_i64<E>(self, _: i64) -> Result<CopyField, E> {
-        Ok(CopyField::Other)
-    }
-
-    fn visit_u64<E>(self, _: u64) -> Result<CopyField, E> {
-        Ok(CopyField::Other)
-    }
-
-    fn visit_f64<E>(self, _: f64) -> Result<CopyField, E> {
-        Ok(CopyField::Other)
-    }
-
-    fn visit_str<E>(self, _: &str) -> Result<CopyField, E> {
-        Ok(CopyField::Other)
-    }
-
-    fn visit_none<E>(self) -> Result<CopyField, E> {
-        Ok(CopyField::Other)
-    }
-
-    fn visit_unit<E>(self) -> Result<CopyField, E> {
-        Ok(CopyField::Other)
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<CopyField, A::Error> {
-        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
-        Ok(CopyField::Other)
+        Ok(CopyRange(start.0, end.0))
     }
 }
 
@@ -313,7 +324,7 @@ struct CopyIndex(u32);
 
 impl<'de> Deserialize<'de> for CopyIndex {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(CopyIndexVisitor)
+        deserializer.deserialize_u64(CopyIndexVisitor)
     }
 }
 
@@ -326,79 +337,79 @@ impl Visitor<'_> for CopyIndexVisitor {
         f.write_str("a non-negative integer")
     }
 
-    fn visit_u64<E>(self, value: u64) -> Result<CopyIndex, E> {
-        Ok(CopyIndex(value as u32))
+    fn visit_u64<E: serde::de::Error>(self, value: u64) -> Result<CopyIndex, E> {
+        Ok(CopyIndex(u32::try_from(value).unwrap_or(u32::MAX)))
     }
 
     fn visit_i64<E: serde::de::Error>(self, value: i64) -> Result<CopyIndex, E> {
-        if value >= 0 {
-            Ok(CopyIndex(value as u32))
-        } else {
-            Err(E::invalid_value(Unexpected::Signed(value), &self))
-        }
+        u64::try_from(value)
+            .map_err(|_| E::invalid_value(Unexpected::Signed(value), &self))
+            .and_then(|value| self.visit_u64(value))
     }
 }
 
-enum DataField {
-    Values(Vec<String>),
-    Other,
-}
+struct DataLines(Vec<String>);
 
-impl<'de> Deserialize<'de> for DataField {
+impl<'de> Deserialize<'de> for DataLines {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        deserializer.deserialize_any(DataFieldVisitor)
+        deserializer.deserialize_seq(DataLinesVisitor)
     }
 }
 
-struct DataFieldVisitor;
+struct DataLinesVisitor;
 
-impl<'de> Visitor<'de> for DataFieldVisitor {
-    type Value = DataField;
+impl<'de> Visitor<'de> for DataLinesVisitor {
+    type Value = DataLines;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.write_str("an array of strings")
+        f.write_str("an array of strings without CR or LF")
     }
 
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<DataField, A::Error> {
-        let mut values = Vec::with_capacity(seq.size_hint().unwrap_or(0));
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<DataLines, A::Error> {
+        let mut values = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(MAX_PREALLOCATED));
         while let Some(value) = seq.next_element::<String>()? {
+            if has_line_break(value.as_bytes()) {
+                return Err(A::Error::invalid_value(Unexpected::Str(&value), &self));
+            }
             values.push(value);
         }
-        Ok(DataField::Values(values))
+        Ok(DataLines(values))
+    }
+}
+
+struct Base64Data(Vec<Vec<u8>>);
+
+impl<'de> Deserialize<'de> for Base64Data {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_seq(Base64DataVisitor)
+    }
+}
+
+struct Base64DataVisitor;
+
+impl<'de> Visitor<'de> for Base64DataVisitor {
+    type Value = Base64Data;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.write_str("an array of base64 strings without CR or LF once decoded")
     }
 
-    fn visit_bool<E>(self, _: bool) -> Result<DataField, E> {
-        Ok(DataField::Other)
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Base64Data, A::Error> {
+        let mut values = Vec::with_capacity(seq.size_hint().unwrap_or(0).min(MAX_PREALLOCATED));
+        while let Some(value) = seq.next_element::<Cow<'de, str>>()? {
+            let decoded = base64::LENIENT
+                .decode(value.as_bytes())
+                .ok()
+                .filter(|decoded| !has_line_break(decoded))
+                .ok_or_else(|| A::Error::invalid_value(Unexpected::Str(&value), &self))?;
+            values.push(decoded);
+        }
+        Ok(Base64Data(values))
     }
+}
 
-    fn visit_i64<E>(self, _: i64) -> Result<DataField, E> {
-        Ok(DataField::Other)
-    }
-
-    fn visit_u64<E>(self, _: u64) -> Result<DataField, E> {
-        Ok(DataField::Other)
-    }
-
-    fn visit_f64<E>(self, _: f64) -> Result<DataField, E> {
-        Ok(DataField::Other)
-    }
-
-    fn visit_str<E>(self, _: &str) -> Result<DataField, E> {
-        Ok(DataField::Other)
-    }
-
-    fn visit_none<E>(self) -> Result<DataField, E> {
-        Ok(DataField::Other)
-    }
-
-    fn visit_unit<E>(self) -> Result<DataField, E> {
-        Ok(DataField::Other)
-    }
-
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<DataField, A::Error> {
-        while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
-        Ok(DataField::Other)
-    }
+pub(super) fn has_line_break(value: &[u8]) -> bool {
+    memchr::memchr2(b'\r', b'\n', value).is_some()
 }
 
 #[cfg(test)]
@@ -475,8 +486,8 @@ mod test {
             b"{\"h\":{\"subject\":[{\"d\":[\" Simple test message\"]}]}}",
         );
         check_encode(
-            r_headers("authentication-results", vec![copy(1, 3)]),
-            b"{\"h\":{\"authentication-results\":[{\"c\":[1,3]}]}}",
+            r_headers("comments", vec![copy(1, 3)]),
+            b"{\"h\":{\"comments\":[{\"c\":[1,3]}]}}",
         );
         check_encode(
             Recipe {
@@ -485,7 +496,6 @@ mod test {
             },
             b"{\"b\":null}",
         );
-        check_encode(Recipe::default(), b"{}");
     }
 
     #[test]
@@ -507,14 +517,6 @@ mod test {
                 body: BodyRecipe::Steps(vec![data(&[""])]),
             },
             b"{\"h\":{\"x\":[{\"c\":[1,2]},{\"d\":[\"a\",\"b\"]}]},\"b\":[{\"d\":[\"\"]}]}",
-        );
-    }
-
-    #[test]
-    fn deserialize_preserves_header_name_case() {
-        check_decode(
-            b"{\"h\":{\"SUBject\":[{\"c\":[1,1]}]}}",
-            r_headers("SUBject", vec![copy(1, 1)]),
         );
     }
 
@@ -564,48 +566,34 @@ mod test {
     }
 
     #[test]
-    fn deserialize_ignores_unknown_step_objects() {
-        check_decode(
-            b"{\"b\":[{\"c\":[1,2]},{\"z\":true}]}",
-            with_body(vec![copy(1, 2)]),
-        );
-    }
-
-    #[test]
-    fn deserialize_skips_non_object_step_elements() {
-        check_decode(
-            b"{\"b\":[1,\"x\",[9],null,{\"c\":[3,4]}]}",
-            with_body(vec![copy(3, 4)]),
-        );
-    }
-
-    #[test]
-    fn deserialize_copy_precedence_over_data() {
-        check_decode(
-            b"{\"b\":[{\"d\":[\"x\"],\"c\":[1,2]}]}",
-            with_body(vec![copy(1, 2)]),
-        );
-    }
-
-    #[test]
-    fn deserialize_non_array_copy_falls_through_to_data() {
-        check_decode(
+    fn deserialize_malformed_steps() {
+        for (input, expected) in [
+            (
+                &b"{\"b\":[{\"c\":[1,2]},{\"z\":true}]}"[..],
+                with_body(vec![copy(1, 2)]),
+            ),
+            (
+                b"{\"b\":[1,\"x\",[9],null,{\"c\":[3,4]}]}",
+                with_body(vec![copy(3, 4)]),
+            ),
+            (
+                b"{\"b\":[{\"c\":[1,2],\"x\":7}]}",
+                with_body(vec![copy(1, 2)]),
+            ),
+            (b"{\"b\":[{\"c\":[1,2,3,4]}]}", with_body(vec![copy(1, 2)])),
+        ] {
+            check_decode(input, expected);
+        }
+        for invalid in [
+            &b"{\"b\":[{\"d\":[\"x\"],\"c\":[1,2]}]}"[..],
             b"{\"b\":[{\"c\":5,\"d\":[\"x\"]}]}",
-            with_body(vec![data(&["x"])]),
-        );
-    }
-
-    #[test]
-    fn deserialize_extra_ignored_step_keys() {
-        check_decode(
-            b"{\"b\":[{\"c\":[1,2],\"x\":7,\"y\":[1,2,3]}]}",
-            with_body(vec![copy(1, 2)]),
-        );
-    }
-
-    #[test]
-    fn deserialize_copy_extra_elements_ignored() {
-        check_decode(b"{\"b\":[{\"c\":[1,2,3,4]}]}", with_body(vec![copy(1, 2)]));
+        ] {
+            assert!(
+                Recipe::from_json(invalid).is_err(),
+                "{}",
+                String::from_utf8_lossy(invalid)
+            );
+        }
     }
 
     #[test]
@@ -637,7 +625,10 @@ mod test {
 
     #[test]
     fn deserialize_empty_data_array() {
-        check_decode(b"{\"b\":[{\"d\":[]}]}", with_body(vec![data(&[])]));
+        assert_eq!(
+            Recipe::from_json(b"{\"b\":[{\"d\":[]}]}").unwrap(),
+            with_body(vec![data(&[])])
+        );
     }
 
     #[test]

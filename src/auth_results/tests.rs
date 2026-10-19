@@ -262,7 +262,7 @@ fn authentication_results() {
 fn dkim2_authentication_results() {
     use crate::{
         Dkim2Result,
-        dkim2::{ChainLink, Dkim2Error, Dkim2Output, Signature as Dkim2Signature},
+        dkim2::{ChainLink, Dkim2Error, Dkim2Hash, Dkim2Output, Signature as Dkim2Signature},
     };
 
     let originator = Dkim2Signature {
@@ -277,7 +277,6 @@ fn dkim2_authentication_results() {
     };
 
     let pass = Dkim2Output {
-        result: Dkim2Result::Pass,
         chain: vec![
             ChainLink {
                 signature: &originator,
@@ -292,10 +291,16 @@ fn dkim2_authentication_results() {
                 custody_ok: true,
             },
         ],
+        ..Dkim2Output::from(Dkim2Result::Pass)
     };
 
+    let body_mismatch = || {
+        Error::Dkim2(Dkim2Error::BodyHashMismatch {
+            m: 2,
+            hash: Dkim2Hash::Sha256,
+        })
+    };
     let fail = Dkim2Output {
-        result: Dkim2Result::Fail(Error::Dkim2(Dkim2Error::BodyHashMismatch(2))),
         chain: vec![
             ChainLink {
                 signature: &originator,
@@ -306,10 +311,11 @@ fn dkim2_authentication_results() {
             ChainLink {
                 signature: &relay,
                 instance: None,
-                result: Dkim2Result::Fail(Error::Dkim2(Dkim2Error::BodyHashMismatch(2))),
+                result: Dkim2Result::Fail(body_mismatch()),
                 custody_ok: true,
             },
         ],
+        ..Dkim2Output::from(Dkim2Result::Fail(body_mismatch()))
     };
 
     let permerror: Dkim2Output =
@@ -321,7 +327,7 @@ fn dkim2_authentication_results() {
         ("dkim2=pass header.d=example.org header.i=1", &pass),
         (
             concat!(
-                "dkim2=fail (Message-Instance m=2 body hash mismatch) ",
+                "dkim2=fail (Message-Instance m=2 body hash sha256 mismatch) ",
                 "header.d=relay.example.com header.i=2"
             ),
             &fail,
@@ -478,5 +484,25 @@ fn received_spf_header_injection() {
     assert!(
         !received_spf.received_spf.contains('"')
             || received_spf.received_spf.matches('"').count() == 2
+    );
+}
+
+// Values from the message or envelope cannot break out of the dkim2 comment.
+#[test]
+fn dkim2_comment_is_escaped() {
+    use crate::{
+        Dkim2Result,
+        dkim2::{Dkim2Error, Dkim2Output},
+    };
+
+    let output: Dkim2Output = Dkim2Result::PermError(Error::Dkim2(Dkim2Error::MailFromMismatch {
+        i: 2,
+        value: "<alice(work)\\x@example.com>\r\n".into(),
+    }))
+    .into();
+    let auth_results = AuthenticationResults::new("mydomain.org").with_dkim2_result(&output);
+    assert_eq!(
+        auth_results.auth_results.rsplit_once("\tdkim2=").unwrap().1,
+        "permerror (DKIM2-Signature i=2 MAIL FROM <alice\\(work\\)\\\\x@example.com> did not match)"
     );
 }

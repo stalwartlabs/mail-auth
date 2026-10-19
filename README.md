@@ -11,15 +11,17 @@ protocols. The library aims to be fast, safe and correct while supporting all ma
 Features:
 
 - **DomainKeys Identified Mail v2 (DKIMv2)**:
-  - ED25519-SHA256 and RSA-SHA256 signing and chain verification.
+  - Implements [draft-ietf-dkim-dkim2-spec-07](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/).
+  - ED25519-SHA256, RSA-SHA256 and post-quantum MLDSA44-Ed25519-SHA512 (ML-DSA-44 + Ed25519 composite) signing and chain verification, with SHA-256 and SHA-512 message hashes.
   - Algorithmic dexterity: a single `DKIM2-Signature` can carry several signatures under different selectors and algorithms.
   - SMTP envelope (MAIL FROM / RCPT TO) and next-domain chain binding, with per-hop `Message-Instance` hashes and modification recipes.
+  - Authentic `From` checks, full and provisional (§13.1) verification, and a signer that only extends Validly Signed DKIM2 Messages.
   - Verifiable delivery status notification (DSN) authentication.
 - **DomainKeys Identified Mail v1 (DKIMv1)**:
   - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 signing and verification.
   - DKIM Authorized Third-Party Signatures.
   - DKIM failure reporting using the Abuse Reporting Format.
-  - Key-pair generation for both RSA and Ed25519 (enabled by the `generate` feature).
+  - Key-pair generation for RSA, Ed25519 and the DKIM2 MLDSA44-Ed25519 composite (enabled by the `generate` feature).
 - **Sender Policy Framework (SPF)**:
   - Policy evaluation.
   - SPF failure reporting using the Abuse Reporting Format.
@@ -41,9 +43,8 @@ Features:
 
 Signing and verification are backed by a selectable crypto provider, chosen with Cargo features:
 
-- `aws-lc-rs` (default): uses [aws-lc-rs](https://crates.io/crates/aws-lc-rs).
-- `ring`: uses [ring](https://crates.io/crates/ring).
-- `rust-crypto`: a pure-Rust backend ([rsa](https://crates.io/crates/rsa), [ed25519-dalek](https://crates.io/crates/ed25519-dalek), [sha1](https://crates.io/crates/sha1), [sha2](https://crates.io/crates/sha2)) that compiles to WebAssembly.
+- `aws-lc-rs` (default): uses [aws-lc-rs](https://crates.io/crates/aws-lc-rs), and [aws-lc-sys](https://crates.io/crates/aws-lc-sys) directly for ML-DSA-44 with a signature context. The `aws-lc-sys` requirement always matches the one of the required `aws-lc-rs` release; if a newer `aws-lc-rs` moves to another `aws-lc-sys`, both copies of AWS-LC are built and linked until mail-auth follows.
+- `rust-crypto`: a pure-Rust backend ([rsa](https://crates.io/crates/rsa), [ed25519-dalek](https://crates.io/crates/ed25519-dalek), [ml-dsa](https://crates.io/crates/ml-dsa), [sha1](https://crates.io/crates/sha1), [sha2](https://crates.io/crates/sha2)) that compiles to WebAssembly. Used when `aws-lc-rs` is disabled.
 
 ### DNS resolution
 
@@ -82,6 +83,9 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
         .sign(
             RFC5322_MESSAGE.as_bytes(),
             Hop::real("sender@example.com", ["recipient@example.org"]),
+            // A message that already carries DKIM2 header fields is only signed
+            // with the passing output of `verify_dkim2` for it.
+            None,
         )
         .unwrap();
 
@@ -346,8 +350,9 @@ To fuzz the library with `cargo-fuzz`:
 ## Conformed RFCs
 
 ### DKIM2
-- [draft-ietf-dkim-dkim2-spec - DKIM2 Signatures](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/)
-- [draft-chuang-dkim2-dns - DKIM2 DNS Records](https://datatracker.ietf.org/doc/draft-chuang-dkim2-dns/)
+- [draft-ietf-dkim-dkim2-spec-07 - DKIM2 Signatures](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/)
+- [draft-ietf-dkim-dkim2-dns - DKIM2 DNS Records](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-dns/)
+- [draft-ietf-lamps-pq-composite-sigs - Composite ML-DSA](https://datatracker.ietf.org/doc/draft-ietf-lamps-pq-composite-sigs/) (`id-MLDSA44-Ed25519-SHA512`)
 
 ### DKIM1
 - [RFC 6376 - DomainKeys Identified Mail (DKIM) Signatures](https://datatracker.ietf.org/doc/html/rfc6376)

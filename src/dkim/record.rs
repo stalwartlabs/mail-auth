@@ -50,6 +50,7 @@ pub(crate) const R_SVC_ALL: u64 = 0x04;
 pub(crate) const R_SVC_EMAIL: u64 = 0x08;
 pub(crate) const R_FLAG_TESTING: u64 = 0x10;
 pub(crate) const R_FLAG_MATCH_DOMAIN: u64 = 0x20;
+pub(crate) const R_MULTIPLE_RECORDS: u64 = 0x80;
 
 pub(crate) const RR_DNS: u8 = 0x01;
 pub(crate) const RR_OTHER: u8 = 0x02;
@@ -98,6 +99,13 @@ impl DomainKey {
     /// Section 3.6.1).
     pub fn requires_strict_identity(&self) -> bool {
         (self.f & R_FLAG_MATCH_DOMAIN) != 0
+    }
+
+    /// Returns `true` when the name held more than one TXT record. DKIM uses
+    /// the first record that parses; DKIM2 treats this as an error
+    /// (draft-ietf-dkim-dkim2-spec Section 14.5).
+    pub fn has_multiple_records(&self) -> bool {
+        (self.f & R_MULTIPLE_RECORDS) != 0
     }
 
     pub(crate) fn verify<'a>(

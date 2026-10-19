@@ -12,28 +12,28 @@
     in a real-world application. Use at your own risk.
 */
 
-use crate::cache::OfflineCache;
+use crate::dns::{DnsOpts, params};
 use crate::normalize_eol;
 use mail_auth::{
-    AuthenticatedMessage, Dkim2Result, DkimOutput, DkimResult, DmarcResult, MessageAuthenticator,
-    Parameters, SpfResult, dkim2::Envelope, dmarc::verify::DmarcParameters,
+    AuthenticatedMessage, Dkim2Output, Dkim2Result, DkimOutput, DkimResult, DmarcResult, SpfResult,
+    dkim2::{BodyRecipe, ChainBinding, Envelope, MessageInstance, Signature, Verification},
+    dmarc::verify::DmarcParameters,
     spf::verify::SpfParameters,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt::Write;
 use std::net::IpAddr;
 use wasm_bindgen::prelude::*;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct VerifyOpts {
-    mode: String,
-    doh_endpoint: String,
-    doh_format: String,
-    records: String,
+    dns: DnsOpts,
     check_dkim: bool,
     check_dkim2: bool,
     check_spf: bool,
     check_dmarc: bool,
+    dkim2_mode: String,
     remote_ip: String,
     ehlo: String,
     host_domain: String,
@@ -70,18 +70,12 @@ pub async fn verify(opts: JsValue) -> Result<JsValue, String> {
     let opts: VerifyOpts = serde_wasm_bindgen::from_value(opts).map_err(|err| err.to_string())?;
     let raw = normalize_eol(&opts.message).into_bytes();
 
-    let offline = opts.mode == "offline";
-    let resolver = if offline {
-        MessageAuthenticator::new_doh("https://offline.invalid/dns-query")
-    } else if opts.doh_format == "wire" {
-        MessageAuthenticator::new_doh_wire(opts.doh_endpoint.clone())
-    } else {
-        MessageAuthenticator::new_doh(opts.doh_endpoint.clone())
-    };
-    let cache = if offline {
-        OfflineCache::from_records(&opts.records)?
-    } else {
-        OfflineCache::default()
+    let resolver = opts.dns.resolver();
+    let cache = opts.dns.cache()?;
+    let provisional = match opts.dkim2_mode.as_str() {
+        "full" => false,
+        "provisional" => true,
+        other => return Err(format!("Unknown DKIM2 verification mode: {other}")),
     };
 
     let message = AuthenticatedMessage::parse(&raw)
@@ -120,14 +114,22 @@ pub async fn verify(opts: JsValue) -> Result<JsValue, String> {
         results.dkim = Some(dkim_check(dkim_output.as_deref().unwrap_or(&[])));
     }
 
-    if opts.check_dkim2 {
-        let rcpts: Vec<&str> = opts.rcpt_to.iter().map(String::as_str).collect();
-        let envelope = Envelope::new(opts.mail_from.as_str(), rcpts);
-        let output = resolver
-            .verify_dkim2(params(&message, &cache), envelope)
-            .await;
-        results.dkim2 = Some(dkim2_check(&output));
-    }
+    let dkim2_output = if opts.check_dkim2 {
+        let envelope = Envelope::new(opts.mail_from.as_str(), opts.rcpt_to.as_slice());
+        let output = if provisional {
+            resolver
+                .verify_dkim2_provisionally(params(&message, &cache), envelope)
+                .await
+        } else {
+            resolver
+                .verify_dkim2(params(&message, &cache), envelope)
+                .await
+        };
+        results.dkim2 = Some(dkim2_check(&output, &message));
+        Some(output)
+    } else {
+        None
+    };
 
     if opts.check_spf {
         results.spf = Some(match (&spf_output, ip) {
@@ -141,13 +143,12 @@ pub async fn verify(opts: JsValue) -> Result<JsValue, String> {
         results.dmarc = Some(match (dkim_output.as_ref(), spf_output.as_ref()) {
             (Some(dkim), Some(spf)) => {
                 let from_domain = opts.mail_from.rsplit('@').next().unwrap_or(&opts.mail_from);
-                let output = resolver
-                    .verify_dmarc(params(
-                        DmarcParameters::new(&message, dkim, from_domain, spf),
-                        &cache,
-                    ))
-                    .await;
-                dmarc_check(&output)
+                let mut dmarc_params = DmarcParameters::new(&message, dkim, from_domain, spf);
+                if let Some(dkim2) = dkim2_output.as_ref() {
+                    dmarc_params = dmarc_params.with_dkim2_output(dkim2);
+                }
+                let output = resolver.verify_dmarc(params(dmarc_params, &cache)).await;
+                dmarc_check(&output, dkim2_output.as_ref())
             }
             _ => CheckResult::new(
                 "NONE",
@@ -157,10 +158,6 @@ pub async fn verify(opts: JsValue) -> Result<JsValue, String> {
     }
 
     serde_wasm_bindgen::to_value(&results).map_err(|err| err.to_string())
-}
-
-fn params<'x, P>(inner: P, cache: &'x OfflineCache) -> Parameters<'x, P, OfflineCache> {
-    Parameters::new(inner).with_cache(cache)
 }
 
 fn dkim_result_label(result: &DkimResult) -> (&'static str, String) {
@@ -211,40 +208,128 @@ fn dkim_check(outputs: &[DkimOutput]) -> CheckResult {
 }
 
 fn algorithm_name(algorithm: mail_auth::crypto::Algorithm) -> &'static str {
-    use mail_auth::crypto::Algorithm;
-    match algorithm {
-        Algorithm::RsaSha256 => "rsa-sha256",
-        Algorithm::RsaSha1 => "rsa-sha1",
-        Algorithm::Ed25519Sha256 => "ed25519-sha256",
-    }
+    algorithm.name()
 }
 
-fn dkim2_check(output: &mail_auth::dkim2::Dkim2Output) -> CheckResult {
+fn dkim2_check(output: &Dkim2Output<'_>, message: &AuthenticatedMessage<'_>) -> CheckResult {
     let (status, top_err) = dkim2_result_label(output.result());
-    let mut lines = Vec::new();
+    let mut detail = String::new();
+    match output.verification() {
+        Verification::Full => detail.push_str("Full verification (-07 §14)"),
+        Verification::Provisional => detail.push_str(
+            "Provisional verification (-07 §13.1): only the most recent signature and \
+             Message-Instance were checked",
+        ),
+    }
     if !top_err.is_empty() {
-        lines.push(top_err);
+        let _ = write!(detail, "\n{top_err}");
     }
-    for link in output.chain() {
-        let (label, err) = dkim2_result_label(&link.result);
-        let suffix = if err.is_empty() {
-            String::new()
-        } else {
-            format!(": {err}")
-        };
-        let custody = if link.custody_ok { "" } else { " custody!" };
-        lines.push(format!(
-            "i={}  d={}  {label}{custody}{suffix}",
-            link.signature.i, link.signature.d
-        ));
-    }
+
     if output.chain().is_empty() {
-        lines.push("No DKIM2-Signature headers found".to_string());
+        let signatures = message.dkim2_signatures();
+        if signatures.is_empty() {
+            detail.push_str("\nNo DKIM2-Signature header fields found");
+        } else {
+            detail.push_str("\nSignatures in the message:");
+            for header in signatures {
+                let _ = write!(detail, "\n  {}", signature_summary(&header.header));
+            }
+        }
+    } else {
+        detail.push_str("\nVerified chain:");
+        for link in output.chain() {
+            let (label, err) = dkim2_result_label(&link.result);
+            let _ = write!(detail, "\n  {label}  {}", signature_summary(link.signature));
+            if !link.custody_ok {
+                detail.push_str("  [chain of custody broken]");
+            }
+            if !err.is_empty() {
+                let _ = write!(detail, ": {err}");
+            }
+        }
     }
-    CheckResult::new(status, lines.join("\n"))
+
+    let instances = message.dkim2_instances();
+    if !instances.is_empty() {
+        detail.push_str("\nMessage-Instance header fields:");
+        for header in instances {
+            let _ = write!(detail, "\n  {}", instance_summary(&header.header));
+        }
+    }
+
+    let feedback = output.feedback_domains().collect::<Vec<_>>();
+    if !feedback.is_empty() {
+        let _ = write!(detail, "\nFeedback requested by: {}", feedback.join(", "));
+        if let Some(relay) = output.feedback_relay() {
+            let _ = write!(detail, " (relayed via {relay})");
+        }
+    }
+    CheckResult::new(status, detail)
 }
 
-fn dkim2_result_label(result: &Dkim2Result) -> (&'static str, String) {
+fn signature_summary(signature: &Signature) -> String {
+    let mut line = format!("i={} m={} d={}", signature.i, signature.m, signature.d);
+    for value in &signature.s {
+        let _ = write!(line, " s={}:{}", value.selector, algorithm_name(value.a));
+    }
+    match &signature.chain {
+        ChainBinding::Envelope { mail_from, rcpt_to } => {
+            let _ = write!(line, " mf={mail_from} rt={}", rcpt_to.join(","));
+        }
+        ChainBinding::NextDomain(domain) => {
+            let _ = write!(line, " nd={domain}");
+        }
+    }
+    if !signature.flags.is_empty() {
+        line.push_str(" f=");
+        for (idx, flag) in signature.flags.iter().enumerate() {
+            if idx > 0 {
+                line.push(',');
+            }
+            line.push_str(&String::from_utf8_lossy(flag.as_bytes()));
+        }
+    }
+    line
+}
+
+fn instance_summary(instance: &MessageInstance) -> String {
+    let mut line = format!("m={} h=", instance.m);
+    for (idx, hash) in instance.hashes.iter().enumerate() {
+        if idx > 0 {
+            line.push(',');
+        }
+        line.push_str(hash.name.as_str());
+    }
+    if let Some(recipe) = &instance.recipe {
+        line.push_str(" r=");
+        let headers = recipe
+            .headers
+            .iter()
+            .map(|header| header.name.as_str())
+            .collect::<Vec<_>>();
+        if !headers.is_empty() {
+            let _ = write!(line, "headers({})", headers.join(","));
+        }
+        match &recipe.body {
+            BodyRecipe::None => {}
+            BodyRecipe::Steps(_) => {
+                if !headers.is_empty() {
+                    line.push('+');
+                }
+                line.push_str("body");
+            }
+            BodyRecipe::Unreconstructable => {
+                if !headers.is_empty() {
+                    line.push('+');
+                }
+                line.push_str("body(null)");
+            }
+        }
+    }
+    line
+}
+
+pub(crate) fn dkim2_result_label(result: &Dkim2Result) -> (&'static str, String) {
     match result {
         Dkim2Result::Pass => ("PASS", String::new()),
         Dkim2Result::Fail(err) => ("FAIL", err.to_string()),
@@ -285,7 +370,7 @@ fn dmarc_result_label(result: &DmarcResult) -> (&'static str, String) {
     }
 }
 
-fn dmarc_check(output: &mail_auth::DmarcOutput) -> CheckResult {
+fn dmarc_check(output: &mail_auth::DmarcOutput, dkim2: Option<&Dkim2Output<'_>>) -> CheckResult {
     let (dkim, dkim_err) = dmarc_result_label(output.dkim_result());
     let (spf, spf_err) = dmarc_result_label(output.spf_result());
     let status = if dkim == "PASS" || spf == "PASS" {
@@ -294,13 +379,20 @@ fn dmarc_check(output: &mail_auth::DmarcOutput) -> CheckResult {
         "FAIL"
     };
     let mut detail = format!("policy {:?} for {}", output.policy(), output.domain());
-    detail.push_str(&format!("\nDKIM alignment: {dkim}"));
+    let _ = write!(detail, "\nDKIM alignment: {dkim}");
     if !dkim_err.is_empty() {
-        detail.push_str(&format!(" ({dkim_err})"));
+        let _ = write!(detail, " ({dkim_err})");
     }
-    detail.push_str(&format!("\nSPF alignment: {spf}"));
+    let _ = write!(detail, "\nSPF alignment: {spf}");
     if !spf_err.is_empty() {
-        detail.push_str(&format!(" ({spf_err})"));
+        let _ = write!(detail, " ({spf_err})");
+    }
+    match dkim2.map(Dkim2Output::verification) {
+        Some(Verification::Full) => detail
+            .push_str("\nDKIM alignment also considers the i=1 DKIM2-Signature when DKIM2 passes"),
+        Some(Verification::Provisional) => detail
+            .push_str("\nA provisional DKIM2 verification does not take part in DMARC alignment"),
+        None => {}
     }
     if output.record().is_none() {
         detail.push_str("\nNo DMARC record found for this domain");

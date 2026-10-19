@@ -193,6 +193,10 @@ label {
   margin-top: 1rem;
 }
 
+label[hidden] {
+  display: none;
+}
+
 .card > label:first-of-type,
 .card h2 + label {
   margin-top: 0.6rem;
@@ -427,6 +431,32 @@ fieldset.checks legend {
   padding: 0.6rem 0.8rem;
   font-size: 0.82rem;
   white-space: pre-wrap;
+}
+
+.note {
+  margin-top: 0.9rem;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--fg-muted);
+  border-radius: var(--radius-sm);
+  padding: 0.6rem 0.8rem;
+  font-size: 0.82rem;
+}
+
+.card-sub.note-sub {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+}
+
+.card-sub code,
+.note code {
+  font: 0.78rem var(--mono);
+  color: var(--fg);
+}
+
+.check.check-row {
+  margin-top: 1rem;
+  flex-wrap: wrap;
 }
 
 .warn {

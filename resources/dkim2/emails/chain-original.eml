@@ -1,15 +1,7 @@
-DKIM2-Signature: i=1; m=1; t=1740000000; d=test1.dkim2.com;
-	mf=c2VuZGVyQHRlc3QxLmRraW0yLmNvbQ==;
-	rt=Zm9vQHRlc3QyLmRraW0yLmNvbQ==;
-	s=rsa1024:rsa-sha256:vf2AdstFm3A0l53jmfiyv1VBThYJga0F/4vOle4WcgN
-	1L1n8L3pUs18hCElKk/5QdE5RHy3kAbP7aGBgtCXJOaYiBQss+amr83VEkQs5Wjd
-	SaG5xtcg0MeN/f1yb8YSmIyaAIk20TPkMzTOlgrpx0ND1Zm8bCRHuxrVX0fm9wvs
-	=;
-Message-Instance: m=1; h=sha256:tB8uwPQbcCHO6zvU0EnzEFWUKKBtwyzmrxeavy4Jn1g=:XI228V/720XNelm76DFKQf934iOEQQCt6wZ3uKCIr9Q=;
 MIME-Version: 1.0
 Message-Id: <fb1b10ae-ea36-4ee4-b84f-b62f036cfaf5@app.fastmail.com>
 Date: Thu, 21 Mar 2024 12:09:37 +1000
-From: "Bron Gondwana" <brong@fastmailteam.com>
+From: "Bron Gondwana" <brong@test1.dkim2.com>
 To: jmap@ietf.org
 Subject: Working group last call draft-ietf-jmap-webpush-vapid
 Content-Type: multipart/alternative;

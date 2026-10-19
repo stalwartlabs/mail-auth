@@ -25,7 +25,7 @@ use crate::{
     IprevResult, SpfOutput, SpfResult,
     crypto::CryptoError,
     dkim::DkimError,
-    dkim2::Dkim2Output,
+    dkim2::{Dkim2Output, Verification},
     dmarc::Policy,
     headers::{HeaderWriter, IntegerBuffer, Writer},
     spf::{SpfIdentity, verify::SpfParameters},
@@ -172,12 +172,15 @@ impl<'x> AuthenticationResults<'x> {
     ///
     /// The entry reports `header.d` (signing domain) and `header.i`
     /// (signature instance number) of the first link in the chain when the
-    /// chain passed, or of the first link that did not pass otherwise.
+    /// chain passed, or of the first link that did not pass otherwise. Both
+    /// are omitted for a provisional verification.
     pub fn set_dkim2_result(&mut self, dkim2: &Dkim2Output) {
         self.auth_results.push_str(";\r\n\tdkim2=");
         dkim2.result().as_auth_result(&mut self.auth_results);
 
-        let link = if matches!(dkim2.result(), Dkim2Result::Pass) {
+        let link = if dkim2.verification() != Verification::Full {
+            None
+        } else if matches!(dkim2.result(), Dkim2Result::Pass) {
             dkim2.chain().first()
         } else {
             dkim2
@@ -616,11 +619,30 @@ impl AsAuthResult for Error {
             Error::NotAligned => "policy not aligned",
             Error::Dns(DnsError::InvalidRecordType) => "invalid dns record type",
             Error::Dkim2(e) => {
-                write!(header, "{e})").ok();
+                write!(CommentWriter(header), "{e}").ok();
+                header.push(')');
                 return;
             }
         });
         header.push(')');
+    }
+}
+
+struct CommentWriter<'x>(&'x mut String);
+
+impl Write for CommentWriter<'_> {
+    fn write_str(&mut self, value: &str) -> std::fmt::Result {
+        for ch in value.chars() {
+            match ch {
+                '(' | ')' | '\\' => {
+                    self.0.push('\\');
+                    self.0.push(ch);
+                }
+                '\0'..='\u{1f}' | '\u{7f}' => {}
+                _ => self.0.push(ch),
+            }
+        }
+        Ok(())
     }
 }
 

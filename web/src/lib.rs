@@ -13,6 +13,7 @@
 */
 
 mod cache;
+mod dns;
 mod keys;
 mod sign;
 mod verify;
@@ -40,7 +41,7 @@ pub(crate) fn load_key(
     key_pem: &str,
     algorithm: &str,
 ) -> Result<mail_auth::crypto::DkimKey, String> {
-    use mail_auth::crypto::{DkimKey, Ed25519Key, RsaKey, Sha256};
+    use mail_auth::crypto::{DkimKey, Ed25519Key, MlDsa44Ed25519Key, RsaKey, Sha256};
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
 
     let der = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
@@ -57,6 +58,17 @@ pub(crate) fn load_key(
             Ed25519Key::from_pkcs8_der(pkcs8)
                 .map(DkimKey::from)
                 .map_err(|err| format!("Invalid Ed25519 key: {err}"))
+        }
+        "mldsa44-ed25519-sha512" => {
+            let pkcs8 = match &der {
+                PrivateKeyDer::Pkcs8(der) => der.secret_pkcs8_der(),
+                _ => {
+                    return Err("ML-DSA-44/Ed25519 keys must be in PKCS#8 PEM format".to_string());
+                }
+            };
+            MlDsa44Ed25519Key::from_pkcs8_der(pkcs8)
+                .map(DkimKey::from)
+                .map_err(|err| format!("Invalid ML-DSA-44/Ed25519 key: {err}"))
         }
         other => Err(format!("Unknown algorithm: {other}")),
     }
