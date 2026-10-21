@@ -263,21 +263,20 @@ impl CanonicalState {
                 self.last_ch = last_ch;
             }
 
+            // Line breaks and WSP are held back until further content follows
+            // (RFC 6376, Section 3.4.4). Trailing WSP is thereby dropped from
+            // every line, so that a line consisting solely of WSP becomes an
+            // empty line and, at the end of the body, is ignored like any
+            // other empty line. WSP that precedes content is still emitted
+            // as a single SP by way of `last_ch`.
             let mut consumed = 0;
             let mut last_ch = self.last_ch;
             let mut breaks = self.crlf_seq;
-            let mut pending = 0;
-            let mut has_wsp = false;
 
             for &ch in tail {
                 match ch {
-                    b'\n' => pending += 1,
-                    b' ' | b'\t' => {
-                        breaks += pending;
-                        pending = 0;
-                        has_wsp = true;
-                    }
-                    b'\r' => {}
+                    b'\n' => breaks += 1,
+                    b' ' | b'\t' | b'\r' => {}
                     _ => break,
                 }
                 consumed += 1;
@@ -285,13 +284,7 @@ impl CanonicalState {
             }
 
             if consumed != 0 {
-                if has_wsp {
-                    write_crlf_run(writer, breaks);
-                    self.crlf_seq = pending;
-                    self.is_empty = false;
-                } else {
-                    self.crlf_seq = breaks + pending;
-                }
+                self.crlf_seq = breaks;
                 self.last_ch = last_ch;
             }
 
@@ -576,7 +569,7 @@ mod test {
     use crate::{
         crypto::{HashContext, HashImpl, Sha256},
         dkim::Canonicalization,
-        headers::{HeaderIterator, Writable},
+        headers::{HeaderIterator, Writable, Writer},
     };
     use encodify::base64;
 
@@ -808,5 +801,100 @@ mod test {
                 canonicalization
             );
         }
+    }
+
+    /// RFC 6376, Section 3.4.4 requires the relaxed body algorithm to apply
+    /// steps (a) and (b) *in order*: trailing WSP is first removed from every
+    /// line, and only then are empty lines at the end of the body ignored.
+    /// A trailing line consisting solely of SP/HTAB therefore becomes an empty
+    /// line and must be dropped, exactly like a genuinely empty one.
+    ///
+    /// Every expected value below was cross-checked against dkimpy 1.1.8.
+    #[test]
+    fn relaxed_body_whitespace_only_trailing_lines() {
+        for (body, expected) in [
+            // The case reported in issue #62.
+            ("</html>\r\n    \r\n", "</html>\r\n"),
+            ("</html>\r\n\t\r\n", "</html>\r\n"),
+            ("</html>\r\n \t \t\r\n", "</html>\r\n"),
+            // Several whitespace-only lines, with and without empty lines between them.
+            ("a\r\n  \r\n\t\r\n \t \r\n", "a\r\n"),
+            ("a\r\n  \r\n\r\n  \r\n\r\n", "a\r\n"),
+            // Trailing WSP on the last content line followed by a whitespace-only line.
+            ("a \t \r\n \r\n", "a\r\n"),
+            ("a\r\n  b \r\n  \r\n", "a\r\n b\r\n"),
+            // A body consisting solely of whitespace-only lines is an empty body.
+            ("   \r\n", ""),
+            (" \t \r\n\r\n\t\r\n", ""),
+            // Whitespace-only lines followed by content are retained as empty lines.
+            ("a\r\n  \r\nb\r\n", "a\r\n\r\nb\r\n"),
+            ("a\r\n \r\n b\r\n", "a\r\n\r\n b\r\n"),
+            ("\r\n  \r\nX", "\r\n\r\nX\r\n"),
+        ] {
+            let mut canonical = Vec::new();
+            CanonicalBody {
+                canonicalization: Canonicalization::Relaxed,
+                body: body.as_bytes(),
+            }
+            .write(&mut canonical);
+            assert_eq!(
+                String::from_utf8(canonical).unwrap(),
+                expected,
+                "CanonicalBody mismatch for body {body:?}"
+            );
+
+            let mut expected_hasher = Sha256::hasher();
+            expected_hasher.write(expected.as_bytes());
+            let expected_hash = expected_hasher.complete();
+
+            // The streaming hasher must agree regardless of how the body is split.
+            for chunk_size in 1..=body.len() {
+                let mut body_hasher =
+                    BodyHasher::new(Sha256::hasher(), Canonicalization::Relaxed, 0);
+                for chunk in body.as_bytes().chunks(chunk_size) {
+                    body_hasher.write(chunk);
+                }
+                let (actual_hasher, _) = body_hasher.finish();
+
+                assert_eq!(
+                    actual_hasher.complete().as_ref(),
+                    expected_hash.as_ref(),
+                    "BodyHasher (chunk size {chunk_size}) mismatch for body {body:?}"
+                );
+            }
+        }
+    }
+
+    /// The full message body from issue #62. The expected `bh=` value was
+    /// computed independently with dkimpy 1.1.8, and agrees with go-msgauth
+    /// and OpenDKIM.
+    #[test]
+    fn relaxed_body_hash_issue_62() {
+        let body = concat!(
+            "<!DOCTYPE html>\r\n",
+            "<html>\r\n",
+            "  <head>\r\n",
+            "    <meta charset=\"UTF-8\">\r\n",
+            "    <title>Your order has shipped</title>\r\n",
+            "  </head>\r\n",
+            "  <body>\r\n",
+            "    <p>Hello World</a></p>\r\n",
+            "    <p>Kind regards,<br>Example Shop</p>\r\n",
+            "  </body>\r\n",
+            "</html>\r\n",
+            "    \r\n",
+        );
+
+        let mut hasher = Sha256::hasher();
+        CanonicalBody {
+            canonicalization: Canonicalization::Relaxed,
+            body: body.as_bytes(),
+        }
+        .write(&mut hasher);
+
+        assert_eq!(
+            base64::STANDARD.encode(hasher.complete()),
+            "mthm2ruDPxvVp7DFDs/wRVXW+DzuZhdraVTNDuO1+N0="
+        );
     }
 }
