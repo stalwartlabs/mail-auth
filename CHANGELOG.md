@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.14.0] - 2026-XX-XX
+## [0.14.0] - 2026-10-24
 
 This release reorganizes the public API and updates DKIM2 to draft-ietf-dkim-dkim2-spec-07. Most API changes are renames and moves; see the [crate documentation](https://docs.rs/mail-auth) for the new names and the README (sections "Backends", "DKIM2 Signing", "DKIM2 Chain Verification" and "DNS Caching") for usage.
 

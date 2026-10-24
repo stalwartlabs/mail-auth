@@ -58,7 +58,7 @@ getrandom = { version = "0.2", features = ["js"] }
 getrandom_v04 = { package = "getrandom", version = "0.4", features = ["wasm_js"] }
 
 [dev-dependencies]
-tokio = { version = "1.51", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
+tokio = { version = "1.54", features = ["net", "io-util", "time", "rt-multi-thread", "macros"] }
 testcontainers = "0.28"
 tempfile = "3"
 
@@ -84,6 +84,3 @@ required-features = ["aws-lc-rs"]
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
-
-[patch.crates-io]
-mail-parser = { path = "../mail-parser" }
