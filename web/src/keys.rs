@@ -12,18 +12,35 @@
     in a real-world application. Use at your own risk.
 */
 
-use encodify::pem;
-use mail_auth::dkim::generate::DkimKeyPair;
+use crate::load_key;
+use encodify::{base64, pem};
+use mail_auth::{crypto::DkimKey, dkim::generate::DkimKeyPair};
 use serde::Serialize;
 use wasm_bindgen::prelude::*;
 
 #[derive(Serialize)]
-struct GeneratedKey {
+struct KeyInfo {
     algorithm: String,
     private_pem: String,
     public_key: String,
     dns_record_name: String,
     dns_record_value: String,
+}
+
+impl KeyInfo {
+    fn new(k: &str, private_pem: String, public_key: String, selector: &str, domain: &str) -> Self {
+        KeyInfo {
+            algorithm: k.to_string(),
+            private_pem,
+            dns_record_name: format!("{selector}._domainkey.{domain}"),
+            dns_record_value: format!("v=DKIM1; k={k}; p={public_key}"),
+            public_key,
+        }
+    }
+
+    fn into_js(self) -> Result<JsValue, String> {
+        serde_wasm_bindgen::to_value(&self).map_err(|err| err.to_string())
+    }
 }
 
 #[wasm_bindgen]
@@ -40,15 +57,48 @@ pub fn generate_key(
             "rsa",
         ),
         "ed25519" => (DkimKeyPair::generate_ed25519(), "PRIVATE KEY", "ed25519"),
+        "mldsa44-ed25519-sha512" => (
+            DkimKeyPair::generate_mldsa44_ed25519(),
+            "PRIVATE KEY",
+            "mldsa44-ed25519-sha512",
+        ),
         other => return Err(format!("Unknown algorithm: {other}")),
     };
     let pair = pair.map_err(|err| err.to_string())?;
-    let generated = GeneratedKey {
-        algorithm: k.to_string(),
-        private_pem: pem::STANDARD.encode(label, pair.private_key()),
-        public_key: pair.encoded_public_key(),
-        dns_record_name: format!("{selector}._domainkey.{domain}"),
-        dns_record_value: format!("v=DKIM1; k={k}; p={}", pair.encoded_public_key()),
+    KeyInfo::new(
+        k,
+        pem::STANDARD.encode(label, pair.private_key()),
+        pair.encoded_public_key(),
+        selector,
+        domain,
+    )
+    .into_js()
+}
+
+#[wasm_bindgen]
+pub fn inspect_key(
+    key_pem: &str,
+    algorithm: &str,
+    selector: &str,
+    domain: &str,
+) -> Result<JsValue, String> {
+    let (k, public_key) = match load_key(key_pem, algorithm)? {
+        DkimKey::Rsa(key) => ("rsa", key.public_key()),
+        DkimKey::Ed25519(key) => ("ed25519", key.public_key()),
+        DkimKey::MlDsa44Ed25519(key) => (
+            "mldsa44-ed25519-sha512",
+            key.public_key().map_err(|err| err.to_string())?,
+        ),
     };
-    serde_wasm_bindgen::to_value(&generated).map_err(|err| err.to_string())
+    if public_key.is_empty() {
+        return Err("Could not derive the public key".to_string());
+    }
+    KeyInfo::new(
+        k,
+        key_pem.trim().to_string(),
+        base64::STANDARD.encode(&public_key),
+        selector,
+        domain,
+    )
+    .into_js()
 }

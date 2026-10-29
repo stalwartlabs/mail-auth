@@ -28,13 +28,13 @@ use std::{
 
 impl MessageAuthenticator {
     /// Creates an authenticator that queries Cloudflare's public resolvers
-    /// over DNS-over-TLS (RFC 7858). Requires the `ring` or `aws-lc-rs`
+    /// over DNS-over-TLS (RFC 7858). Requires the `aws-lc-rs`
     /// feature.
     ///
     /// # Errors
     ///
     /// Returns a [`NetError`] if the resolver cannot be built.
-    #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+    #[cfg(feature = "aws-lc-rs")]
     pub fn new_cloudflare_tls() -> Result<Self, NetError> {
         Self::new(ResolverConfig::tls(&CLOUDFLARE), ResolverOpts::default())
     }
@@ -76,12 +76,12 @@ impl MessageAuthenticator {
     }
 
     /// Creates an authenticator that queries Quad9's public resolvers over
-    /// DNS-over-TLS (RFC 7858). Requires the `ring` or `aws-lc-rs` feature.
+    /// DNS-over-TLS (RFC 7858). Requires the `aws-lc-rs` feature.
     ///
     /// # Errors
     ///
     /// Returns a [`NetError`] if the resolver cannot be built.
-    #[cfg(any(feature = "ring", feature = "aws-lc-rs"))]
+    #[cfg(feature = "aws-lc-rs")]
     pub fn new_quad9_tls() -> Result<Self, NetError> {
         Self::new(ResolverConfig::tls(&QUAD9), ResolverOpts::default())
     }

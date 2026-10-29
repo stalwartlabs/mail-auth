@@ -45,6 +45,8 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Ready> {
     ) -> crate::Result<SealedSet<'x>> {
         if !arc_output.can_be_sealed() {
             return Err(Error::Arc(ArcError::InvalidChainValidation));
+        } else if !self.signature.a.is_dkim1() {
+            return Err(Error::Dkim(crate::dkim::DkimError::UnsupportedAlgorithm));
         }
 
         let mut set = SealedSet {

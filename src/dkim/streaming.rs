@@ -226,6 +226,15 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
         body_len: u64,
         now: u64,
     ) -> crate::Result<Signature> {
+        if !self.template.a.is_dkim1()
+            || matches!(
+                self.template.atpsh,
+                Some(crate::crypto::HashAlgorithm::Sha512)
+            )
+        {
+            return Err(Error::Dkim(super::DkimError::UnsupportedAlgorithm));
+        }
+
         let mut headers = Vec::with_capacity(self.template.h.len());
         let mut found_headers = vec![false; self.template.h.len()];
         let mut signed_headers = Vec::with_capacity(self.template.h.len());

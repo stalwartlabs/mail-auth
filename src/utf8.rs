@@ -9,6 +9,7 @@ use std::{borrow::Cow, string::FromUtf8Error};
 #[inline]
 pub(crate) fn into_string(bytes: Vec<u8>) -> Result<String, FromUtf8Error> {
     if simdutf8::basic::from_utf8(&bytes).is_ok() {
+        // SAFETY: simdutf8 has just validated the whole buffer as UTF-8 and the bytes are moved unchanged.
         Ok(unsafe { String::from_utf8_unchecked(bytes) })
     } else {
         String::from_utf8(bytes)

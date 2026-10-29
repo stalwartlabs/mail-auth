@@ -11,11 +11,12 @@ fn main() {
             in_package = line == "[package]";
             continue;
         }
-        if in_package && line.starts_with("version") {
-            if let Some(value) = line.split('=').nth(1) {
-                version = value.trim().trim_matches('"').to_string();
-                break;
-            }
+        if in_package
+            && line.starts_with("version")
+            && let Some(value) = line.split('=').nth(1)
+        {
+            version = value.trim().trim_matches('"').to_string();
+            break;
         }
     }
     println!("cargo:rustc-env=MAIL_AUTH_VERSION={version}");

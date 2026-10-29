@@ -92,6 +92,15 @@ impl<T: SigningKey> DkimSigner<T, Ready> {
         message: impl HeaderStream<'x>,
         now: u64,
     ) -> crate::Result<Signature> {
+        if !self.template.a.is_dkim1()
+            || matches!(
+                self.template.atpsh,
+                Some(crate::crypto::HashAlgorithm::Sha512)
+            )
+        {
+            return Err(Error::Dkim(super::DkimError::UnsupportedAlgorithm));
+        }
+
         let (body_len, canonical_headers, signed_headers, canonical_body) =
             self.template.canonicalize(message);
 

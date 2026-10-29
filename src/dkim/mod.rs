@@ -250,6 +250,7 @@ impl From<Algorithm> for HashAlgorithm {
         match a {
             Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => HashAlgorithm::Sha256,
             Algorithm::RsaSha1 => HashAlgorithm::Sha1,
+            Algorithm::MlDsa44Ed25519Sha512 => HashAlgorithm::Sha512,
         }
     }
 }

@@ -1,0 +1,198 @@
+DKIM2-Signature: i=3; m=3; t=1740002100; d=test3.dkim2.com; mf=PHJlbGF5QHRlc3QzLmRraW0yLmNvbT4=; rt=PHVzZXJAdGVzdDQuZGtpbTIuY29tPg==; s=ed25519:ed25519-sha256:2Rr17KisT0Kea7bm9aiITSuJN8eSl6DzKOwVve4g54U3QmSgIID+5pzSjQcpvY5buTHxWbJn002hu1Oao8H6Dg==;
+Message-Instance: m=3; h=sha256:hccpVJ4U1/VSIWZcRGKWbqXEFnuTg/ehX4DaML99f0A=:AU2ehAlvQ2g+ZnJf3kTHsCycDFE7sCn6AhpbTGgSYFM=; r=eyJoIjp7ImV4dHJhLWhlYWRlciI6W119LCJiIjpbeyJjIjpbMSwxNV19LHsiYyI6WzE4LDY2XX1dfQ==;
+Extra-Header: yes
+DKIM2-Signature: i=2; m=2; t=1740002100; d=test2.dkim2.com; mf=PGJvdW5jZXNAdGVzdDIuZGtpbTIuY29tPg==; rt=PHVzZXJAdGVzdDMuZGtpbTIuY29tPg==; s=ed25519:ed25519-sha256:EPn7LEy4Ip1nc+PsFncWCIb1MTV16PqBqgiJXJWgrBb3oXDIR71mcTB62jyBRkOfS9aJCG+u6WTmgePKcrHWDQ==;
+Message-Instance: m=2; h=sha256:esBgJxS9qku8gN8VBM1u/k0sVne4lmxnX700VhvlHYc=:4olUkMUi2bCCfVrAOg4rSNpPMBWnWoKd71+94zpiUqo=; r=eyJoIjp7ImFyY2hpdmVkLWF0IjpbXSwiY29udGVudC10eXBlIjpbeyJkIjpbIm11bHRpcGFydC9hbHRlcm5hdGl2ZTsgYm91bmRhcnk9MTJiNTNkYzgyOWQyNDUxMWJmYTA0ZjdkNWUzNjc1ZjgiXX1dLCJkYXRlIjpbeyJkIjpbIlRodSwgMjEgTWFyIDIwMjQgMTI6MDk6MzcgKzEwMDAiXX1dLCJmZWVkYmFjay1pZCI6W10sImZyb20iOlt7ImQiOlsiXCJCcm9uIEdvbmR3YW5hXCIgPGJyb25nQHRlc3QxLmRraW0yLmNvbT4iXX1dLCJsaXN0LWFyY2hpdmUiOltdLCJsaXN0LWhlbHAiOltdLCJsaXN0LWlkIjpbXSwibGlzdC1vd25lciI6W10sImxpc3QtcG9zdCI6W10sImxpc3Qtc3Vic2NyaWJlIjpbXSwibGlzdC11bnN1YnNjcmliZSI6W10sIm1lc3NhZ2UtaWQiOlt7ImQiOlsiPGZiMWIxMGFlLWVhMzYtNGVlNC1iODRmLWI2MmYwMzZjZmFmNUBhcHAuZmFzdG1haWwuY29tPiJdfV0sIm1lc3NhZ2UtaWQtaGFzaCI6W10sInByZWNlZGVuY2UiOltdLCJzdWJqZWN0IjpbeyJkIjpbIldvcmtpbmcgZ3JvdXAgbGFzdCBjYWxsIGRyYWZ0LWlldGYtam1hcC13ZWJwdXNoLXZhcGlkIl19XX0sImIiOlt7ImQiOlsiLS0xMmI1M2RjODI5ZDI0NTExYmZhMDRmN2Q1ZTM2NzVmOCJdfSx7ImMiOls1LDVdfSx7ImMiOls3LDldfSx7ImQiOlsiVGhpcyBlbWFpbCBzdGFydHMgYSB3b3JraW5nIGdyb3VwIGxhc3QgY2FsbCBmb3IgaHR0cHM6Ly9kYXRhdHJhY2tlci5pZXRmLm9yZy9kb2MvZHJhZnQtaWV0Zi1qbWFwLXdlYnB1c2gtdmFwaWQvIGFzIGRpc2N1c3NlZCBpbiB0aGUgSUVURjExOSBzZXNzaW9uLiJdfSx7ImMiOlsxMSwxMV19LHsiZCI6WyJQbGVhc2UgcG9zdCBhbnkgY29tbWVudHMgb3IgcmVzcG9uc2VzIGJ5ICpUaHVyc2RheSwgQXByaWwgNHRoLCAyMDI0Ki4iXX0seyJjIjpbMTUsMjVdfSx7ImQiOlsiLS0xMmI1M2RjODI5ZDI0NTExYmZhMDRmN2Q1ZTM2NzVmOCJdfSx7ImMiOlsyNywzMV19LHsiZCI6WyJhbWlseTpBcmlhbDtcIj5IaSBBbGwsPGJyPjwvZGl2PjxkaXYgc3R5bGU9M0RcImZvbnQtZmFtaWx5OkFyaWFsO1wiPjxkaXY+PGI9Iiwicj48L2Rpdj48ZGl2PlRoaXMgZW1haWwgc3RhcnRzIGEgd29ya2luZyBncm91cCBsYXN0IGNhbGwgZm9yIDxhIGhyZWY9M0RcIj0iLCJodHRwczovL2RhdGF0cmFja2VyLmlldGYub3JnL2RvYy9kcmFmdC1pZXRmLWptYXAtd2VicHVzaC12YXBpZC9cIj5odHRwczovPSIsIi9kYXRhdHJhY2tlci5pZXRmLm9yZy9kb2MvZHJhZnQtaWV0Zi1qbWFwLXdlYnB1c2gtdmFwaWQvPC9hPiBhcyBkaXNjdXNzZT0iLCJkIGluIHRoZSBJRVRGMTE5IHNlc3Npb24uPGJyPjwvZGl2PjxkaXYgc3R5bGU9M0RcImZvbnQtZmFtaWx5OkFyaWFsO1wiPjxicj0iLCI+PC9kaXY+PGRpdiBzdHlsZT0zRFwiZm9udC1mYW1pbHk6QXJpYWw7XCI+UGxlYXNlIHBvc3QgYW55IGNvbW1lbnRzIG9yIHJlcz0iLCJwb25zZXMgYnkgPGI+VGh1cnNkYXksIEFwcmlsIDR0aCwgMjAyNDwvYj4uPGJyPjwvZGl2PjxkaXYgc3R5bGU9M0RcImZvbnQtPSIsImZhbWlseTpBcmlhbDtcIj48YnI+PC9kaXY+PGRpdiBzdHlsZT0zRFwiZm9udC1mYW1pbHk6QXJpYWw7XCI+VGhhbmtzLDxicj48Lz0iLCJkaXY+PGRpdiBzdHlsZT0zRFwiZm9udC1mYW1pbHk6QXJpYWw7XCI+PGJyPjwvZGl2PjxkaXYgc3R5bGU9M0RcImZvbnQtZmFtaWw9IiwieTpBcmlhbDtcIj5Ccm9uLjxicj48L2Rpdj48ZGl2Pjxicj48L2Rpdj48ZGl2Pjxicj48L2Rpdj48L2Rpdj48ZGl2IGlkPTNEXCI9Iiwic2lnNTY2Mjk0MTdcIj48ZGl2IGNsYXNzPTNEXCJzaWduYXR1cmVcIj4tLTxicj48L2Rpdj48ZGl2IGNsYXNzPTNEXCJzaWduYXR1cj0iLCJlXCI+Jm5ic3A7IEJyb24gR29uZHdhbmEsIENFTywgRmFzdG1haWwgUHR5IEx0ZDxicj48L2Rpdj48ZGl2IGNsYXNzPTNEXCJzaT0iLCJnbmF0dXJlXCI+Jm5ic3A7IGJyb25nQGZhc3RtYWlsdGVhbS5jb208YnI+PC9kaXY+PGRpdiBjbGFzcz0zRFwic2lnbmF0dXJlXCI9IiwiPjxicj48L2Rpdj48L2Rpdj48ZGl2IHN0eWxlPTNEXCJmb250LWZhbWlseTpBcmlhbDtcIj48YnI+PC9kaXY+PC9ib2R5PjwvaHQ9IiwibWw+IiwiLS0xMmI1M2RjODI5ZDI0NTExYmZhMDRmN2Q1ZTM2NzVmOC0tIl19XX0=;
+DKIM2-Signature: i=1; m=1; t=1740002100; d=test1.dkim2.com; mf=PGJyb25nQHRlc3QxLmRraW0yLmNvbT4=; rt=PGxpc3RAdGVzdDIuZGtpbTIuY29tPg==; s=sel1:rsa-sha256:HLXLofwW/TzT+3tCC/YR+LIGj0ZfJUppNBvEAyGRN1oaweCbTzjAVqR3tw9SGTQgXnmgwIQb1E2zs4Ke/O8xytctk7OTHuPQ5Tc/TQRnl7zmh25bas4RoEKiNes8R+EHMY5+frwkqsNk0MjHgpgyghAfd18h8V+u+f0VMfT2XNLJgwL3TUai/pMy2IKHJwxjD6EF/c7Zs49AT6fOAUX+SetV3uDTBe9ywDGZ1xCTCDbNLlnW/qbO+HQtIRsxgf4q5kj573DgzEp2+6+xpWwxLZpGHhuAz9msQnrbeQ+xdg6bKuTR2JN0SLoJly1dv/jkyFkLD46XoEgGnfLVgudvyg==;
+Message-Instance: m=1; h=sha256:MExUPRTBnQsJ/I3XKmPZnnJ5j9Ej5QLgtr3llRGAGZ4=:XI228V/720XNelm76DFKQf934iOEQQCt6wZ3uKCIr9Q=;
+Received: from ietfa.amsl.com (localhost [IPv6:::1])
+	by ietfa.amsl.com (Postfix) with ESMTP id B5BE4C1CAE68
+	for <brong@fastmailteam.com>; Wed,  7 Aug 2024 18:23:32 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
+	t=1723080212; bh=4olUkMUi2bCCfVrAOg4rSNpPMBWnWoKd71+94zpiUqo=;
+	h=Date:To:Subject:List-Id:List-Archive:List-Help:List-Owner:
+	 List-Post:List-Subscribe:List-Unsubscribe:From;
+	b=CLw2FjhKp7CRVUJPX4KiI30N4GDBexaIPvfwPPJBKsPRXVFw81Tztl17T218R0ijP
+	 YHaj6U21uewshsjhUOIL2AuFDHHXd3glLsWSvCVzbDpmr+IXDgZtRgWaf0Xf3f5PV4
+	 NjakHUDM8Pzo03GyxEpeE6Zc/BPche9Daga0TYKA=
+Received: from ietfa.amsl.com (localhost [IPv6:::1])
+ by ietfa.amsl.com (Postfix) with ESMTP id 90085C1D4A90
+ for <brong@fastmailteam.com>; Wed,  7 Aug 2024 18:23:32 -0700 (PDT)
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/simple; d=ietf.org; s=ietf1;
+ t=1723080212; bh=D4M1qDkbCpQmJnJKwy6QzCLlvWZ8iPtmnwzvt/sAK4A=;
+ h=Date:From:To:Subject:List-Id:List-Archive:List-Help:List-Owner:
+ List-Post:List-Subscribe:List-Unsubscribe;
+ b=yBBUCVc87K5d2tjGaSRqun787NrrwNHAT0er1vnq79tkxY+FYwq0op2sWlTW5RO/E
+ ADDylBQ1omAuQKR+t/GHVMd008kbgnKTDrd9xGK+Z64CT0f/F2GvDILtM5XiuY2wxW
+ BOS4ELsZ9mwSMkkjcf+G9hnRC2DiAkcv7pS8svGk=
+X-Original-To: jmap@ietfa.amsl.com
+X-Remote-Delivered-To: jmap@ietfa.amsl.com
+Received: from localhost (localhost [127.0.0.1])
+ by ietfa.amsl.com (Postfix) with ESMTP id 0604EC151557
+ for <jmap@ietfa.amsl.com>; Wed,  7 Aug 2024 18:23:16 -0700 (PDT)
+X-Virus-Scanned: amavisd-new at amsl.com
+X-Remote-Spam-Flag: NO
+X-Remote-Spam-Score: -7.107
+X-Remote-Spam-Level: 
+X-Remote-Spam-Status: No, score=-7.107 tagged_above=-999 required=5
+ tests=[BAYES_00=-1.9, DKIM_SIGNED=0.1, DKIM_VALID=-0.1,
+ DKIM_VALID_AU=-0.1, DKIM_VALID_EF=-0.1, HTML_MESSAGE=0.001,
+ RCVD_IN_DNSWL_HI=-5, RCVD_IN_ZEN_BLOCKED_OPENDNS=0.001,
+ SPF_PASS=-0.001, T_SCC_BODY_TEXT_LINE=-0.01,
+ URIBL_DBL_BLOCKED_OPENDNS=0.001, URIBL_ZEN_BLOCKED_OPENDNS=0.001]
+ autolearn=ham autolearn_force=no
+Authentication-Results: ietfa.amsl.com (amavisd-new); dkim=pass (2048-bit key)
+ header.d=fastmailteam.com header.b="BegZuiNO";
+ dkim=pass (2048-bit key) header.d=messagingengine.com
+ header.b="gwSrTmAD"
+Received: from mail.ietf.org ([50.223.129.194])
+ by localhost (ietfa.amsl.com [127.0.0.1]) (amavisd-new, port 10024)
+ with ESMTP id 6eYkUse_PpJL for <jmap@ietfa.amsl.com>;
+ Wed,  7 Aug 2024 18:23:11 -0700 (PDT)
+Received: from fhigh4-smtp.messagingengine.com
+ (fhigh4-smtp.messagingengine.com [103.168.172.155])
+ (using TLSv1.3 with cipher TLS_AES_256_GCM_SHA384 (256/256 bits)
+ key-exchange X25519 server-signature ECDSA (P-256) server-digest SHA256)
+ (No client certificate requested)
+ by ietfa.amsl.com (Postfix) with ESMTPS id 59805C180B46
+ for <jmap@ietf.org>; Wed,  7 Aug 2024 18:23:11 -0700 (PDT)
+Received: from compute3.internal (compute3.nyi.internal [10.202.2.43])
+ by mailfhigh.nyi.internal (Postfix) with ESMTP id 7F8CD1151BFC
+ for <jmap@ietf.org>; Wed,  7 Aug 2024 21:23:10 -0400 (EDT)
+Received: from imap43 ([10.202.2.93])
+ by compute3.internal (MEProxy); Wed, 07 Aug 2024 21:23:10 -0400
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=
+ fastmailteam.com; h=cc:content-type:content-type:date:date:from
+ :from:in-reply-to:message-id:mime-version:reply-to:subject
+ :subject:to:to; s=fm1; t=1723080190; x=1723166590; bh=ENKomZA/3h
+ Kj4mEy8zVyGxgFFF3ca2hZ/98i2+K7KaY=; b=BegZuiNOFa7t8HkBcw4YJkGa21
+ +ZXchRG4uDKn+hTDdyIFMQLuJfjj7Ks2hlnuPsrSgorSlQV+ahGmsRlTyiu8IB0C
+ C6S0e4hqCQ+E0ngcic5VnMguB/2sNLy3oEu3ypsaPLjIP8Suw5GjQo83lklnxYdX
+ iDxKeLSkBR5RsQD5JJu9jz7Ejy/xWMXv0xzeDZ4nSUqCukzroi47GJymVzwtgF9B
+ gW0jwsOtlSwg1aAG593D2QPp2xs+y3y+/KKtifqw7cyZjxwCQD+IV44KttDfryxH
+ 7sbJAVZrrsvkO4Ye+X5JQWi5Y5+/3dhVZsJbi+Z8odScOVpVUTfrbZ//gZoA==
+DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=
+ messagingengine.com; h=cc:content-type:content-type:date:date
+ :feedback-id:feedback-id:from:from:in-reply-to:message-id
+ :mime-version:reply-to:subject:subject:to:to:x-me-proxy
+ :x-me-proxy:x-me-sender:x-me-sender:x-sasl-enc; s=fm3; t=
+ 1723080190; x=1723166590; bh=ENKomZA/3hKj4mEy8zVyGxgFFF3ca2hZ/98
+ i2+K7KaY=; b=gwSrTmADrvu95IfsA6s0PrAHSj1aHlMh7SAg+kYOdHSSBheVQ9U
+ Pcy2ca09ZC5cU1bUPgRVyBDIWIHzyWO4e9Gtc4sOniF5mO3NqXbgowpsoOSpaCbL
+ KJQ/MsQltjc1Aa+WytrRdovUf6IsJSV48efWpd10eM5MeZ1SOid4Smygbb1ApMoC
+ PRbYcOXxpR3LT9+MlSrtTFxE+u9T6IiMlzyQ8koJzubtqaeTCJD/XQTer5EbMQvH
+ wZlDztSYjcG90vdgTjaqrnaK5YmLIh02GnwmPhOizHCcHJqkWeJdKoEGlXCv/YQv
+ 06hEKtDPMftijuxZNZrJfNszCkq1XofOPJA==
+X-ME-Sender: <xms:_h20ZuwXg_Fsx0BuOLSMOZO1-8fizxTBF_t0j5sjZD12Ur-622oo9Q>
+ <xme:_h20ZqRT1Zm-hJj0LmAX563um-V86XXD1TICB_4okgFllK960ODM2ezjcU3xGNa93
+ rWAwth4rSU>
+X-ME-Proxy-Cause: gggruggvucftvghtrhhoucdtuddrgeeftddrledugdeghecutefuodetggdotefrodftvf
+ curfhrohhfihhlvgemucfhrghsthforghilhdpqfgfvfdpuffrtefokffrpgfnqfghnecu
+ uegrihhlohhuthemuceftddtnecunecujfgurhepofggfffhvffkufgtsegrtderreertd
+ dtnecuhfhrohhmpedfuehrohhnucfiohhnugifrghnrgdfuceosghrohhnghesfhgrshht
+ mhgrihhlthgvrghmrdgtohhmqeenucggtffrrghtthgvrhhnpeffjeetvdeufeehiedufe
+ dukeegueekudffveefudekhfehhfeugfekleffkeethfenucffohhmrghinhepihgvthhf
+ rdhorhhgnecuvehluhhsthgvrhfuihiivgeptdenucfrrghrrghmpehmrghilhhfrhhomh
+ epsghrohhnghesfhgrshhtmhgrihhlthgvrghmrdgtohhmpdhnsggprhgtphhtthhopedt
+X-ME-Proxy: <xmx:_h20ZgVNinMgANitQTXC3nkqjvQGwTtHOJ3s-_0ZiMI8FwoVVYqZFQ>
+ <xmx:_h20Zki1lA6RRp1uSC0Mbrolwi-AHu163azlB8Xw-JjLUfkOGcICZw>
+ <xmx:_h20ZgCk05oM7CTdtLS_ljALb70IwsQKZgvxHPuhtktxc5V7Rgb-dg>
+ <xmx:_h20ZlJwW8Jp1dIYzpfbybXM8udtY4i0bdiXfap0QhMKb_gL6EzSdg>
+ <xmx:_h20ZrolsC-tmEni_U-kNfMASwVtyKmGvuQcxdcR5qxMqndygVHHQ8jE>
+Feedback-ID: i2d7042ce:Fastmail
+Received: by mailuser.nyi.internal (Postfix, from userid 501)
+ id 5272C2D4007D; Wed,  7 Aug 2024 21:23:10 -0400 (EDT)
+X-Mailer: MessagingEngine.com Webmail Interface
+MIME-Version: 1.0
+Date: Thu, 08 Aug 2024 11:22:49 +1000
+To: jmap@ietf.org
+Message-Id: <855105cc-e439-4a4f-9d93-3d56f9aed618@app.fastmail.com>
+Message-ID-Hash: QUAKRFGSIORIBVKHCBU3D7MSUNMJA7ZR
+X-Message-ID-Hash: QUAKRFGSIORIBVKHCBU3D7MSUNMJA7ZR
+X-MailFrom: brong@test1.dkim2.com
+X-Mailman-Rule-Misses: dmarc-mitigation; no-senders; approved; emergency;
+ loop; banned-address; member-moderation; header-match-jmap.ietf.org-0;
+ nonmember-moderation; administrivia; implicit-dest; max-recipients; max-size; 
+ news-moderation; no-subject; digests; suspicious-header
+X-Mailman-Version: 3.3.9rc4
+Precedence: list
+Subject: =?utf-8?q?=5BJmap=5D_Working_Group_Last_Call_=28repeat=29_draft-ietf-jmap-we?=
+ =?utf-8?q?bpush-vapid-03?=
+List-Id: JSON Message Access Protocol <jmap.ietf.org>
+Archived-At: <https://mailarchive.ietf.org/arch/msg/jmap/h5ZJ4zIU_xTYV6Urxz1GIukafIU>
+List-Archive: <https://mailarchive.ietf.org/arch/browse/jmap>
+List-Help: <mailto:jmap-request@ietf.org?subject=help>
+List-Owner: <mailto:jmap-owner@ietf.org>
+List-Post: <mailto:jmap@ietf.org>
+List-Subscribe: <mailto:jmap-join@ietf.org>
+List-Unsubscribe: <mailto:jmap-leave@ietf.org>
+Content-Type: multipart/mixed; boundary="===============6090836018512317826=="
+X-Original-From: "Bron Gondwana" <brong@test1.dkim2.com>
+From: Bron Gondwana <brong=40test1.dkim2.com@test2.dkim2.com>
+
+--===============6090836018512317826==
+Content-Type: multipart/alternative; boundary=050c6a6ec8c942ab825bbc048ba71c35
+
+--050c6a6ec8c942ab825bbc048ba71c35
+Content-Type: text/plain
+Content-Transfer-Encoding: 7bit
+
+Hi All,
+
+This starts a repeat working group last call on the webpush vapid draft:
+
+https://datatracker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/
+
+Please provide any comments on the updated draft by *Thursday August 22nd,* two weeks from today.  I'll submit to IESG then unless there are remaining unsolved issues.
+
+Here's some extra text.
+
+Thanks,
+
+Bron.
+
+
+--
+  Bron Gondwana, CEO, Fastmail Pty Ltd
+  brong@fastmailteam.com
+
+
+--050c6a6ec8c942ab825bbc048ba71c35
+Content-Type: text/html
+Content-Transfer-Encoding: quoted-printable
+
+<!DOCTYPE html><html><head><title></title><style type=3D"text/css">p.Mso=
+Normal,p.MsoNoSpacing{margin:0}</style></head><body><div style=3D"font-f=
+amily:Arial;">Hi All,<br></div><div style=3D"font-family:Arial;"><br></d=
+iv><div style=3D"font-family:Arial;">This starts a repeat working group =
+last call on the webpush vapid draft:<br></div><div style=3D"font-family=
+:Arial;"><br></div><div style=3D"font-family:Arial;"><a href=3D"https://=
+datatracker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/">https://datatra=
+cker.ietf.org/doc/draft-ietf-jmap-webpush-vapid/</a><br></div><div style=
+=3D"font-family:Arial;"><br></div><div style=3D"font-family:Arial;">Plea=
+se provide any comments on the updated draft by <b>Thursday August 22nd,=
+</b> two weeks from today.&nbsp; I'll submit to IESG then unless there a=
+re remaining unsolved issues.<br></div><div style=3D"font-family:Arial;"=
+><br></div><div style=3D"font-family:Arial;">Thanks,<br></div><div style=
+=3D"font-family:Arial;"><br>Bron.<br></div><div style=3D"font-family:Ari=
+al;"><br></div><div style=3D"font-family:Arial;"><br></div><div id=3D"si=
+g56629417"><div class=3D"signature">--<br></div><div class=3D"signature"=
+>&nbsp; Bron Gondwana, CEO, Fastmail Pty Ltd<br></div><div class=3D"sign=
+ature">&nbsp; brong@fastmailteam.com<br></div><div class=3D"signature"><=
+br></div></div><div style=3D"font-family:Arial;"><br></div></body></html=
+>
+--050c6a6ec8c942ab825bbc048ba71c35--
+
+
+--===============6090836018512317826==
+Content-Type: text/plain; charset="utf-8"
+MIME-Version: 1.0
+Content-Transfer-Encoding: base64
+Content-Disposition: inline
+
+X19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX19fX18KSm1hcCBtYWls
+aW5nIGxpc3QgLS0gam1hcEBpZXRmLm9yZwpUbyB1bnN1YnNjcmliZSBzZW5kIGFuIGVtYWlsIHRv
+IGptYXAtbGVhdmVAaWV0Zi5vcmcK
+
+--===============6090836018512317826==--
+

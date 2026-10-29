@@ -23,12 +23,11 @@ pub mod dmarc;
 pub mod dns;
 mod error;
 pub mod headers;
+mod heap;
 pub mod iprev;
 pub mod message;
 pub mod mta_sts;
 pub(crate) mod parse;
-#[cfg(feature = "report")]
-pub mod report;
 pub(crate) mod sampling;
 pub(crate) mod scan;
 pub mod signer;
@@ -45,11 +44,8 @@ compile_error!(
 #[cfg(not(any(feature = "dns-hickory", feature = "dns-doh")))]
 compile_error!("a DNS backend is required; enable feature `dns-hickory` or `dns-doh`");
 
-pub use flate2;
 #[cfg(not(feature = "dns-doh"))]
 pub use hickory_resolver;
-#[cfg(feature = "report")]
-pub use zip;
 
 #[cfg(feature = "arc")]
 pub use arc::{ArcOutput, ArcResult};

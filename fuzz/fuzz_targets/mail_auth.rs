@@ -14,12 +14,10 @@ use mail_auth::{
     dmarc::DmarcRecord,
     dns::TxtRecordParser,
     mta_sts::{MtaStsRecord, TlsRptRecord},
-    report::{arf::FeedbackReport, dmarc::AggregateReport},
     spf::{Macro, SpfRecord},
 };
 
 static RFC822_ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz:=- \r\n";
-static XML_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz</>";
 static TXT_ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz1=;:";
 
 fuzz_target!(|data: &[u8]| {
@@ -73,12 +71,6 @@ fuzz_target!(|data: &[u8]| {
 
     Macro::parse(data).ok();
     Macro::parse(&data_txt).ok();
-
-    AggregateReport::parse_xml(data).ok();
-    AggregateReport::parse_xml(&into_alphabet(data, XML_ALPHABET)).ok();
-
-    FeedbackReport::parse_arf(data).ok();
-    FeedbackReport::parse_arf(&data_rfc822).ok();
 });
 
 fn into_alphabet(data: &[u8], alphabet: &[u8]) -> Vec<u8> {

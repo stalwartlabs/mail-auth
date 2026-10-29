@@ -69,6 +69,26 @@ pub trait TxtRecordParser: Sized {
     /// version tag), or another [`Error`] when the record is of this type but
     /// malformed.
     fn parse(record: &[u8]) -> crate::Result<Self>;
+
+    /// Parses the TXT records found at one name, each with its character
+    /// strings already concatenated. The default implementation returns the
+    /// first record that [`parse`](Self::parse) accepts, or the error of the
+    /// last one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Dns`] with [`DnsError::InvalidRecordType`](crate::DnsError::InvalidRecordType)
+    /// when `records` is empty, or the error of the last record otherwise.
+    fn parse_records(records: &[Vec<u8>]) -> crate::Result<Self> {
+        let mut result = Err(Error::Dns(crate::DnsError::InvalidRecordType));
+        for record in records {
+            result = Self::parse(record);
+            if result.is_ok() {
+                break;
+            }
+        }
+        result
+    }
 }
 
 mod private {

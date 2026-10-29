@@ -5,9 +5,12 @@
  */
 
 //! Authentication of inbound DKIM2-signed delivery status notifications
-//! (§12.1.2) through [`MessageAuthenticator::verify_dkim2_dsn`].
+//! (§16.3) through [`MessageAuthenticator::verify_dkim2_dsn`].
 
-use super::{ChainBinding, Dkim2Result, Signature, sign::Envelope, verify::relaxed_domain_match};
+use super::{
+    ChainBinding, Dkim2Result, Signature, Verification, sign::Envelope,
+    verify::relaxed_domain_match,
+};
 use crate::dns::DnsCache;
 use crate::{
     AuthenticatedMessage, MessageAuthenticator, Parameters, ResolverCache, TxtRecord,
@@ -128,6 +131,10 @@ pub enum Dkim2DsnFailure {
     /// The DSN signer is not a recipient of the returned message, or the
     /// returned message was not last signed by the receiving system.
     NotAligned,
+    /// A DKIM2 chain of the DSN or of the returned message could not be
+    /// verified because of a temporary DNS error (§13.2); the DSN should be
+    /// rejected temporarily so that the sender retries.
+    TempError,
 }
 
 impl std::fmt::Display for Dkim2DsnFailure {
@@ -142,6 +149,9 @@ impl std::fmt::Display for Dkim2DsnFailure {
             Dkim2DsnFailure::NotAligned => {
                 "DSN signer is not aligned with the returned message recipient"
             }
+            Dkim2DsnFailure::TempError => {
+                "DKIM2 chain could not be verified due to a temporary DNS error"
+            }
         })
     }
 }
@@ -154,12 +164,16 @@ fn top_signature<'x>(
         .iter()
         .map(|h| &h.header)
         .max_by_key(|s| s.i)
-        .map(|top| match &top.chain {
-            ChainBinding::Envelope { mail_from, rcpt_to } => {
-                (&top.d, mail_from.as_str(), rcpt_to.as_slice())
-            }
-            ChainBinding::NextDomain(_) => (&top.d, "", &[][..]),
-        })
+        .map(envelope_of)
+}
+
+fn envelope_of(signature: &Signature) -> (&String, &str, &[String]) {
+    match &signature.chain {
+        ChainBinding::Envelope { mail_from, rcpt_to } => {
+            (&signature.d, mail_from.as_str(), rcpt_to.as_slice())
+        }
+        ChainBinding::NextDomain(_) => (&signature.d, "", &[][..]),
+    }
 }
 
 fn domain_of(address: &str) -> &str {
@@ -200,13 +214,15 @@ fn dsn_return_path<'x>(signatures: impl Iterator<Item = &'x Signature>) -> Optio
 
 impl MessageAuthenticator {
     /// Authenticates an inbound DKIM2-signed delivery status notification
-    /// (§12.1.2).
+    /// (§16.3).
     ///
     /// `params` wraps the [`Dkim2Dsn`], optionally with a DNS cache (see
     /// [`Parameters`]). `envelope` is the SMTP envelope the DSN was received
     /// with, usually with a null `MAIL FROM` (`<>`).
     ///
-    /// Both messages must be DKIM2 signed. The DSN is verified against
+    /// Both messages must be DKIM2 signed. A DSN is expected to carry a
+    /// single `DKIM2-Signature` and `Message-Instance` (§16.2), but a longer
+    /// chain is accepted when it verifies. The DSN is verified against
     /// `envelope` as with
     /// [`verify_dkim2`](MessageAuthenticator::verify_dkim2). The returned
     /// message is verified against the envelope recorded in its most recent
@@ -214,8 +230,9 @@ impl MessageAuthenticator {
     /// [`Dkim2Dsn::returned_full`] is true. Finally the DSN must be aligned
     /// with the returned message:
     ///
-    /// 1. The DSN signing domain relaxed-matches the domain of an `rt=`
-    ///    recipient in the returned message's most recent signature.
+    /// 1. An `rt=` recipient domain of the returned message's most recent
+    ///    signature relaxed-matches the signing domain of the DSN's `i=1`
+    ///    signature.
     /// 2. The `d=` of that signature relaxed-matches the domain of an
     ///    `envelope` `RCPT TO` address, which shows that the receiving system
     ///    made it.
@@ -288,21 +305,36 @@ impl MessageAuthenticator {
         A: AsRef<str> + Clone,
         RT: IntoIterator<Item: AsRef<str>> + Clone,
     {
-        if !is_dkim2_signed(dsn.dsn.as_ref()) {
+        let dsn_message = dsn.dsn.as_ref();
+        if !is_dkim2_signed(dsn_message) {
             return Err(Dkim2DsnFailure::DsnNotSigned);
         } else if !is_dkim2_signed(dsn.returned.as_ref()) {
             return Err(Dkim2DsnFailure::ReturnedNotSigned);
         }
 
         let dsn_output = self
-            .verify_dkim2_(dsn.dsn.as_ref(), envelope.clone(), cache_txt, now, true)
+            .verify_dkim2_(
+                dsn_message,
+                envelope.clone(),
+                cache_txt,
+                now,
+                true,
+                Verification::Full,
+            )
             .await;
         let dsn_result = dsn_output.result;
-        if !matches!(dsn_result, Dkim2Result::Pass) {
-            return Err(Dkim2DsnFailure::DsnChainFailed);
+        match dsn_result {
+            Dkim2Result::Pass => {}
+            Dkim2Result::TempError(_) => return Err(Dkim2DsnFailure::TempError),
+            _ => return Err(Dkim2DsnFailure::DsnChainFailed),
         }
 
-        let dsn_signing_domain = top_signature(dsn.dsn.as_ref()).map(|(d, _, _)| d);
+        let dsn_signing_domain = dsn_message
+            .dkim2_signatures
+            .iter()
+            .map(|h| &h.header)
+            .find(|signature| signature.i == 1)
+            .map(|signature| &signature.d);
         let returned_top = top_signature(dsn.returned.as_ref());
         let (returned_mail_from, returned_rcpt_to) = returned_top
             .as_ref()
@@ -315,12 +347,15 @@ impl MessageAuthenticator {
                 cache_txt,
                 now,
                 dsn.returned_full,
+                Verification::Full,
             )
             .await
             .result;
-        if !matches!(returned_result, Dkim2Result::Pass) {
-            return Err(Dkim2DsnFailure::ReturnedChainFailed);
-        };
+        match returned_result {
+            Dkim2Result::Pass => {}
+            Dkim2Result::TempError(_) => return Err(Dkim2DsnFailure::TempError),
+            _ => return Err(Dkim2DsnFailure::ReturnedChainFailed),
+        }
 
         let aligned = match (&dsn_signing_domain, &returned_top) {
             (Some(dsn_domain), Some((returned_domain, _, rcpt_to))) => {
@@ -366,11 +401,11 @@ where
 mod test {
     use super::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput, Signature, dsn_return_path};
     use crate::{
-        MessageAuthenticator,
+        DnsError, Error, MessageAuthenticator,
         crypto::Ed25519Key,
         dkim::DomainKey,
         dkim2::{ChainBinding, Dkim2Signer, Envelope, Hop},
-        dns::cache::test::DummyCaches,
+        dns::{TxtRecord, cache::test::DummyCaches},
         parse::TxtRecordParser,
     };
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
@@ -433,7 +468,7 @@ mod test {
         I: Into<String>,
     {
         let signer = Dkim2Signer::from_key(key).domain(domain).selector(selector);
-        let signed = signer.sign_at(message, hop, T).unwrap();
+        let signed = signer.sign_at(message, hop, None, T).unwrap();
         let mut out = signed.to_header().into_bytes();
         out.extend_from_slice(message);
         out
@@ -503,8 +538,14 @@ mod test {
     }
 
     async fn verify(dsn_bytes: &[u8]) -> Result<Dkim2DsnOutput, Dkim2DsnFailure> {
+        verify_with(dsn_bytes, load_caches()).await
+    }
+
+    async fn verify_with(
+        dsn_bytes: &[u8],
+        caches: DummyCaches,
+    ) -> Result<Dkim2DsnOutput, Dkim2DsnFailure> {
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
-        let caches = load_caches();
         let dsn = Dkim2Dsn::parse(dsn_bytes).expect("parse DSN");
         let params = caches.parameters(&dsn);
         let envelope = Envelope::new("<>", ["sender@test1.dkim2.com"]);
@@ -544,6 +585,35 @@ mod test {
         assert!(output.is_ok(), "{output:?}");
     }
 
+    // A DSN relayed through a second signer verifies; §16.2 single-signature is a sender rule.
+    #[tokio::test]
+    async fn verify_dsn_with_two_signatures() {
+        let plain = make_dsn(&signed_returned(), "message/rfc822", false);
+        let hop1 = sign_full(
+            load_key("test2.dkim2.com", "ed25519"),
+            "test2.dkim2.com",
+            "ed25519",
+            &plain,
+            Hop::real("<>", ["relay@test3.dkim2.com"]),
+        );
+        let signed = Dkim2Signer::from_key(load_key("test3.dkim2.com", "ed25519"))
+            .domain("test3.dkim2.com")
+            .selector("ed25519")
+            .out_of_band_arrangement()
+            .sign_at(
+                hop1.as_slice(),
+                Hop::real("<>", ["sender@test1.dkim2.com"]),
+                None,
+                T,
+            )
+            .unwrap();
+        let mut hop2 = signed.to_header().into_bytes();
+        hop2.extend_from_slice(&hop1);
+
+        let output = verify(&hop2).await;
+        assert!(output.is_ok(), "{output:?}");
+    }
+
     #[tokio::test]
     async fn verify_dsn_returned_headers_only() {
         let dsn_signed = make_dsn(
@@ -563,6 +633,25 @@ mod test {
 
         let output = verify(&dsn_signed).await;
         assert_eq!(output, Err(Dkim2DsnFailure::ReturnedNotSigned));
+    }
+
+    // A temporary DNS failure on either chain is reported as a temporary error, not a forgery.
+    #[tokio::test]
+    async fn verify_dsn_temporary_dns_failure() {
+        let dsn_signed = make_dsn(&signed_returned(), "message/rfc822", true);
+        for domain in ["test2.dkim2.com", "test1.dkim2.com"] {
+            let caches = load_caches();
+            caches.txt_add(
+                format!("ed25519._domainkey.{domain}."),
+                TxtRecord::Error(Error::Dns(DnsError::Resolver("timeout".to_string()))),
+                Instant::now() + Duration::new(3600, 0),
+            );
+            assert_eq!(
+                verify_with(&dsn_signed, caches).await,
+                Err(Dkim2DsnFailure::TempError),
+                "{domain}"
+            );
+        }
     }
 
     #[tokio::test]

@@ -1,6 +1,7 @@
 import init, {
   version,
   generate_key,
+  inspect_key,
   sign_dkim1,
   sign_dkim2,
   sign_dkim2_revised,
@@ -16,12 +17,14 @@ const splitList = (value) =>
 
 const STORE_KEY = "mailauth-playground";
 
-const SAMPLE_MESSAGE = `From: alice@example.com
-To: bob@example.net
+const DEFAULT_DOMAIN = "example.com";
+
+const sampleMessage = (domain) => `From: alice@${domain}
+To: friends@${domain}
 Subject: Hello from mail-auth
 Date: Tue, 30 Jun 2026 10:00:00 +0000
 
-Hi Bob,
+Hi everyone,
 
 This message was signed in the browser with mail-auth.
 
@@ -29,20 +32,28 @@ Cheers,
 Alice
 `;
 
-const SAMPLE_MODIFIED = `From: alice@example.com
-To: bob@example.net
-Subject: [list] Hello from mail-auth
+const sampleModified = (domain) => `From: alice@${domain}
+To: friends@${domain}
+Subject: [friends] Hello from mail-auth
 Date: Tue, 30 Jun 2026 10:00:00 +0000
 
-Hi Bob,
+Hi everyone,
 
 This message was signed in the browser with mail-auth.
 
 Cheers,
 Alice
 --
-Sent via list.example
+Sent via the friends@${domain} list
 `;
+
+const ALGORITHMS = {
+  rsa: "RSA-SHA256",
+  ed25519: "Ed25519-SHA256",
+  "mldsa44-ed25519-sha512": "MLDSA44-Ed25519-SHA512",
+};
+
+const TXT_CHUNK = 255;
 
 const state = {
   identity: null,
@@ -51,7 +62,11 @@ const state = {
     endpoint: "https://cloudflare-dns.com/dns-query",
     format: "json",
     records: "",
+    localKey: true,
   },
+  hopMode: "smtp",
+  gate: "verify",
+  lastSigned: null,
 };
 
 function loadState() {
@@ -68,11 +83,76 @@ function loadState() {
 }
 
 function saveState() {
-  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+  try {
+    localStorage.setItem(
+      STORE_KEY,
+      JSON.stringify({ identity: state.identity, dns: state.dns })
+    );
+  } catch (_) {
+    /* storage unavailable */
+  }
 }
 
 function algoLabel(algorithm) {
-  return algorithm === "rsa" ? "RSA-SHA256" : "Ed25519-SHA256";
+  return ALGORITHMS[algorithm] || algorithm;
+}
+
+function activeDomain() {
+  return (
+    state.identity?.domain ||
+    $("s-domain").value.trim() ||
+    DEFAULT_DOMAIN
+  );
+}
+
+function txtRecordLine(name, value) {
+  const chunks = [];
+  for (let i = 0; i < value.length; i += TXT_CHUNK) {
+    chunks.push(`"${value.slice(i, i + TXT_CHUNK)}"`);
+  }
+  return `${name}. IN TXT ${chunks.join(" ")}`;
+}
+
+function dnsOpts() {
+  const id = state.identity;
+  const localRecords =
+    state.dns.localKey && id && id.dnsName && id.dnsValue
+      ? `${id.dnsName} TXT ${id.dnsValue}`
+      : "";
+  return {
+    mode: state.dns.mode,
+    dohEndpoint: state.dns.endpoint,
+    dohFormat: state.dns.format,
+    records: state.dns.records,
+    localRecords,
+  };
+}
+
+function dkim2Opts(id, mailFrom, rcptTo) {
+  const flags = ["feedback", "feedhere", "exploded"].filter(
+    (flag) => $(`d2-flag-${flag}`).checked
+  );
+  return {
+    keyPem: id.pem,
+    algorithm: id.algorithm,
+    domain: id.domain,
+    selector: id.selector,
+    hashes: $("d2-hashes").value.split(","),
+    flags,
+    nonce: $("d2-nonce").value.trim(),
+    hop: {
+      kind: state.hopMode,
+      mailFrom,
+      rcptTo,
+      nextDomain: $("d2-nd").value.trim(),
+    },
+    gate: state.gate,
+    received: {
+      mailFrom: $("d2-recv-mailfrom").value.trim(),
+      rcptTo: splitList($("d2-recv-rcpt").value),
+    },
+    dns: dnsOpts(),
+  };
 }
 
 function showTab(name) {
@@ -102,6 +182,8 @@ function refreshContextStrips() {
   document.querySelectorAll('[data-context="dns"]').forEach((el) => {
     el.innerHTML = `${dns}<a href="#" data-goto="settings">Settings</a>`;
   });
+  $("d1-algo-note").hidden =
+    state.identity?.algorithm !== "mldsa44-ed25519-sha512";
 }
 
 function hostOf(url) {
@@ -114,7 +196,7 @@ function hostOf(url) {
 
 async function ensureKey() {
   if (state.identity) return state.identity;
-  const domain = $("s-domain").value.trim() || "example.com";
+  const domain = $("s-domain").value.trim() || DEFAULT_DOMAIN;
   const selector = $("s-selector").value.trim() || "default";
   const generated = generate_key("ed25519", 0, selector, domain);
   state.identity = {
@@ -148,7 +230,10 @@ function renderKeyStatus() {
     $("s-key-wrap").hidden = false;
   }
   if (state.identity.dnsName && state.identity.dnsValue) {
-    $("s-dns-record").textContent = `${state.identity.dnsName}. IN TXT "${state.identity.dnsValue}"`;
+    $("s-dns-record").textContent = txtRecordLine(
+      state.identity.dnsName,
+      state.identity.dnsValue
+    );
     $("s-dns-wrap").hidden = false;
   } else {
     $("s-dns-wrap").hidden = true;
@@ -166,6 +251,17 @@ function clearError(id) {
 function showOutput(wrapId, preId, text) {
   $(preId).textContent = text;
   $(wrapId).hidden = false;
+}
+function showNote(id, text) {
+  const el = $(id);
+  el.textContent = text;
+  el.hidden = !text;
+}
+
+function rememberSigned(message, mailFrom, rcptTo) {
+  state.lastSigned =
+    state.hopMode === "smtp" ? { message, mailFrom, rcptTo } : { message };
+  $("v-last").disabled = false;
 }
 
 async function handleDkim1Sign() {
@@ -188,56 +284,61 @@ async function handleDkim1Sign() {
 
 async function handleDkim2Sign() {
   clearError("d2-error");
+  showNote("d2-validity", "");
+  const btn = $("d2-sign");
+  btn.disabled = true;
   try {
     const id = await ensureKey();
-    const out = sign_dkim2(
-      id.pem,
-      id.algorithm,
-      id.domain,
-      id.selector,
-      $("d2-mailfrom").value,
-      splitList($("d2-rcpt").value),
+    const mailFrom = $("d2-mailfrom").value.trim();
+    const rcptTo = splitList($("d2-rcpt").value);
+    const result = await sign_dkim2(
+      dkim2Opts(id, mailFrom, rcptTo),
       $("d2-message").value
     );
-    showOutput("d2-output-wrap", "d2-output", out);
-    $("d2-original").value = out;
+    showNote("d2-validity", result.validity);
+    showOutput("d2-output-wrap", "d2-output", result.signed_message);
+    $("d2-original").value = result.signed_message;
+    if (state.hopMode === "smtp") {
+      $("d2-recv-mailfrom").value = mailFrom;
+      $("d2-recv-rcpt").value = rcptTo.join(", ");
+    }
+    rememberSigned(result.signed_message, mailFrom, rcptTo);
     updateReviseButton();
   } catch (err) {
     showError("d2-error", String(err));
+  } finally {
+    btn.disabled = false;
   }
 }
 
 async function handleDkim2Revise() {
   clearError("d2-rev-error");
+  showNote("d2-rev-validity", "");
+  const btn = $("d2-revise");
+  btn.disabled = true;
   try {
     const id = await ensureKey();
-    const result = sign_dkim2_revised(
-      id.pem,
-      id.algorithm,
-      id.domain,
-      id.selector,
-      $("d2-mailfrom").value,
-      splitList($("d2-rcpt").value),
+    const mailFrom = $("d2-fwd-mailfrom").value.trim();
+    const rcptTo = splitList($("d2-fwd-rcpt").value);
+    const result = await sign_dkim2_revised(
+      dkim2Opts(id, mailFrom, rcptTo),
       $("d2-original").value,
       $("d2-modified").value
     );
-    let hasRecipe = false;
-    try {
-      const parsed = JSON.parse(result.recipe_debug);
-      hasRecipe = parsed && parsed.recipe != null;
-    } catch (_) {
-      hasRecipe = false;
-    }
+    showNote("d2-rev-validity", result.validity);
     showOutput(
       "d2-recipe-wrap",
       "d2-recipe",
-      hasRecipe
-        ? result.recipe_debug
-        : "No differences found between the original and modified messages."
+      result.instance !== "null"
+        ? result.instance
+        : "The signed content matches the most recent Message-Instance, so no new instance was added; only a DKIM2-Signature was."
     );
     showOutput("d2-revout-wrap", "d2-revout", result.signed_message);
+    rememberSigned(result.signed_message, mailFrom, rcptTo);
   } catch (err) {
     showError("d2-rev-error", String(err));
+  } finally {
+    updateReviseButton();
   }
 }
 
@@ -290,10 +391,8 @@ async function handleVerify() {
   btn.textContent = "Verifying…";
   try {
     const res = await verify({
-      mode: state.dns.mode,
-      dohEndpoint: state.dns.endpoint,
-      dohFormat: state.dns.format,
-      records: state.dns.records,
+      dns: dnsOpts(),
+      dkim2Mode: $("v-dkim2-mode").value,
       checkDkim: $("v-dkim").checked,
       checkDkim2: $("v-dkim2").checked,
       checkSpf: $("v-spf").checked,
@@ -330,17 +429,24 @@ function setupSettings() {
     clearError("s-error");
     const pem = $("s-paste-key").value.trim();
     if (!pem) return showError("s-error", "Paste a PEM private key first.");
-    state.identity = {
-      domain: $("s-domain").value.trim() || "example.com",
-      selector: $("s-selector").value.trim() || "default",
-      algorithm: $("s-paste-algo").value,
-      pem,
-      publicKey: "",
-      dnsName: "",
-      dnsValue: "",
-    };
-    saveState();
-    renderKeyStatus();
+    try {
+      const domain = $("s-domain").value.trim() || DEFAULT_DOMAIN;
+      const selector = $("s-selector").value.trim() || "default";
+      const k = inspect_key(pem, $("s-paste-algo").value, selector, domain);
+      state.identity = {
+        domain,
+        selector,
+        algorithm: k.algorithm,
+        pem,
+        publicKey: k.public_key,
+        dnsName: k.dns_record_name,
+        dnsValue: k.dns_record_value,
+      };
+      saveState();
+      renderKeyStatus();
+    } catch (err) {
+      showError("s-error", String(err));
+    }
   });
 
   $("s-generate").addEventListener("click", () => {
@@ -348,7 +454,7 @@ function setupSettings() {
     try {
       const algo = $("s-gen-algo").value;
       const bits = parseInt($("s-gen-bits").value, 10) || 2048;
-      const domain = $("s-domain").value.trim() || "example.com";
+      const domain = $("s-domain").value.trim() || DEFAULT_DOMAIN;
       const selector = $("s-selector").value.trim() || "default";
       const g = generate_key(algo, bits, selector, domain);
       state.identity = {
@@ -379,6 +485,12 @@ function setupSettings() {
     });
   });
 
+  const syncBits = () => {
+    $("s-gen-bits-wrap").hidden = $("s-gen-algo").value !== "rsa";
+  };
+  $("s-gen-algo").addEventListener("change", syncBits);
+  syncBits();
+
   $("s-doh-preset").addEventListener("change", (e) => {
     const v = e.target.value;
     if (v === "custom") return;
@@ -393,11 +505,26 @@ function setupSettings() {
       endpoint: $("s-doh-endpoint").value.trim(),
       format: $("s-doh-format").value,
       records: $("s-records").value,
+      localKey: $("s-local-key").checked,
     };
     saveState();
     const flash = $("s-dns-saved");
     flash.hidden = false;
     setTimeout(() => (flash.hidden = true), 1500);
+  });
+}
+
+function setupSegmented(selector, key, paneKey, onChange) {
+  const segs = document.querySelectorAll(`${selector} .seg`);
+  segs.forEach((seg) => {
+    seg.addEventListener("click", () => {
+      segs.forEach((s) => s.classList.toggle("active", s === seg));
+      const value = seg.dataset[key];
+      document
+        .querySelectorAll(`[data-${paneKey}]`)
+        .forEach((pane) => (pane.hidden = pane.dataset[paneKey] !== value));
+      onChange(value);
+    });
   });
 }
 
@@ -409,6 +536,7 @@ function hydrateSettingsInputs() {
   $("s-doh-endpoint").value = state.dns.endpoint;
   $("s-doh-format").value = state.dns.format;
   $("s-records").value = state.dns.records;
+  $("s-local-key").checked = state.dns.localKey !== false;
   if (state.dns.mode === "offline") {
     document.querySelector('#s-dnsmode .seg[data-dnsmode="offline"]').click();
   }
@@ -432,12 +560,24 @@ function setupGenericButtons() {
   document.querySelectorAll("[data-sample]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const kind = btn.dataset.sample;
-      if (kind === "d2-message") $("d2-message").value = SAMPLE_MESSAGE;
-      else if (kind === "d1-message") $("d1-message").value = SAMPLE_MESSAGE;
-      else if (kind === "v-message") $("v-message").value = SAMPLE_MESSAGE;
+      const domain = activeDomain();
+      if (kind === "d2-message") {
+        $("d2-message").value = sampleMessage(domain);
+        $("d2-mailfrom").value = `alice@${domain}`;
+        $("d2-rcpt").value = `friends@${domain}`;
+      } else if (kind === "d1-message") $("d1-message").value = sampleMessage(domain);
+      else if (kind === "v-message") $("v-message").value = sampleMessage(domain);
       else if (kind === "d2-revised") {
-        $("d2-original").value = SAMPLE_MESSAGE;
-        $("d2-modified").value = SAMPLE_MODIFIED;
+        const signed = state.lastSigned?.message;
+        $("d2-original").value = signed || sampleMessage(domain);
+        $("d2-modified").value = signed
+          ? signed.replace(
+            /^Subject: Hello from mail-auth/m,
+            "Subject: [friends] Hello from mail-auth"
+          ) + `--\r\nSent via the friends@${domain} list\r\n`
+          : sampleModified(domain);
+        $("d2-fwd-mailfrom").value = `friends-bounces@${domain}`;
+        $("d2-fwd-rcpt").value = "bob@example.net, carol@example.org";
       }
       updateReviseButton();
     });
@@ -464,6 +604,23 @@ function setupGenericButtons() {
   $("d2-original").addEventListener("input", updateReviseButton);
   $("d2-modified").addEventListener("input", updateReviseButton);
 
+  setupSegmented("#d2-hopmode", "hopmode", "hoppane", (mode) => {
+    state.hopMode = mode;
+  });
+  setupSegmented("#d2-gate", "gate", "gatepane", (gate) => {
+    state.gate = gate;
+  });
+
+  $("v-last").addEventListener("click", () => {
+    const last = state.lastSigned;
+    if (!last) return;
+    $("v-message").value = last.message;
+    if (last.mailFrom !== undefined) {
+      $("v-mailfrom").value = last.mailFrom;
+      $("v-rcpt").value = last.rcptTo.join(", ");
+    }
+  });
+
   $("d1-sign").addEventListener("click", handleDkim1Sign);
   $("d2-sign").addEventListener("click", handleDkim2Sign);
   $("d2-revise").addEventListener("click", handleDkim2Revise);
@@ -489,8 +646,18 @@ async function boot() {
   hydrateSettingsInputs();
   renderKeyStatus();
 
-  $("d2-message").value = SAMPLE_MESSAGE;
-  $("d1-message").value = SAMPLE_MESSAGE;
+  const domain = activeDomain();
+  $("d2-message").value = sampleMessage(domain);
+  $("d1-message").value = sampleMessage(domain);
+  if (domain !== DEFAULT_DOMAIN) {
+    $("d2-mailfrom").value = `alice@${domain}`;
+    $("d2-rcpt").value = `friends@${domain}`;
+    $("d2-recv-mailfrom").value = `alice@${domain}`;
+    $("d2-recv-rcpt").value = `friends@${domain}`;
+    $("d2-fwd-mailfrom").value = `friends-bounces@${domain}`;
+    $("v-mailfrom").value = `alice@${domain}`;
+    $("v-rcpt").value = `friends@${domain}`;
+  }
   updateReviseButton();
 
   showTab("dkim2");

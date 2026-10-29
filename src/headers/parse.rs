@@ -126,15 +126,6 @@ impl<'x> HeaderIterator<'x> {
         }
     }
 
-    #[cfg(feature = "report")]
-    pub fn seek_start(&mut self) {
-        let rest = self.message.get(self.pos..).unwrap_or_default();
-        self.pos += rest
-            .iter()
-            .position(|ch| !ch.is_ascii_whitespace())
-            .unwrap_or(rest.len());
-    }
-
     pub fn body_offset(&mut self) -> Option<usize> {
         (self.pos < self.message.len()).then_some(self.pos)
     }

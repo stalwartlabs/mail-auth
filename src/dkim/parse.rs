@@ -16,7 +16,9 @@ use crate::{
     Error,
     crypto::VerifyingKeyType,
     dkim::DomainKey,
-    dkim::{RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION},
+    dkim::{
+        RR_EXPIRATION, RR_SIGNATURE, RR_UNKNOWN_TAG, RR_VERIFICATION, record::R_MULTIPLE_RECORDS,
+    },
     parse::*,
 };
 use std::slice::Iter;
@@ -284,6 +286,12 @@ impl TxtRecordParser for DomainKey {
                             {
                                 key_type = VerifyingKeyType::Ed25519;
                             }
+                            b'm' | b'M'
+                                if header.match_bytes(b"ldsa44-ed25519-sha512")
+                                    && header.seek_tag_end() =>
+                            {
+                                key_type = VerifyingKeyType::MlDsa44Ed25519;
+                            }
                             b';' => (),
                             _ => {
                                 return Err(Error::Dkim(DkimError::UnsupportedKeyType));
@@ -307,6 +315,20 @@ impl TxtRecordParser for DomainKey {
             }),
             _ => Err(Error::Dns(DnsError::InvalidRecordType)),
         }
+    }
+
+    fn parse_records(records: &[Vec<u8>]) -> crate::Result<Self> {
+        let mut result = Err(Error::Dns(DnsError::InvalidRecordType));
+        for record in records {
+            result = Self::parse(record);
+            if let Ok(key) = &mut result {
+                if records.len() > 1 {
+                    key.f |= R_MULTIPLE_RECORDS;
+                }
+                break;
+            }
+        }
+        result
     }
 }
 

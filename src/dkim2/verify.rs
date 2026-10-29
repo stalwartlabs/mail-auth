@@ -4,29 +4,41 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! DKIM2 chain verification (§10 and §11) through
-//! [`MessageAuthenticator::verify_dkim2`].
+//! DKIM2 chain verification (§13 and §14) through
+//! [`MessageAuthenticator::verify_dkim2`] and
+//! [`MessageAuthenticator::verify_dkim2_provisionally`].
 
 use super::{
-    ChainBinding, ChainLink, Dkim2Error, Dkim2Output, Flag, MessageInstance, Signature,
+    ChainBinding, ChainLink, Dkim2Error, Dkim2Hash, Dkim2Output, MessageInstance, Signature,
+    Verification,
+    recipe::{BodyRecipe, apply_body_recipe, body_lines, headers_len},
     sign::Envelope,
 };
 use crate::dns::DnsCache;
 use crate::{
     AuthenticatedMessage, Dkim2Result, DnsError, Error, MessageAuthenticator, Parameters,
     ResolverCache, TxtRecord,
-    crypto::{Algorithm, CryptoError, HashAlgorithm},
-    dkim::DkimError,
-    dkim::DomainKey,
-    dkim2::{canonicalize::CanonicalizedHeaderWriter, sign::now},
-    headers::{Header, HeaderIterator, HeaderStream, Writer},
+    crypto::{Algorithm, CryptoError},
+    dkim::{DkimError, DomainKey},
+    dkim2::parse::is_domain,
+    dkim2::{
+        canonicalize::{CanonicalizedHeaderWriter, Digests, body_digests, header_digests},
+        sign::now,
+    },
+    dns::to_a_label,
+    headers::{Header, HeaderIterator, Writer},
 };
+use mail_parser::{Address, HeaderForm};
+use std::borrow::Cow;
 
 const MAX_AGE: u64 = 14 * 86400;
+const MAX_FUTURE: u64 = 86400;
 const MAX_CHAIN_LENGTH: usize = 50;
+const MIN_RSA_BITS: usize = 1024;
 
 impl MessageAuthenticator {
-    /// Verifies the DKIM2 signature chain of an RFC 5322 message.
+    /// Verifies the DKIM2 signature chain of an RFC 5322 message: whether it
+    /// is a Validly Signed DKIM2 Message (§13 and §14).
     ///
     /// `params` wraps the parsed message, optionally with a DNS cache (see
     /// [`Parameters`]); a plain `&AuthenticatedMessage` also works.
@@ -35,12 +47,14 @@ impl MessageAuthenticator {
     /// and every `RCPT TO` appears in its `rt=`.
     ///
     /// The verifier checks, in order, the syntax and numbering of every
-    /// `DKIM2-Signature` and `Message-Instance`, the signature timestamps
-    /// (at most 14 days old), the envelope binding and chain of custody,
-    /// every signature value, the header and body hashes of every instance
-    /// (applying recipes to recreate earlier revisions) and finally the
-    /// `donotmodify` and `donotexplode` requests. It stops at the first
-    /// failure.
+    /// `DKIM2-Signature` and `Message-Instance` (§14.2), the signature
+    /// timestamps (at most 14 days old and at most one day in the future,
+    /// §14.3), the envelope binding, the `mf=`/`d=` match of every signature
+    /// and the chain of custody (§14.4), every signature value (§14.5 and
+    /// §14.6), the hashes of every instance, applying recipes to recreate
+    /// earlier revisions (§14.7), and that every `From` header field, current
+    /// or recreated, is Authentic (§11 and §14.8). It stops at the first
+    /// failure. Domains are compared as A-labels (§18).
     ///
     /// For each `s=` entry of each signature it performs one DNS TXT lookup
     /// for the public key at `<selector>._domainkey.<d>`, served from the
@@ -51,16 +65,18 @@ impl MessageAuthenticator {
     /// - [`Dkim2Result::Pass`]: the whole chain verified. The output lists
     ///   every hop in [`Dkim2Output::chain`].
     /// - [`Dkim2Result::Fail`]: a signature value, header hash or body hash
-    ///   did not match, a signature has no supported algorithm, or a
-    ///   `donotmodify`/`donotexplode` request was not honored.
-    /// - [`Dkim2Result::PermError`]: a DKIM2 header field is malformed or
-    ///   incomplete, the chain is longer than 50 hops, a signature expired,
-    ///   the envelope or chain of custody does not match, or a public key is
-    ///   missing, invalid, revoked or of the wrong type.
+    ///   did not match, or a signature or instance has no supported
+    ///   algorithm.
+    /// - [`Dkim2Result::PermError`]: a DKIM2 header field is malformed,
+    ///   incomplete or missing, the numbering has a gap, the chain is longer
+    ///   than 50 hops, a timestamp is out of range, the envelope or chain of
+    ///   custody does not match, a public key is missing, malformed,
+    ///   duplicated, revoked or of the wrong type, or a `From` header field is
+    ///   not Authentic.
     /// - [`Dkim2Result::TempError`]: a public key lookup failed with a
     ///   temporary DNS error.
-    /// - [`Dkim2Result::None`]: the message has no `DKIM2-Signature`, or the
-    ///   signature numbering does not run from 1 without gaps.
+    /// - [`Dkim2Result::None`]: the message has no `DKIM2-Signature` and no
+    ///   `Message-Instance` header field.
     ///
     /// # Example
     ///
@@ -96,8 +112,52 @@ impl MessageAuthenticator {
         R: IntoIterator<Item: AsRef<str>>,
     {
         let params = params.into();
-        self.verify_dkim2_(params.input, envelope, params.txt_cache(), now(), true)
-            .await
+        self.verify_dkim2_(
+            params.input,
+            envelope,
+            params.txt_cache(),
+            now(),
+            true,
+            Verification::Full,
+        )
+        .await
+    }
+
+    /// Checks whether a message is Provisionally Verified (§13.1): the
+    /// initial assessment a receiver may make before accepting delivery,
+    /// and the precondition for later sending a DSN about the message.
+    ///
+    /// Performs the header field validity, timestamp and envelope checks of
+    /// [`verify_dkim2`](Self::verify_dkim2), then verifies only the most
+    /// recent signature and the hashes of the most recent `Message-Instance`.
+    /// It does not check the chain of custody of earlier hops, earlier
+    /// signatures or hashes, or whether `From` header fields are Authentic.
+    /// A most recent signature with `nd=` is a [`Dkim2Result::PermError`].
+    ///
+    /// A passing result is reported with [`Verification::Provisional`], its
+    /// [`Dkim2Output::chain`] holds only the most recent signature, and it is
+    /// neither a proof of validity for [`Dkim2Signer`](super::Dkim2Signer)
+    /// nor an authenticated identity for DMARC or Authentication-Results.
+    pub async fn verify_dkim2_provisionally<'x, C, A, R>(
+        &self,
+        params: impl Into<Parameters<'x, &'x AuthenticatedMessage<'x>, C>>,
+        envelope: Envelope<A, R>,
+    ) -> Dkim2Output<'x>
+    where
+        C: DnsCache + 'x,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+    {
+        let params = params.into();
+        self.verify_dkim2_(
+            params.input,
+            envelope,
+            params.txt_cache(),
+            now(),
+            true,
+            Verification::Provisional,
+        )
+        .await
     }
 
     pub(crate) async fn verify_dkim2_<'x, TXT, A, R>(
@@ -107,7 +167,72 @@ impl MessageAuthenticator {
         cache_txt: Option<&TXT>,
         now: u64,
         body_present: bool,
+        verification: Verification,
     ) -> Dkim2Output<'x>
+    where
+        TXT: ResolverCache<Box<str>, TxtRecord>,
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+    {
+        let result = self
+            .verify_chain(
+                message,
+                envelope,
+                cache_txt,
+                now,
+                body_present,
+                verification,
+            )
+            .await;
+        let signatures = message.dkim2_signatures.as_slice();
+        let instances = message.dkim2_instances.as_slice();
+        let verified = match verification {
+            Verification::Full => signatures,
+            Verification::Provisional => signatures
+                .len()
+                .checked_sub(1)
+                .and_then(|top| signatures.get(top..))
+                .unwrap_or_default(),
+        };
+        let chain = match result {
+            Ok(()) => verified
+                .iter()
+                .map(|sig_header| ChainLink {
+                    signature: &sig_header.header,
+                    instance: sig_header
+                        .header
+                        .m
+                        .checked_sub(1)
+                        .and_then(|index| instances.get(index as usize))
+                        .map(|h| &h.header),
+                    result: Dkim2Result::Pass,
+                    custody_ok: true,
+                })
+                .collect(),
+            Err(_) => Vec::new(),
+        };
+        Dkim2Output {
+            result: match result {
+                Ok(()) => Dkim2Result::Pass,
+                Err(result) => result,
+            },
+            chain,
+            verification,
+            raw_message: message.raw_message,
+            signature_fields: signatures,
+            instance_fields: instances,
+        }
+    }
+
+    async fn verify_chain<TXT, A, R>(
+        &self,
+        message: &AuthenticatedMessage<'_>,
+        envelope: Envelope<A, R>,
+        cache_txt: Option<&TXT>,
+        now: u64,
+        body_present: bool,
+        verification: Verification,
+    ) -> Result<(), Dkim2Result>
     where
         TXT: ResolverCache<Box<str>, TxtRecord>,
         A: AsRef<str>,
@@ -120,348 +245,503 @@ impl MessageAuthenticator {
                 if name.eq_ignore_ascii_case(b"dkim2-signature")
                     || name.eq_ignore_ascii_case(b"message-instance")
                 {
-                    return Dkim2Result::from(header.header.clone()).into();
+                    return Err(Dkim2Result::from(header.header.clone()));
                 }
             }
-        }
-
-        if message.dkim2_signatures.is_empty() {
-            return Dkim2Result::None.into();
-        } else if message.dkim2_signatures.len() > MAX_CHAIN_LENGTH
-            || message.dkim2_instances.len() > MAX_CHAIN_LENGTH
-        {
-            return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::ChainTooLong)).into();
         }
 
         let signatures = message.dkim2_signatures.as_slice();
         let instances = message.dkim2_instances.as_slice();
-
-        for (index, header) in signatures.iter().enumerate() {
-            let signature = &header.header;
-            let expected = index as u32 + 1;
-            if signature.i != expected {
-                return Dkim2Result::None.into();
-            }
-            for (present, tag) in [(signature.m != 0, "m"), (!signature.d.is_empty(), "d")] {
-                if !present {
-                    return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::SignatureTagMissing {
-                        i: signature.i,
-                        tag,
-                    }))
-                    .into();
-                }
-            }
-            if let ChainBinding::Envelope { mail_from, rcpt_to } = &signature.chain {
-                if mail_from.is_empty() && rcpt_to.is_empty() {
-                    return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::SignatureTagMissing {
-                        i: signature.i,
-                        tag: "mf",
-                    }))
-                    .into();
-                }
-                if require_reverse_path()
-                    && !(is_reverse_path(mail_from) && rcpt_to.iter().all(|r| is_reverse_path(r)))
-                {
-                    return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::SignatureSyntax(
-                        signature.i,
-                    )))
-                    .into();
-                }
-            }
-            if now > signature.t && now - signature.t > MAX_AGE {
-                return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::SignatureExpired(
-                    signature.i,
-                )))
-                .into();
-            }
+        if signatures.is_empty() {
+            return Err(if instances.is_empty() {
+                Dkim2Result::None
+            } else {
+                perm_error(Dkim2Error::SignatureMissing(1))
+            });
+        } else if signatures.len() > MAX_CHAIN_LENGTH || instances.len() > MAX_CHAIN_LENGTH {
+            return Err(perm_error(Dkim2Error::ChainTooLong));
         }
 
-        for (index, header) in instances.iter().enumerate() {
-            let instance = &header.header;
-            if instance.m != index as u32 + 1 {
-                return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::InstanceMissing(
-                    index as u32 + 1,
-                )))
-                .into();
-            }
-        }
+        check_numbering(signatures, instances, now).map_err(perm_error)?;
 
-        let highest_sig_m = signatures.last().map(|h| h.header.m).unwrap_or(0);
-        let highest_mi_m = instances.last().map(|h| h.header.m).unwrap_or(0);
-        if highest_mi_m == 0 {
-            return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::InstanceMissing(1))).into();
-        }
-        if highest_mi_m != highest_sig_m {
-            return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::InstanceAboveSignature(
-                highest_mi_m,
-            )))
-            .into();
-        }
+        let Some((top, previous)) = signatures.split_last() else {
+            return Err(perm_error(Dkim2Error::SignatureMissing(1)));
+        };
+        let top = &top.header;
+        check_envelope(top, envelope).map_err(perm_error)?;
 
-        let top_signature = &signatures.last().unwrap().header;
-        match &top_signature.chain {
-            ChainBinding::Envelope { mail_from, rcpt_to } => {
-                if !address_matches(envelope.mail_from.as_ref(), mail_from) {
-                    return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::MailFromMismatch(
-                        top_signature.i,
-                    )))
-                    .into();
+        match verification {
+            Verification::Full => {
+                for header in signatures {
+                    check_mail_from_domain(&header.header).map_err(perm_error)?;
                 }
-                for rcpt in envelope.rcpt_to {
-                    if !rcpt_to.iter().any(|r| address_matches(rcpt.as_ref(), r)) {
-                        return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::RcptToMismatch(
-                            top_signature.i,
-                        )))
-                        .into();
-                    }
-                }
-                if mail_from != "<>" {
-                    let (_, domain) = local_and_domain(mail_from);
-                    if !relaxed_domain_match(domain, &top_signature.d) {
-                        return Dkim2Result::PermError(Error::Dkim2(
-                            Dkim2Error::MailFromDomainMismatch(top_signature.i),
-                        ))
-                        .into();
+                for pair in signatures.windows(2) {
+                    if let [previous, current] = pair {
+                        check_custody(&previous.header, &current.header).map_err(perm_error)?;
                     }
                 }
             }
-            ChainBinding::NextDomain(_) => {
-                return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::SignatureTagUnexpected {
-                    i: top_signature.i,
-                    tag: "nd",
-                }))
-                .into();
-            }
+            Verification::Provisional => check_mail_from_domain(top).map_err(perm_error)?,
         }
 
-        for window in signatures.windows(2) {
-            let previous = &window[0].header;
-            let current = &window[1].header;
-            match &previous.chain {
-                ChainBinding::NextDomain(next_domain) => {
-                    if !next_domain.eq_ignore_ascii_case(&current.d) {
-                        return Dkim2Result::PermError(Error::Dkim2(
-                            Dkim2Error::NextDomainMismatch(current.i),
-                        ))
-                        .into();
-                    }
-                }
-                ChainBinding::Envelope { rcpt_to, .. } => {
-                    let current_domain = match &current.chain {
-                        ChainBinding::Envelope { mail_from, .. } => local_and_domain(mail_from).1,
-                        ChainBinding::NextDomain(_) => current.d.as_str(),
-                    };
-                    let custody_ok = rcpt_to.iter().any(|rcpt| {
-                        let (_, rcpt_domain) = local_and_domain(rcpt);
-                        relaxed_domain_match(current_domain, rcpt_domain)
-                    });
-                    if !custody_ok {
-                        let error = match &current.chain {
-                            ChainBinding::Envelope { .. } => {
-                                Dkim2Error::MailFromMismatch(current.i)
-                            }
-                            ChainBinding::NextDomain(_) => Dkim2Error::CustodyBreak(current.i),
-                        };
-                        return Dkim2Result::PermError(Error::Dkim2(error)).into();
-                    }
-                }
-            }
+        let checked = match verification {
+            Verification::Full => signatures,
+            Verification::Provisional => signatures.get(previous.len()..).unwrap_or_default(),
+        };
+        let mut input = Vec::with_capacity(256 * (instances.len() + signatures.len()));
+        for sig_header in checked {
+            self.check_signature(sig_header, signatures, instances, cache_txt, &mut input)
+                .await?;
         }
 
-        for sig_header in signatures {
-            let signature = &sig_header.header;
-            if signature.s.is_empty() {
-                return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::NoValidAlgorithm(signature.i)))
-                    .into();
-            }
-
-            let mut input = Vec::with_capacity(256);
-            for (name, value) in instances
-                .iter()
-                .filter(|h| h.header.m <= signature.m)
-                .map(|h| (h.name, h.value))
-                .chain(
-                    signatures
-                        .iter()
-                        .filter(|h| h.header.i < signature.i)
-                        .map(|h| (h.name, h.value)),
+        match verification {
+            Verification::Full => check_instances(message, signatures, instances, body_present),
+            Verification::Provisional => instances.last().map_or(Ok(()), |header| {
+                StateHashes::default().check(
+                    &header.header,
+                    &message.headers,
+                    body_present.then(|| message.raw_body()),
                 )
-            {
-                let mut w = CanonicalizedHeaderWriter::new(&mut input, name);
-                w.write(value);
-                w.finalize();
-            }
-            strip_and_canonicalize_signature(sig_header.value, &mut input);
+            }),
+        }
+        .map_err(|error| match error {
+            Dkim2Error::FromNotAuthentic(_) | Dkim2Error::InstanceNotSigned(_) => perm_error(error),
+            error => Dkim2Result::Fail(Error::Dkim2(error)),
+        })
+    }
 
-            for value in &signature.s {
-                let key = match self
-                    .txt_lookup::<DomainKey>(
-                        format!("{}._domainkey.{}.", value.selector, signature.d),
-                        cache_txt,
-                    )
-                    .await
-                {
-                    Ok(key) => key,
-                    Err(Error::Dns(DnsError::Resolver(_))) => {
-                        return Dkim2Result::TempError(Error::Dkim2(Dkim2Error::PublicKeyFetch(
-                            signature.i,
-                        )))
-                        .into();
-                    }
-                    Err(Error::Dkim(DkimError::PublicKeyRevoked)) => {
-                        return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::PublicKeyRevoked(
-                            signature.i,
-                        )))
-                        .into();
-                    }
-                    Err(_) => {
-                        return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::PublicKeyMissing(
-                            signature.i,
-                        )))
-                        .into();
-                    }
-                };
-
-                if matches!(value.a, Algorithm::RsaSha256 | Algorithm::RsaSha1)
-                    && key.p.public_key_bits() < 1024
-                {
-                    return Dkim2Result::PermError(Error::Dkim2(Dkim2Error::PublicKeySyntax(
-                        signature.i,
-                    )))
-                    .into();
-                }
-
-                match key.p.verify_bytes(&input, &value.b, value.a) {
-                    Ok(()) => {}
-                    Err(Error::Crypto(CryptoError::IncompatibleAlgorithms)) => {
-                        return Dkim2Result::PermError(Error::Dkim2(
-                            Dkim2Error::PublicKeyAlgorithmMismatch(signature.i),
-                        ))
-                        .into();
-                    }
-                    Err(_) => {
-                        return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::IncorrectSignature(
-                            signature.i,
-                        )))
-                        .into();
-                    }
-                }
-            }
+    async fn check_signature<TXT>(
+        &self,
+        sig_header: &Header<'_, Signature>,
+        signatures: &[Header<'_, Signature>],
+        instances: &[Header<'_, MessageInstance>],
+        cache_txt: Option<&TXT>,
+        input: &mut Vec<u8>,
+    ) -> Result<(), Dkim2Result>
+    where
+        TXT: ResolverCache<Box<str>, TxtRecord>,
+    {
+        let signature = &sig_header.header;
+        if signature.s.is_empty() {
+            return Err(Dkim2Result::Fail(Error::Dkim2(
+                Dkim2Error::NoValidAlgorithm(signature.i),
+            )));
         }
 
-        let algorithm = HashAlgorithm::Sha256;
-        let mut new_body = vec![];
-        let mut new_haders = vec![];
-        let mut last_body = message.raw_body();
-        let mut last_headers = message.headers.as_slice();
+        input.clear();
+        for (name, value) in instances
+            .iter()
+            .filter(|h| h.header.m <= signature.m)
+            .map(|h| (h.name, h.value))
+            .chain(
+                signatures
+                    .iter()
+                    .take_while(|h| h.header.i < signature.i)
+                    .map(|h| (h.name, h.value)),
+            )
+        {
+            let mut w = CanonicalizedHeaderWriter::new(input, name);
+            w.write(value);
+            w.finalize();
+        }
+        strip_and_canonicalize_signature(sig_header.value, input);
 
-        for header in instances.iter().rev() {
-            let instance = &header.header;
-            let Some(recorded) = instance.hashes.iter().find(|h| h.name == Some(algorithm)) else {
-                continue;
+        let mut passed = None;
+        let mut failed = None;
+        for value in &signature.s {
+            let key_error = |error: fn(u32, Box<str>) -> Dkim2Error| {
+                Error::Dkim2(error(signature.i, value.selector.as_str().into()))
+            };
+            let key = match self
+                .txt_lookup::<DomainKey>(
+                    format!("{}._domainkey.{}.", value.selector, signature.d),
+                    cache_txt,
+                )
+                .await
+            {
+                Ok(key) => key,
+                Err(Error::Dns(DnsError::Resolver(_))) => {
+                    return Err(Dkim2Result::TempError(key_error(|i, selector| {
+                        Dkim2Error::PublicKeyFetch { i, selector }
+                    })));
+                }
+                Err(err) => {
+                    return Err(Dkim2Result::PermError(key_error(match err {
+                        Error::Dkim(DkimError::PublicKeyRevoked) => {
+                            |i, selector| Dkim2Error::PublicKeyRevoked { i, selector }
+                        }
+                        Error::Dns(DnsError::RecordNotFound(_)) => {
+                            |i, selector| Dkim2Error::PublicKeyMissing { i, selector }
+                        }
+                        Error::Dkim(DkimError::UnsupportedKeyType) => {
+                            |i, selector| Dkim2Error::PublicKeyAlgorithmMismatch { i, selector }
+                        }
+                        _ => |i, selector| Dkim2Error::PublicKeySyntax { i, selector },
+                    })));
+                }
             };
 
-            let header_hash = algorithm.headers_hash(last_headers.iter().copied());
-
-            if header_hash.as_ref() != recorded.header_hash {
-                return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::HeaderHashMismatch(instance.m)))
-                    .into();
-            }
-            if !body_present {
-                break;
-            }
-            let body_hash = algorithm.body_hash(last_body);
-            if body_hash.as_ref() != recorded.body_hash {
-                return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::BodyHashMismatch(instance.m)))
-                    .into();
-            }
-            if instance.m > 1
-                && let Some(recipe) = &instance.recipe
+            if key.has_multiple_records() {
+                return Err(Dkim2Result::PermError(key_error(|i, selector| {
+                    Dkim2Error::PublicKeyMultiple { i, selector }
+                })));
+            } else if matches!(value.a, Algorithm::RsaSha256)
+                && key.p.public_key_bits() < MIN_RSA_BITS
             {
-                match recipe.apply(last_headers, last_body) {
-                    Ok(previous) => {
-                        new_body = previous;
-                        let mut iter = HeaderIterator::new(&new_body);
-                        new_haders = iter.by_ref().collect();
-                        last_body = iter.body();
-                        last_headers = new_haders.as_slice();
-                    }
-                    Err(_) => {
-                        return Dkim2Result::Fail(Error::Dkim2(Dkim2Error::HeaderHashMismatch(
-                            instance.m,
-                        )))
-                        .into();
-                    }
+                return Err(Dkim2Result::PermError(key_error(|i, selector| {
+                    Dkim2Error::PublicKeySyntax { i, selector }
+                })));
+            }
+
+            match key.p.verify_bytes(input, &value.b, value.a) {
+                Ok(()) => {
+                    passed.get_or_insert(value.selector.as_str());
+                }
+                Err(Error::Crypto(CryptoError::IncompatibleAlgorithms)) => {
+                    return Err(Dkim2Result::PermError(key_error(|i, selector| {
+                        Dkim2Error::PublicKeyAlgorithmMismatch { i, selector }
+                    })));
+                }
+                Err(_) => {
+                    failed.get_or_insert(value.selector.as_str());
                 }
             }
         }
 
-        if let Some(error) = flag_violation(signatures, instances, algorithm) {
-            return Dkim2Result::Fail(Error::Dkim2(error)).into();
-        }
-
-        Dkim2Output {
-            result: Dkim2Result::Pass,
-            chain: signatures
-                .iter()
-                .map(|sig_header| ChainLink {
-                    signature: &sig_header.header,
-                    instance: instances
-                        .iter()
-                        .find(|h| h.header.m == sig_header.header.m)
-                        .map(|h| &h.header),
-                    result: Dkim2Result::Pass,
-                    custody_ok: true,
-                })
-                .collect(),
+        match (passed, failed) {
+            (_, None) => Ok(()),
+            (None, Some(failed)) => Err(Dkim2Result::Fail(Error::Dkim2(
+                Dkim2Error::IncorrectSignature {
+                    i: signature.i,
+                    selector: failed.into(),
+                },
+            ))),
+            (Some(passed), Some(failed)) => Err(Dkim2Result::Fail(Error::Dkim2(
+                Dkim2Error::PartialSignatureFailure {
+                    i: signature.i,
+                    passed: passed.into(),
+                    failed: failed.into(),
+                },
+            ))),
         }
     }
 }
 
-fn flag_violation(
+#[cold]
+fn perm_error(error: Dkim2Error) -> Dkim2Result {
+    Dkim2Result::PermError(Error::Dkim2(error))
+}
+
+fn check_numbering(
     signatures: &[Header<'_, Signature>],
     instances: &[Header<'_, MessageInstance>],
-    algorithm: HashAlgorithm,
-) -> Option<Dkim2Error> {
-    let mut protected_m: Option<u32> = None;
-    let mut protected_i: Option<u32> = None;
-    for header in signatures {
+    now: u64,
+) -> Result<(), Dkim2Error> {
+    for (expected, header) in (1u32..).zip(signatures) {
         let signature = &header.header;
-        if signature.flags.contains(&Flag::DoNotModify) {
-            protected_m = Some(protected_m.map_or(signature.m, |m| m.min(signature.m)));
+        if signature.i != expected {
+            return Err(Dkim2Error::SequenceGap(expected));
         }
-        if signature.flags.contains(&Flag::DoNotExplode) {
-            protected_i = Some(protected_i.map_or(signature.i, |i| i.min(signature.i)));
+        if let ChainBinding::Envelope { mail_from, rcpt_to } = &signature.chain
+            && require_reverse_path()
+            && !(is_reverse_path(mail_from) && rcpt_to.iter().all(|r| is_reverse_path(r)))
+        {
+            return Err(Dkim2Error::SignatureSyntax(signature.i));
+        }
+        if now > signature.t && now - signature.t > MAX_AGE {
+            return Err(Dkim2Error::SignatureExpired(signature.i));
+        } else if signature.t > now.saturating_add(MAX_FUTURE) {
+            return Err(Dkim2Error::SignatureFromFuture(signature.i));
         }
     }
 
-    if let Some(protected_m) = protected_m
-        && let Some(reference) = instances
-            .iter()
-            .find(|h| h.header.m == protected_m)
-            .and_then(|h| h.header.hashes.iter().find(|h| h.name == Some(algorithm)))
-            .map(|h| (h.header_hash.as_slice(), h.body_hash.as_slice()))
-    {
-        for header in instances {
-            let instance = &header.header;
-            if instance.m > protected_m
-                && let Some(hashes) = instance.hashes.iter().find(|h| h.name == Some(algorithm))
-                && (hashes.header_hash.as_slice(), hashes.body_hash.as_slice()) != reference
+    for (expected, header) in (1u32..).zip(instances) {
+        if header.header.m != expected {
+            return Err(Dkim2Error::InstanceMissing(expected));
+        }
+    }
+
+    let highest_m = instances.last().map_or(0, |h| h.header.m);
+    let mut previous_m = 0;
+    for header in signatures {
+        let signature = &header.header;
+        if signature.m == 0 || signature.m > highest_m {
+            return Err(Dkim2Error::InstanceMissing(signature.m));
+        } else if signature.m < previous_m {
+            return Err(Dkim2Error::SignatureSyntax(signature.i));
+        }
+        previous_m = signature.m;
+    }
+    if highest_m > previous_m {
+        return Err(Dkim2Error::InstanceNotSigned(highest_m));
+    }
+
+    Ok(())
+}
+
+fn check_envelope<A, R>(top: &Signature, envelope: Envelope<A, R>) -> Result<(), Dkim2Error>
+where
+    A: AsRef<str>,
+    R: IntoIterator<Item: AsRef<str>>,
+{
+    match &top.chain {
+        ChainBinding::Envelope { mail_from, rcpt_to } => {
+            let envelope_from = envelope.mail_from.as_ref();
+            if !address_matches(envelope_from, mail_from) {
+                return Err(Dkim2Error::MailFromMismatch {
+                    i: top.i,
+                    value: envelope_from.into(),
+                });
+            }
+            for rcpt in envelope.rcpt_to {
+                let rcpt = rcpt.as_ref();
+                if !rcpt_to.iter().any(|r| address_matches(rcpt, r)) {
+                    return Err(Dkim2Error::RcptToMismatch {
+                        i: top.i,
+                        value: rcpt.into(),
+                    });
+                }
+            }
+            Ok(())
+        }
+        ChainBinding::NextDomain(_) => Err(Dkim2Error::SignatureTagUnexpected {
+            i: top.i,
+            tag: "nd",
+        }),
+    }
+}
+
+pub(crate) fn check_mail_from_domain(signature: &Signature) -> Result<(), Dkim2Error> {
+    match &signature.chain {
+        ChainBinding::Envelope { mail_from, .. }
+            if !is_null_path(mail_from)
+                && !relaxed_domain_match(local_and_domain(mail_from).1, &signature.d) =>
+        {
+            Err(Dkim2Error::MailFromDomainMismatch(signature.i))
+        }
+        _ => Ok(()),
+    }
+}
+
+pub(crate) fn check_custody(previous: &Signature, current: &Signature) -> Result<(), Dkim2Error> {
+    match (&previous.chain, &current.chain) {
+        (ChainBinding::NextDomain(next_domain), _) => {
+            if domain_eq(next_domain, &current.d) {
+                Ok(())
+            } else {
+                Err(Dkim2Error::NextDomainMismatch(current.i))
+            }
+        }
+        (ChainBinding::Envelope { rcpt_to, .. }, ChainBinding::Envelope { mail_from, .. })
+            if !is_null_path(mail_from) =>
+        {
+            let mail_from_domain = local_and_domain(mail_from).1;
+            if rcpt_to
+                .iter()
+                .any(|rcpt| relaxed_domain_match(mail_from_domain, local_and_domain(rcpt).1))
             {
-                return Some(Dkim2Error::Modified);
+                Ok(())
+            } else {
+                Err(Dkim2Error::CustodyMailFromMismatch {
+                    i: current.i,
+                    previous: previous.i,
+                })
+            }
+        }
+        (ChainBinding::Envelope { rcpt_to, .. }, _) => {
+            if rcpt_to
+                .iter()
+                .any(|rcpt| relaxed_domain_match(local_and_domain(rcpt).1, &current.d))
+            {
+                Ok(())
+            } else {
+                Err(Dkim2Error::CustodyDomainMismatch {
+                    i: current.i,
+                    previous: previous.i,
+                })
+            }
+        }
+    }
+}
+
+#[derive(Default)]
+pub(crate) struct StateHashes {
+    header: Digests,
+    body: Digests,
+}
+
+impl StateHashes {
+    pub(crate) fn check(
+        &mut self,
+        instance: &MessageInstance,
+        headers: &[(&[u8], &[u8])],
+        body: Option<&[u8]>,
+    ) -> Result<(), Dkim2Error> {
+        let mut header_wanted = [false; Dkim2Hash::COUNT];
+        let mut body_wanted = [false; Dkim2Hash::COUNT];
+        for algorithm in instance.hashes.iter().filter_map(|hash| hash.name.known()) {
+            let index = algorithm.index();
+            for (wanted, cached) in [
+                (&mut header_wanted, &self.header),
+                (&mut body_wanted, &self.body),
+            ] {
+                if let (Some(wanted), Some(None)) = (wanted.get_mut(index), cached.get(index)) {
+                    *wanted = true;
+                }
+            }
+        }
+        if body.is_none() {
+            body_wanted = [false; Dkim2Hash::COUNT];
+        }
+        fill(
+            &mut self.header,
+            header_digests(headers.iter().copied(), header_wanted),
+        );
+        if let Some(body) = body.filter(|_| body_wanted.contains(&true)) {
+            fill(&mut self.body, body_digests(body, body_wanted));
+        }
+
+        let mut supported = false;
+        for hash in &instance.hashes {
+            let Some(algorithm) = hash.name.known() else {
+                continue;
+            };
+            supported = true;
+            let index = algorithm.index();
+            if self
+                .header
+                .get(index)
+                .and_then(Option::as_ref)
+                .is_none_or(|computed| computed.as_ref() != hash.header_hash)
+            {
+                return Err(Dkim2Error::HeaderHashMismatch {
+                    m: instance.m,
+                    hash: algorithm,
+                });
+            }
+            if body.is_some()
+                && self
+                    .body
+                    .get(index)
+                    .and_then(Option::as_ref)
+                    .is_none_or(|computed| computed.as_ref() != hash.body_hash)
+            {
+                return Err(Dkim2Error::BodyHashMismatch {
+                    m: instance.m,
+                    hash: algorithm,
+                });
+            }
+        }
+        if supported {
+            Ok(())
+        } else {
+            Err(Dkim2Error::NoValidHash(instance.m))
+        }
+    }
+}
+
+fn fill(cache: &mut Digests, computed: Digests) {
+    for (slot, digest) in cache.iter_mut().zip(computed) {
+        if digest.is_some() {
+            *slot = digest;
+        }
+    }
+}
+
+fn check_instances(
+    message: &AuthenticatedMessage<'_>,
+    signatures: &[Header<'_, Signature>],
+    instances: &[Header<'_, MessageInstance>],
+    body_present: bool,
+) -> Result<(), Dkim2Error> {
+    let mut hashes = StateHashes::default();
+    let mut header_buffer;
+    let mut body_buffer;
+    let mut headers: Cow<'_, [(&[u8], &[u8])]> = Cow::Borrowed(&message.headers);
+    let mut body = body_present.then(|| message.raw_body());
+    let mut from = from_domain(&message.headers);
+
+    for header in instances.iter().rev() {
+        let instance = &header.header;
+        hashes.check(instance, &headers, body)?;
+
+        let Some(recipe) = instance.recipe.as_ref().filter(|_| instance.m > 1) else {
+            continue;
+        };
+        let replaces_from = recipe
+            .headers
+            .iter()
+            .any(|header| header.name.eq_ignore_ascii_case("from"));
+        if replaces_from {
+            let signature = signatures
+                .iter()
+                .map(|h| &h.header)
+                .find(|signature| signature.m >= instance.m)
+                .ok_or(Dkim2Error::InstanceNotSigned(instance.m))?;
+            check_from_authentic(from.as_deref(), signature)?;
+        }
+
+        match (&recipe.body, body) {
+            (BodyRecipe::Steps(steps), Some(current)) => {
+                let mut previous = Vec::with_capacity(current.len());
+                apply_body_recipe(&body_lines(current), steps, &mut previous);
+                body_buffer = previous;
+                body = Some(&body_buffer);
+                hashes.body = Default::default();
+            }
+            (BodyRecipe::Unreconstructable, _) => body = None,
+            (BodyRecipe::None, _) | (BodyRecipe::Steps(_), None) => {}
+        }
+
+        if !recipe.headers.is_empty() {
+            let mut previous = Vec::with_capacity(headers_len(&headers));
+            recipe.apply_headers(&headers, &mut previous);
+            header_buffer = previous;
+            headers = Cow::Owned(HeaderIterator::new(&header_buffer).collect());
+            hashes.header = Default::default();
+            if replaces_from {
+                from = from_domain(&headers);
             }
         }
     }
 
-    if let Some(protected_i) = protected_i
-        && signatures
-            .iter()
-            .any(|h| h.header.i > protected_i && h.header.flags.contains(&Flag::Exploded))
-    {
-        return Some(Dkim2Error::Exploded);
-    }
+    signatures.first().map_or(Ok(()), |first| {
+        check_from_authentic(from.as_deref(), &first.header)
+    })
+}
 
-    None
+pub(crate) fn from_domain(headers: &[(&[u8], &[u8])]) -> Option<String> {
+    let mut from = headers
+        .iter()
+        .filter(|(name, _)| name.trim_ascii().eq_ignore_ascii_case(b"from"));
+    let (Some((_, value)), None) = (from.next(), from.next()) else {
+        return None;
+    };
+    let parsed = HeaderForm::Addresses.parse(value);
+    let list = parsed.value().as_address()?;
+    let mut addresses = list.iter();
+    let (Some(Address::Mailbox(mailbox)), None) = (addresses.next(), addresses.next()) else {
+        return None;
+    };
+    let (local, domain) = mailbox.address()?.split_once('@')?;
+    let valid = !local.is_empty()
+        && local.bytes().chain(domain.bytes()).all(|ch| {
+            !ch.is_ascii_whitespace() && !ch.is_ascii_control() && !b"@<>()[],;:\"".contains(&ch)
+        });
+    let domain = to_a_label(domain);
+    (valid && is_domain(domain.as_bytes())).then(|| domain.into_owned())
+}
+
+fn check_from_authentic(domain: Option<&str>, signature: &Signature) -> Result<(), Dkim2Error> {
+    if is_from_authentic(domain, &signature.d) {
+        Ok(())
+    } else {
+        Err(Dkim2Error::FromNotAuthentic(signature.i))
+    }
+}
+
+pub(crate) fn is_from_authentic(from_domain: Option<&str>, signing_domain: &str) -> bool {
+    from_domain.is_some_and(|domain| relaxed_domain_match(domain, signing_domain))
 }
 
 fn local_and_domain(address: &str) -> (&str, &str) {
@@ -473,12 +753,23 @@ fn local_and_domain(address: &str) -> (&str, &str) {
     }
 }
 
-/// Exact reverse-path or forward-path comparison for the chain-of-custody
-/// check.
+fn is_null_path(path: &str) -> bool {
+    matches!(path.trim(), "<>" | "")
+}
+
+fn domain_eq(a: &str, b: &str) -> bool {
+    if a.is_ascii() && b.is_ascii() {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        to_a_label(a) == to_a_label(b)
+    }
+}
+
+/// Exact reverse-path or forward-path comparison for the envelope check.
 fn address_matches(envelope: &str, signed: &str) -> bool {
     let (el, ed) = local_and_domain(envelope);
     let (sl, sd) = local_and_domain(signed);
-    el == sl && ed.eq_ignore_ascii_case(sd)
+    el == sl && domain_eq(ed, sd)
 }
 
 /// Whether a signed `mf=` or `rt=` value is a well-formed RFC 5321 path.
@@ -501,10 +792,18 @@ fn require_reverse_path() -> bool {
     }
 }
 
-pub(crate) fn relaxed_domain_match(mail_from_domain: &str, signing_domain: &str) -> bool {
-    let mut current = mail_from_domain;
+pub(crate) fn relaxed_domain_match(parameter1: &str, parameter2: &str) -> bool {
+    if parameter1.starts_with('[') || parameter2.starts_with('[') {
+        return false;
+    }
+    let (parameter1, parameter2) = if parameter1.is_ascii() && parameter2.is_ascii() {
+        (Cow::Borrowed(parameter1), Cow::Borrowed(parameter2))
+    } else {
+        (to_a_label(parameter1), to_a_label(parameter2))
+    };
+    let mut current = parameter1.as_ref();
     loop {
-        if current.eq_ignore_ascii_case(signing_domain) {
+        if current.eq_ignore_ascii_case(&parameter2) {
             return true;
         }
         match current.split_once('.') {
@@ -515,88 +814,36 @@ pub(crate) fn relaxed_domain_match(mail_from_domain: &str, signing_domain: &str)
 }
 
 /// Writes the canonicalized `DKIM2-Signature` value with the base64
-/// signature values of the `s=` tag removed (§9.6).
+/// signature values of the `s=` tag removed (§12.8).
 fn strip_and_canonicalize_signature(signature: &[u8], out: &mut Vec<u8>) {
-    out.extend(b"dkim2-signature:".as_slice());
-    let mut iter = signature.iter().peekable();
-    let mut last_ch = b' ';
-    while let Some(&ch) = iter.next() {
-        if !ch.is_ascii_whitespace() {
-            if matches!(ch, b's' | b'S') && matches!(last_ch, b' ' | b';') {
-                let mut found_eq = false;
-                while let Some(next_ch) = iter.peek() {
-                    match next_ch {
-                        b'\t' | b'\n' | b'\x0C' | b'\r' | b' ' => {
-                            iter.next();
-                        }
-                        b'=' => {
-                            found_eq = true;
-                            iter.next();
-                            break;
-                        }
-                        _ => break,
-                    }
-                }
-
-                if found_eq {
+    out.extend_from_slice(b"dkim2-signature:");
+    for (pos, spec) in signature.split(|&ch| ch == b';').enumerate() {
+        if pos > 0 {
+            out.push(b';');
+        }
+        let is_signature_tag = spec
+            .split(|&ch| ch == b'=')
+            .next()
+            .is_some_and(|name| name.trim_ascii() == b"s")
+            && spec.contains(&b'=');
+        if !is_signature_tag {
+            out.extend(spec.iter().filter(|ch| !ch.is_ascii_whitespace()));
+            continue;
+        }
+        for (pos, set) in spec.split(|&ch| ch == b',').enumerate() {
+            if pos > 0 {
+                out.push(b',');
+            }
+            let mut colons = 0;
+            for &ch in set.iter().filter(|ch| !ch.is_ascii_whitespace()) {
+                if colons < 2 {
                     out.push(ch);
-                    out.push(b'=');
-                    'next_signature: loop {
-                        let mut found_colon = false;
-                        for &ch in iter.by_ref() {
-                            match ch {
-                                b'\t' | b'\n' | b'\x0C' | b'\r' | b' ' => {}
-                                b':' => {
-                                    out.push(ch);
-                                    if !found_colon {
-                                        found_colon = true;
-                                    } else {
-                                        break;
-                                    }
-                                }
-                                b';' => {
-                                    out.push(ch);
-                                    break 'next_signature;
-                                }
-                                b',' => {
-                                    out.push(ch);
-                                    continue 'next_signature;
-                                }
-                                _ => {
-                                    out.push(ch);
-                                }
-                            }
-                        }
-
-                        for &ch in iter.by_ref() {
-                            match ch {
-                                b';' => {
-                                    out.push(ch);
-                                    break 'next_signature;
-                                }
-                                b',' => {
-                                    out.push(ch);
-                                    continue 'next_signature;
-                                }
-                                _ => {}
-                            }
-                        }
-
-                        break;
-                    }
-                    last_ch = b' ';
-                    continue;
+                    colons += usize::from(ch == b':');
                 }
             }
-
-            out.push(ch);
-            last_ch = ch;
-        } else {
-            last_ch = b' ';
         }
     }
-
-    out.extend(b"\r\n");
+    out.extend_from_slice(b"\r\n");
 }
 
 #[cfg(test)]
@@ -611,8 +858,8 @@ mod canonicalize_test {
             ("i=1; s=sel:alg:U0lH", "dkim2-signature:i=1;s=sel:alg:\r\n"),
             ("s=a:b:U0lH,c:d:WkZa;", "dkim2-signature:s=a:b:,c:d:;\r\n"),
             (
-                "s=sel:alg:U0lH; f=donotmodify;",
-                "dkim2-signature:s=sel:alg:;f=donotmodify;\r\n",
+                "s=sel:alg:U0lH; f=feedback;",
+                "dkim2-signature:s=sel:alg:;f=feedback;\r\n",
             ),
             (
                 "i=1;\r\n m=1;\r\n\ts=sel:alg:U0\r\n lH;",
@@ -631,7 +878,6 @@ mod canonicalize_test {
             ),
             ("", "dkim2-signature:\r\n"),
             ("d=as; s=a:b:CC;", "dkim2-signature:d=as;s=a:b:;\r\n"),
-            ("S=sel:alg:CC;", "dkim2-signature:S=sel:alg:;\r\n"),
             (
                 "s=badset; n=a:b:c;",
                 "dkim2-signature:s=badset;n=a:b:c;\r\n",
@@ -648,6 +894,12 @@ mod canonicalize_test {
                 "dkim2-signature:rt=QQs=,WWW;s=a:b:;\r\n",
             ),
             ("s=se l:al g:CC;", "dkim2-signature:s=sel:alg:;\r\n"),
+            ("n= s=a:b:c;", "dkim2-signature:n=s=a:b:c;\r\n"),
+            (
+                "x=1 s=a:b:c; s=a:b:c;",
+                "dkim2-signature:x=1s=a:b:c;s=a:b:;\r\n",
+            ),
+            ("\r\n\ts\r\n =a:b:c", "dkim2-signature:s=a:b:\r\n"),
         ] {
             let mut out = Vec::new();
             super::strip_and_canonicalize_signature(value.as_bytes(), &mut out);

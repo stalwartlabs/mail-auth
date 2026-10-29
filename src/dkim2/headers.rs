@@ -9,7 +9,7 @@
 //! The inherent `write` methods emit a header field on one line. The
 //! [`HeaderWriter`] implementations fold long header fields, which does not
 //! change the signed bytes because DKIM2 canonicalization removes all
-//! whitespace (§9.6). The [`Display`] implementations format the value
+//! whitespace (§12.8). The [`Display`] implementations format the value
 //! without the field name.
 
 use super::{ChainBinding, MessageInstance, Signature, SignatureValue};
@@ -18,6 +18,8 @@ use crate::{
     utf8::to_str_lossy,
 };
 use std::fmt::{Display, Formatter};
+
+const RECIPE_CAPACITY: usize = 256;
 
 impl SignatureValue {
     fn write(&self, writer: &mut impl Writer, empty: bool) {
@@ -106,7 +108,7 @@ impl MessageInstance {
             if pos > 0 {
                 writer.write(b",");
             }
-            writer.write(hash.name.map(|n| n.name().as_bytes()).unwrap_or(b""));
+            writer.write(hash.name.as_str().as_bytes());
             writer.write(b":");
             writer.write_base64(&hash.header_hash);
             writer.write(b":");
@@ -114,8 +116,8 @@ impl MessageInstance {
         }
 
         if let Some(recipe) = &self.recipe {
-            let mut json = Vec::new();
-            if recipe.to_json(&mut json).is_ok() {
+            let mut json = Vec::with_capacity(RECIPE_CAPACITY);
+            if recipe.write_json(&mut json).is_ok() {
                 writer.write(b"; r=");
                 writer.write_base64(&json);
             }
@@ -125,7 +127,9 @@ impl MessageInstance {
 
     /// Writes the complete `Message-Instance` header field on one line,
     /// terminated by CRLF. The recipe, if any, is written as base64-encoded
-    /// JSON in the `r=` tag, and omitted if it cannot be serialized.
+    /// JSON in the `r=` tag as it is, including one accepted leniently when
+    /// parsed; the signers check [`Recipe::validate`](super::Recipe::validate)
+    /// on recipes they generate before signing.
     pub fn write(&self, writer: &mut impl Writer) {
         writer.write(b"Message-Instance: ");
         self.write_value(writer);
@@ -163,9 +167,10 @@ impl Display for MessageInstance {
 
 #[cfg(test)]
 mod test {
-    use crate::crypto::{Algorithm, HashAlgorithm};
+    use crate::crypto::Algorithm;
     use crate::dkim2::{
-        ChainBinding, Flag, MessageHash, MessageInstance, Signature, SignatureValue,
+        ChainBinding, Dkim2Hash, Flag, HashName, MessageHash, MessageInstance, Signature,
+        SignatureValue,
     };
     use crate::headers::HeaderWriter;
 
@@ -180,7 +185,7 @@ mod test {
     }
 
     /// The signature canonicalization unfolds and then deletes all
-    /// whitespace (§9.6), so a folded header field and its unfolded form must
+    /// whitespace (§12.8), so a folded header field and its unfolded form must
     /// reduce to identical bytes. Also asserts that no physical line exceeds
     /// the fold limit (excluding the single leading fold tab).
     fn assert_fold_is_transparent(field_name: &[u8], folded: &[u8], unfolded: &[u8]) {
@@ -282,7 +287,7 @@ mod test {
                 ],
             },
             n: Some("banana".to_string()),
-            flags: vec![Flag::Feedback, Flag::DoNotModify],
+            flags: vec![Flag::Feedback, Flag::Exploded],
         }
     }
 
@@ -291,14 +296,19 @@ mod test {
             m: 1,
             hashes: vec![
                 MessageHash {
-                    name: Some(HashAlgorithm::Sha256),
+                    name: Dkim2Hash::Sha256.into(),
                     header_hash: (0u8..32).collect(),
                     body_hash: (32u8..64).collect(),
                 },
                 MessageHash {
-                    name: Some(HashAlgorithm::Sha256),
-                    header_hash: (64u8..96).collect(),
-                    body_hash: (96u8..128).collect(),
+                    name: Dkim2Hash::Sha512.into(),
+                    header_hash: (64u8..128).collect(),
+                    body_hash: (128u8..192).collect(),
+                },
+                MessageHash {
+                    name: HashName::Unknown("sha3-256".into()),
+                    header_hash: (0u8..32).collect(),
+                    body_hash: (32u8..64).collect(),
                 },
             ],
             recipe: None,
@@ -350,7 +360,7 @@ mod test {
         let mut unfolded = Vec::new();
         instance.write_value(&mut unfolded);
         unfolded.extend_from_slice(b"\r\n");
-        dump_folded("Message-Instance (large: 2 sha256 hash sets)", &folded);
+        dump_folded("Message-Instance (large: sha256, sha512, unknown)", &folded);
         assert_fold_is_transparent(b"Message-Instance: ", &folded, &unfolded);
 
         let value = value_of(&folded, b"Message-Instance: ");
@@ -414,12 +424,12 @@ mod test {
     fn flags_emitted_in_order() {
         let mut buf = Vec::new();
         Signature {
-            flags: vec![Flag::DoNotModify, Flag::FeedHere],
+            flags: vec![Flag::Exploded, Flag::FeedHere],
             ..sample()
         }
         .write_value(&mut buf, false);
         let out = String::from_utf8(buf).unwrap();
-        assert!(out.contains("f=donotmodify,feedhere;"), "{out}");
+        assert!(out.contains("f=exploded,feedhere;"), "{out}");
     }
 
     #[test]
