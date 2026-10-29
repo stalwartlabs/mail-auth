@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.14.2] - Unreleased
+
+### Fixed
+- DKIM: relaxed body canonicalization now ignores whitespace-only lines at the end of the body (RFC 6376, Section 3.4.4), which produced a `bh=` that other implementations rejected (#62).
+
 ## [0.14.1] - 2026-10-26
 
 ### Fixed
