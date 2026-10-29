@@ -264,35 +264,15 @@ impl CanonicalState {
             }
 
             let mut consumed = 0;
-            let mut last_ch = self.last_ch;
-            let mut breaks = self.crlf_seq;
-            let mut pending = 0;
-            let mut has_wsp = false;
 
             for &ch in tail {
                 match ch {
-                    b'\n' => pending += 1,
-                    b' ' | b'\t' => {
-                        breaks += pending;
-                        pending = 0;
-                        has_wsp = true;
-                    }
-                    b'\r' => {}
+                    b'\n' => self.crlf_seq += 1,
+                    b' ' | b'\t' | b'\r' => {}
                     _ => break,
                 }
                 consumed += 1;
-                last_ch = ch;
-            }
-
-            if consumed != 0 {
-                if has_wsp {
-                    write_crlf_run(writer, breaks);
-                    self.crlf_seq = pending;
-                    self.is_empty = false;
-                } else {
-                    self.crlf_seq = breaks + pending;
-                }
-                self.last_ch = last_ch;
+                self.last_ch = ch;
             }
 
             rest = &tail[consumed..];
@@ -576,7 +556,7 @@ mod test {
     use crate::{
         crypto::{HashContext, HashImpl, Sha256},
         dkim::Canonicalization,
-        headers::{HeaderIterator, Writable},
+        headers::{HeaderIterator, Writable, Writer},
     };
     use encodify::base64;
 
@@ -806,6 +786,136 @@ mod test {
                 split_hash.as_ref(),
                 "Split CRLF mismatch for {:?} canonicalization",
                 canonicalization
+            );
+        }
+    }
+
+    // Whitespace-only trailing lines are dropped by relaxed body canonicalization (issue #62).
+    #[test]
+    fn relaxed_body_whitespace_only_trailing_lines() {
+        for (body, expected) in [
+            ("</html>\r\n    \r\n", "</html>\r\n"),
+            ("</html>\r\n\t\r\n", "</html>\r\n"),
+            ("</html>\r\n \t \t\r\n", "</html>\r\n"),
+            ("a\r\n  \r\n\t\r\n \t \r\n", "a\r\n"),
+            ("a\r\n  \r\n\r\n  \r\n\r\n", "a\r\n"),
+            ("a \t \r\n \r\n", "a\r\n"),
+            ("a\r\n  b \r\n  \r\n", "a\r\n b\r\n"),
+            ("a\r\n  ", "a\r\n"),
+            ("   \r\n", ""),
+            (" \t \r\n\r\n\t\r\n", ""),
+            ("a\r\n  \r\nb\r\n", "a\r\n\r\nb\r\n"),
+            ("a\r\n \r\n b\r\n", "a\r\n\r\n b\r\n"),
+            ("\r\n  \r\nX", "\r\n\r\nX\r\n"),
+        ] {
+            assert_relaxed_body(body.as_bytes(), expected.as_bytes());
+        }
+    }
+
+    // The issue #62 body hashes to the bh= value computed by dkimpy.
+    #[test]
+    fn relaxed_body_hash_issue_62() {
+        let body = concat!(
+            "<!DOCTYPE html>\r\n",
+            "<html>\r\n",
+            "  <head>\r\n",
+            "    <meta charset=\"UTF-8\">\r\n",
+            "    <title>Your order has shipped</title>\r\n",
+            "  </head>\r\n",
+            "  <body>\r\n",
+            "    <p>Hello World</a></p>\r\n",
+            "    <p>Kind regards,<br>Example Shop</p>\r\n",
+            "  </body>\r\n",
+            "</html>\r\n",
+            "    \r\n",
+        );
+
+        let mut hasher = Sha256::hasher();
+        CanonicalBody {
+            canonicalization: Canonicalization::Relaxed,
+            body: body.as_bytes(),
+        }
+        .write(&mut hasher);
+
+        assert_eq!(
+            base64::STANDARD.encode(hasher.complete()),
+            "mthm2ruDPxvVp7DFDs/wRVXW+DzuZhdraVTNDuO1+N0="
+        );
+    }
+
+    // Relaxed body canonicalization matches a line-based RFC 6376 reference on every short CRLF body.
+    #[test]
+    fn relaxed_body_matches_reference() {
+        const TOKENS: [&[u8]; 4] = [b"a", b" ", b"\t", b"\r\n"];
+        const MAX_TOKENS: u32 = 7;
+
+        let mut body = Vec::new();
+        for len in 0..=MAX_TOKENS {
+            for mut index in 0..TOKENS.len().pow(len) {
+                body.clear();
+                for _ in 0..len {
+                    body.extend_from_slice(TOKENS[index % TOKENS.len()]);
+                    index /= TOKENS.len();
+                }
+                assert_relaxed_body(&body, &reference_relaxed_body(&body));
+            }
+        }
+    }
+
+    fn reference_relaxed_body(body: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut lines = body.split(|&ch| ch == b'\n').peekable();
+        while let Some(line) = lines.next() {
+            let line = line.strip_suffix(b"\r").unwrap_or(line);
+            if lines.peek().is_none() && line.is_empty() {
+                break;
+            }
+            let mut in_wsp = false;
+            for &ch in line {
+                if matches!(ch, b' ' | b'\t') {
+                    in_wsp = true;
+                } else {
+                    if in_wsp {
+                        out.push(b' ');
+                        in_wsp = false;
+                    }
+                    out.push(ch);
+                }
+            }
+            out.extend_from_slice(b"\r\n");
+        }
+        while out.ends_with(b"\r\n\r\n") {
+            out.truncate(out.len() - 2);
+        }
+        if out == b"\r\n" {
+            out.clear();
+        }
+        out
+    }
+
+    fn assert_relaxed_body(body: &[u8], expected: &[u8]) {
+        let mut canonical = Vec::new();
+        CanonicalBody {
+            canonicalization: Canonicalization::Relaxed,
+            body,
+        }
+        .write(&mut canonical);
+        assert_eq!(canonical, expected, "CanonicalBody mismatch for {body:?}");
+
+        let mut expected_hasher = Sha256::hasher();
+        expected_hasher.write(expected);
+        let expected_hash = expected_hasher.complete();
+
+        for chunk_size in 1..=body.len() {
+            let mut body_hasher = BodyHasher::new(Sha256::hasher(), Canonicalization::Relaxed, 0);
+            for chunk in body.chunks(chunk_size) {
+                body_hasher.write(chunk);
+            }
+            let (actual_hasher, _) = body_hasher.finish();
+            assert_eq!(
+                actual_hasher.complete().as_ref(),
+                expected_hash.as_ref(),
+                "BodyHasher (chunk size {chunk_size}) mismatch for {body:?}"
             );
         }
     }
