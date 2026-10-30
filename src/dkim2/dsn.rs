@@ -4,14 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! Authentication of inbound DKIM2-signed delivery status notifications
-//! (§16.3) through [`MessageAuthenticator::verify_dkim2_dsn`].
+//! DKIM2 delivery status notifications: inbound authentication (§16.4) and
+//! outbound signing domain and returned message helpers (§16.2, §16.3).
 
 use super::{
-    ChainBinding, Dkim2Result, Signature, Verification, sign::Envelope,
+    ChainBinding, Dkim2Result, Recipe, Signature, Verification, sign::Envelope,
     verify::relaxed_domain_match,
 };
 use crate::dns::DnsCache;
+use crate::headers::HeaderIterator;
 use crate::{
     AuthenticatedMessage, MessageAuthenticator, Parameters, ResolverCache, TxtRecord,
     dkim2::sign::now, dns::NoCache,
@@ -197,6 +198,78 @@ impl AuthenticatedMessage<'_> {
     pub fn dkim2_return_path(&self) -> Option<&str> {
         dsn_return_path(self.dkim2_signatures.iter().map(|header| &header.header))
     }
+
+    /// Returns the domains that may sign a DSN about this message (§16.2).
+    pub fn dkim2_dsn_domains(&self) -> impl Iterator<Item = &str> {
+        top_signature(self)
+            .map_or(&[][..], |(_, _, rcpt_to)| rcpt_to)
+            .iter()
+            .map(|rcpt| domain_of(rcpt))
+            .filter(|domain| !domain.starts_with('['))
+            .flat_map(|domain| {
+                std::iter::successors(Some(domain), |domain| {
+                    domain.split_once('.').map(|(_, parent)| parent)
+                })
+                .filter(|domain| domain.contains('.'))
+            })
+    }
+
+    /// Returns `true` if `domain` may sign a DSN about this message (§16.2).
+    pub fn dkim2_dsn_aligned(&self, domain: &str) -> bool {
+        top_signature(self).is_none_or(|(_, _, rcpt_to)| {
+            rcpt_to.is_empty()
+                || rcpt_to
+                    .iter()
+                    .any(|rcpt| relaxed_domain_match(domain_of(rcpt), domain))
+        })
+    }
+
+    /// Returns the header block as it was before the last `hops` DKIM2
+    /// signers handled it, for the returned part of a DSN (§16.3).
+    pub fn dkim2_arrival_headers(&self, hops: usize) -> Vec<u8> {
+        let signatures = &self.dkim2_signatures;
+        let kept = signatures
+            .get(..signatures.len().saturating_sub(hops))
+            .unwrap_or_default();
+        let arrival_m = kept.last().map_or(0, |signature| signature.header.m);
+        let (older, newer) = self.dkim2_instances.split_at(
+            self.dkim2_instances
+                .partition_point(|instance| instance.header.m <= arrival_m),
+        );
+
+        let mut out = Vec::with_capacity(self.raw_headers().len());
+        for (name, value) in kept
+            .iter()
+            .map(|header| (header.name, header.value))
+            .chain(older.iter().map(|header| (header.name, header.value)))
+        {
+            out.extend_from_slice(name);
+            out.push(b':');
+            out.extend_from_slice(value);
+        }
+
+        let mut undone: Option<Vec<u8>> = None;
+        for recipe in newer
+            .iter()
+            .rev()
+            .filter_map(|instance| instance.header.recipe.as_ref())
+        {
+            let mut previous = Vec::with_capacity(self.raw_headers().len());
+            match &undone {
+                Some(block) => recipe.apply_headers(
+                    &HeaderIterator::new(block).collect::<Vec<_>>(),
+                    &mut previous,
+                ),
+                None => recipe.apply_headers(self.headers(), &mut previous),
+            }
+            undone = Some(previous);
+        }
+        match undone {
+            Some(block) => out.extend_from_slice(&block),
+            None => Recipe::default().apply_headers(self.headers(), &mut out),
+        }
+        out
+    }
 }
 
 fn dsn_return_path<'x>(signatures: impl Iterator<Item = &'x Signature>) -> Option<&'x str> {
@@ -214,7 +287,7 @@ fn dsn_return_path<'x>(signatures: impl Iterator<Item = &'x Signature>) -> Optio
 
 impl MessageAuthenticator {
     /// Authenticates an inbound DKIM2-signed delivery status notification
-    /// (§16.3).
+    /// (§16.4).
     ///
     /// `params` wraps the [`Dkim2Dsn`], optionally with a DNS cache (see
     /// [`Parameters`]). `envelope` is the SMTP envelope the DSN was received
@@ -399,9 +472,9 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput, Signature, dsn_return_path};
+    use super::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput, Recipe, Signature, dsn_return_path};
     use crate::{
-        DnsError, Error, MessageAuthenticator,
+        AuthenticatedMessage, DnsError, Error, MessageAuthenticator,
         crypto::Ed25519Key,
         dkim::DomainKey,
         dkim2::{ChainBinding, Dkim2Signer, Envelope, Hop},
@@ -574,6 +647,170 @@ mod test {
             dsn_return_path(std::iter::once(&signature)),
             Some("sender@test1.dkim2.com")
         );
+    }
+
+    fn forwarded(modify_subject: bool) -> Vec<u8> {
+        let returned = signed_returned();
+        let text = String::from_utf8(returned.clone()).unwrap();
+        let modified = if modify_subject {
+            text.replacen("Subject: Hello", "Subject: [fwd] Hello", 1)
+        } else {
+            text
+        };
+        let signed = Dkim2Signer::from_key(load_key("test2.dkim2.com", "ed25519"))
+            .domain("test2.dkim2.com")
+            .selector("ed25519")
+            .out_of_band_arrangement()
+            .sign_revised_at(
+                returned.as_slice(),
+                modified.as_bytes(),
+                Hop::real("user@test2.dkim2.com", ["final@example.com"]),
+                None,
+                T,
+            )
+            .unwrap();
+        let mut out = signed.to_header().into_bytes();
+        out.extend_from_slice(modified.as_bytes());
+        out
+    }
+
+    // Candidate DSN signing domains and the §16.2 alignment check follow the top rt=.
+    #[test]
+    fn dsn_signing_domains() {
+        let returned = signed_returned();
+        let message = AuthenticatedMessage::parse(&returned).unwrap();
+        assert_eq!(
+            message.dkim2_dsn_domains().collect::<Vec<_>>(),
+            ["test2.dkim2.com", "dkim2.com"]
+        );
+        assert!(message.dkim2_dsn_aligned("test2.dkim2.com"));
+        assert!(message.dkim2_dsn_aligned("DKIM2.com"));
+        assert!(!message.dkim2_dsn_aligned("sub.test2.dkim2.com"));
+        assert!(!message.dkim2_dsn_aligned("test1.dkim2.com"));
+
+        let unsigned = AuthenticatedMessage::parse(RETURNED_PLAIN.as_bytes()).unwrap();
+        assert_eq!(unsigned.dkim2_dsn_domains().count(), 0);
+        assert!(unsigned.dkim2_dsn_aligned("anything.example"));
+    }
+
+    // Dropping our hop restores the previous hop's DKIM2 fields and its signed headers.
+    #[test]
+    fn dsn_arrival_headers() {
+        let previous = signed_returned();
+        let previous = AuthenticatedMessage::parse(&previous).unwrap();
+        let mut expected = Vec::new();
+        Recipe::default().apply_headers(previous.headers(), &mut expected);
+
+        for modify_subject in [false, true] {
+            let forwarded = forwarded(modify_subject);
+            let message = AuthenticatedMessage::parse(&forwarded).unwrap();
+            assert_eq!(message.dkim2_signatures().len(), 2);
+
+            let arrival = message.dkim2_arrival_headers(1);
+            assert!(arrival.ends_with(&expected), "{modify_subject}");
+            let arrival = AuthenticatedMessage::parse(&arrival).unwrap();
+            assert_eq!(
+                arrival
+                    .dkim2_signatures()
+                    .iter()
+                    .map(|signature| signature.header.i)
+                    .collect::<Vec<_>>(),
+                [1]
+            );
+            assert_eq!(
+                arrival
+                    .dkim2_instances()
+                    .iter()
+                    .map(|instance| instance.header.m)
+                    .collect::<Vec<_>>(),
+                [1]
+            );
+            assert!(arrival.dkim2_dsn_aligned("test2.dkim2.com"));
+
+            let unchanged = AuthenticatedMessage::parse(&forwarded).unwrap();
+            let all = unchanged.dkim2_arrival_headers(0);
+            let all = AuthenticatedMessage::parse(&all).unwrap();
+            assert_eq!(all.dkim2_signatures().len(), 2);
+            assert_eq!(
+                all.dkim2_instances().len(),
+                if modify_subject { 2 } else { 1 }
+            );
+
+            let none = unchanged.dkim2_arrival_headers(2);
+            let none = AuthenticatedMessage::parse(&none).unwrap();
+            assert!(none.dkim2_signatures().is_empty());
+            assert!(none.dkim2_instances().is_empty());
+            assert!(
+                none.headers()
+                    .iter()
+                    .any(|(name, _)| name.eq_ignore_ascii_case(b"From"))
+            );
+        }
+    }
+
+    // Two consecutive own hops, each editing a header, are both undone and the result verifies at the first hop.
+    #[tokio::test]
+    async fn verify_dsn_with_two_own_hops() {
+        let returned = signed_returned();
+        let hop =
+            |message: &[u8], domain: &str, from: &str, to: &str, find: &str, replace: &str| {
+                let text = String::from_utf8(message.to_vec()).unwrap();
+                let modified = text.replacen(find, replace, 1);
+                let signed = Dkim2Signer::from_key(load_key(domain, "ed25519"))
+                    .domain(domain)
+                    .selector("ed25519")
+                    .out_of_band_arrangement()
+                    .sign_revised_at(message, modified.as_bytes(), Hop::real(from, [to]), None, T)
+                    .unwrap();
+                let mut out = signed.to_header().into_bytes();
+                out.extend_from_slice(modified.as_bytes());
+                out
+            };
+        let hop2 = hop(
+            &returned,
+            "test2.dkim2.com",
+            "user@test2.dkim2.com",
+            "relay@test3.dkim2.com",
+            "Subject: Hello",
+            "Subject: [list] Hello",
+        );
+        let hop3 = hop(
+            &hop2,
+            "test3.dkim2.com",
+            "relay@test3.dkim2.com",
+            "final@example.com",
+            "Subject: [list] Hello",
+            "Subject: [list] [fwd] Hello",
+        );
+        let message = AuthenticatedMessage::parse(&hop3).unwrap();
+        assert_eq!(message.dkim2_signatures().len(), 3);
+        assert_eq!(message.dkim2_instances().len(), 3);
+
+        let arrival = message.dkim2_arrival_headers(2);
+        assert!(!String::from_utf8_lossy(&arrival).contains("[list]"));
+        let dsn = make_dsn(&arrival, "text/rfc822-headers", true);
+        let output = verify(&dsn).await;
+        assert!(output.is_ok(), "{output:?}");
+    }
+
+    // A DSN carrying the rebuilt arrival headers passes §16.4 at the previous hop; the raw ones do not.
+    #[tokio::test]
+    async fn verify_dsn_with_arrival_headers() {
+        for modify_subject in [false, true] {
+            let forwarded = forwarded(modify_subject);
+            let message = AuthenticatedMessage::parse(&forwarded).unwrap();
+
+            let dsn = make_dsn(
+                &message.dkim2_arrival_headers(1),
+                "text/rfc822-headers",
+                true,
+            );
+            let output = verify(&dsn).await;
+            assert!(output.is_ok(), "{modify_subject}: {output:?}");
+
+            let dsn = make_dsn(&headers_only(&forwarded), "text/rfc822-headers", true);
+            assert_eq!(verify(&dsn).await, Err(Dkim2DsnFailure::NotAligned));
+        }
     }
 
     #[tokio::test]

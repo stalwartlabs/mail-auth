@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.15.1] - 2026-10-30
+
+### Added
+- DKIM2: `AuthenticatedMessage::dkim2_dsn_domains` and `dkim2_dsn_aligned` choose and check the `d=` of an outbound DSN (§16.2).
+- DKIM2: `AuthenticatedMessage::dkim2_arrival_headers` rebuilds the returned header block of a DSN as it was before the last hops (§16.3).
+
 ## [0.15.0] - 2026-10-30
 
 ### Added
