@@ -9,8 +9,8 @@ use super::{
 };
 use crate::dkim2::{ChainBinding, Dkim2Output, Dkim2Signed, Verification};
 use crate::{
-    AuthenticatedMessage, Dkim2Result, Error, MessageAuthenticator,
-    crypto::{DkimKey, Ed25519Key, MlDsa44Ed25519Key, RsaKey, Sha256, SigningKey},
+    AuthenticatedMessage, Dkim2Result, DnsError, Error, MessageAuthenticator,
+    crypto::{DkimKey, Ed25519Key, MlDsa44Key, RsaKey, Sha256, SigningKey},
     dkim::{DkimError, DomainKey},
     dkim2::{Dkim2Error, Dkim2Hash, Dkim2Signer, Flag, Hop},
     dns::{TxtRecord, cache::test::DummyCaches},
@@ -81,8 +81,8 @@ fn load_rsa(domain: &str, selector: &str) -> RsaKey<Sha256> {
         .unwrap()
 }
 
-fn load_mldsa() -> MlDsa44Ed25519Key {
-    MlDsa44Ed25519Key::from_pkcs8_der(&pkcs8("test1.dkim2.com", "mldsa44")).unwrap()
+fn load_mldsa() -> MlDsa44Key {
+    MlDsa44Key::from_pkcs8_der(&pkcs8("test1.dkim2.com", "mldsa44")).unwrap()
 }
 
 fn signer(domain: &str) -> Dkim2Signer<Ready> {
@@ -362,7 +362,7 @@ async fn signer_requires_validity_proof() {
             signer("test2.dkim2.com")
                 .sign_at(&message1, hop2(), verified, NOW)
                 .unwrap_err(),
-            Error::Dkim2(Dkim2Error::NotValidlySigned),
+            Error::Dkim2(Dkim2Error::NotFullyVerified),
             "{label}"
         );
     }
@@ -489,10 +489,24 @@ async fn signer_local_checks() {
             )),
         Dkim2Error::DuplicateSelector(1)
     );
+    let same_algorithm = (1..8).fold(signer("test1.dkim2.com"), |signer, n| {
+        signer.additional_key(load_ed25519("test1.dkim2.com", "ed25519"), format!("s{n}"))
+    });
+    assert!(
+        same_algorithm
+            .sign_at(
+                &original,
+                Hop::real("sender@test1.dkim2.com", ["a@example.com"]),
+                None,
+                NOW
+            )
+            .is_ok()
+    );
     assert_eq!(
-        err(signer("test1.dkim2.com")
-            .additional_key(load_ed25519("test1.dkim2.com", "ed25519"), "two")
-            .additional_key(load_ed25519("test1.dkim2.com", "ed25519"), "three")
+        err((1..9)
+            .fold(signer("test1.dkim2.com"), |signer, n| {
+                signer.hybrid_key(load_ed25519("test1.dkim2.com", "ed25519"), format!("s{n}"))
+            })
             .sign_at(
                 &original,
                 Hop::real("sender@test1.dkim2.com", ["a@example.com"]),
@@ -574,7 +588,7 @@ async fn sign_then_verify_imaginary_hop() {
                 NOW,
             )
             .unwrap_err(),
-        Error::Dkim2(Dkim2Error::NotValidlySigned)
+        Error::Dkim2(Dkim2Error::NotFullyVerified)
     );
     let sign3 = signer("test3.dkim2.com")
         .out_of_band_arrangement()
@@ -599,7 +613,7 @@ async fn sign_then_verify_imaginary_hop() {
     assert_eq!(output.chain().len(), 3);
 }
 
-// -07 §7.1: an nd= signature matches when the previous rt= domain is d= or a subdomain of it.
+// §7.1: an nd= signature matches when the previous rt= domain is d= or a subdomain of it.
 #[tokio::test]
 async fn verify_imaginary_hop_relaxed_direction() {
     let original = original();
@@ -684,11 +698,11 @@ async fn verify_rejects_imaginary_hop_from_subdomain() {
             &["recipient@example.com"]
         )
         .await,
-        perm(Dkim2Error::CustodyDomainMismatch { i: 2, previous: 1 })
+        fail(Dkim2Error::CustodyDomainMismatch { i: 2, previous: 1 })
     );
 }
 
-// -07 §7.1: a null mf= mid-chain matches the previous rt= domain against d=.
+// §7.1: a null mf= mid-chain matches the previous rt= domain against d=.
 #[tokio::test]
 async fn verify_null_mail_from_mid_chain() {
     let original = original();
@@ -744,18 +758,18 @@ async fn verify_null_mail_from_mid_chain() {
     );
     assert_eq!(
         verify_raw(&message2, "<>", &["recipient@example.com"]).await,
-        perm(Dkim2Error::CustodyDomainMismatch { i: 2, previous: 1 })
+        fail(Dkim2Error::CustodyDomainMismatch { i: 2, previous: 1 })
     );
 }
 
-// -07 §14.3: timestamps more than one day ahead are rejected.
+// §14.3: timestamps more than one day ahead are rejected.
 #[tokio::test]
 async fn verify_rejects_future_timestamp() {
     let original = original();
     for (t, expected) in [
         (NOW + DAY - 1, Dkim2Result::Pass),
-        (NOW + DAY + 1, perm(Dkim2Error::SignatureFromFuture(1))),
-        (NOW - 15 * DAY, perm(Dkim2Error::SignatureExpired(1))),
+        (NOW + DAY + 1, fail(Dkim2Error::SignatureFromFuture(1))),
+        (NOW - 15 * DAY, fail(Dkim2Error::SignatureExpired(1))),
     ] {
         let message = prepend(
             &signer("test1.dkim2.com")
@@ -781,7 +795,7 @@ async fn verify_rejects_future_timestamp() {
     }
 }
 
-// -07 §11: the From domain must relaxed-match d= of the signature that covers it.
+// §11: the From domain must relaxed-match d= of the signature that covers it.
 #[tokio::test]
 async fn verify_from_is_authentic() {
     let foreign = b"From: someone@other.example\r\nSubject: x\r\n\r\nbody\r\n";
@@ -816,7 +830,7 @@ async fn verify_from_is_authentic() {
             &["recipient@example.com"]
         )
         .await,
-        perm(Dkim2Error::FromNotAuthentic(1))
+        fail(Dkim2Error::FromNotAuthentic(1))
     );
     let parsed = AuthenticatedMessage::parse(&message).unwrap();
     assert_eq!(
@@ -835,9 +849,9 @@ async fn verify_from_is_authentic() {
         ("sender@mail.test1.dkim2.com", Dkim2Result::Pass),
         (
             "a@test1.dkim2.com, b@test1.dkim2.com",
-            perm(Dkim2Error::FromNotAuthentic(1)),
+            fail(Dkim2Error::FromNotAuthentic(1)),
         ),
-        ("a@[192.0.2.1]", perm(Dkim2Error::FromNotAuthentic(1))),
+        ("a@[192.0.2.1]", fail(Dkim2Error::FromNotAuthentic(1))),
     ] {
         let raw = format!("From: {from}\r\nSubject: x\r\n\r\nbody\r\n");
         let message = prepend(
@@ -906,7 +920,7 @@ async fn verify_rewritten_from() {
     let _lenient = crate::dkim2::sign::test_authentic_from::LenientFrom::new();
     for (new_from, expected) in [
         ("list@test2.dkim2.com", Dkim2Result::Pass),
-        ("list@other.example", perm(Dkim2Error::FromNotAuthentic(2))),
+        ("list@other.example", fail(Dkim2Error::FromNotAuthentic(2))),
     ] {
         let modified = text.replace("From: sender@test1.dkim2.com", &format!("From: {new_from}"));
         let signed = signer("test2.dkim2.com")
@@ -987,15 +1001,17 @@ async fn verify_sha512_hashes() {
     }
 }
 
-// The composite algorithm signs and verifies alone and next to Ed25519.
+// ML-DSA-44 signs and verifies alone, as an alternative to Ed25519 and as a hybrid with it.
 #[tokio::test]
-async fn sign_then_verify_mldsa44_ed25519() {
+async fn sign_then_verify_mldsa44() {
     let original = original();
     for signer in [
         signer_with(load_mldsa(), "test1.dkim2.com", "mldsa44"),
         signer_with(load_mldsa(), "test1.dkim2.com", "mldsa44")
             .additional_key(load_ed25519("test1.dkim2.com", "ed25519"), "ed25519")
             .hashes([Dkim2Hash::Sha512]),
+        signer_with(load_mldsa(), "test1.dkim2.com", "mldsa44")
+            .hybrid_key(load_ed25519("test1.dkim2.com", "ed25519"), "ed25519"),
     ] {
         let signed = signer
             .sign_at(
@@ -1005,7 +1021,7 @@ async fn sign_then_verify_mldsa44_ed25519() {
                 NOW,
             )
             .unwrap();
-        assert_eq!(signed.signature.s[0].b.len(), 2484);
+        assert_eq!(signed.signature.s[0].b.len(), 2420);
         let message = prepend(&signed, &original);
         assert_eq!(
             verify_raw(
@@ -1019,54 +1035,77 @@ async fn sign_then_verify_mldsa44_ed25519() {
     }
 }
 
-// -07 §14.6: every s= entry is checked and the failing selector is reported.
+// §14.6: "|" groups pass if any group passes, "," groups only if every entry passes.
 #[tokio::test]
-async fn verify_reports_failing_selectors() {
+async fn verify_signature_groups() {
     let original = original();
-    let signed = signer("test1.dkim2.com")
-        .additional_key(load_rsa("test1.dkim2.com", "sel1"), "sel1")
-        .sign_at(
-            &original,
-            Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]),
-            None,
-            NOW,
-        )
-        .unwrap();
-    let text = String::from_utf8(prepend(&signed, &original)).unwrap();
-    let mut wrong_ed25519 = signed.clone();
-    wrong_ed25519.signature.s[0].b[0] ^= 1;
-    let mut both_wrong = wrong_ed25519.clone();
-    both_wrong.signature.s[1].b[0] ^= 1;
-    assert!(text.starts_with("DKIM2-Signature:"));
+    let hop = || Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]);
+    let verify = |signed: &Dkim2Signed| {
+        let message = prepend(signed, &original);
+        async move {
+            verify_raw(
+                &message,
+                "sender@test1.dkim2.com",
+                &["recipient@example.com"],
+            )
+            .await
+        }
+    };
 
-    assert_eq!(
-        verify_raw(
-            &prepend(&wrong_ed25519, &original),
-            "sender@test1.dkim2.com",
-            &["recipient@example.com"]
-        )
-        .await,
-        fail(Dkim2Error::PartialSignatureFailure {
-            i: 1,
-            passed: "sel1".into(),
-            failed: "ed25519".into()
-        })
+    let alternatives = signer("test1.dkim2.com")
+        .additional_key(load_rsa("test1.dkim2.com", "sel1"), "sel1")
+        .sign_at(&original, hop(), None, NOW)
+        .unwrap();
+    assert!(
+        alternatives
+            .to_header()
+            .contains("s=ed25519:ed25519-sha256:")
     );
     assert_eq!(
-        verify_raw(
-            &prepend(&both_wrong, &original),
-            "sender@test1.dkim2.com",
-            &["recipient@example.com"]
-        )
-        .await,
+        alternatives
+            .signature
+            .s
+            .iter()
+            .map(|value| value.group)
+            .collect::<Vec<_>>(),
+        vec![0, 1]
+    );
+    let mut wrong_ed25519 = alternatives.clone();
+    wrong_ed25519.signature.s[0].b[0] ^= 1;
+    assert_eq!(verify(&wrong_ed25519).await, Dkim2Result::Pass);
+    let mut both_wrong = wrong_ed25519.clone();
+    both_wrong.signature.s[1].b[0] ^= 1;
+    assert_eq!(
+        verify(&both_wrong).await,
+        fail(Dkim2Error::NoSignatureGroupPassed(1))
+    );
+
+    let hybrid = signer("test1.dkim2.com")
+        .hybrid_key(load_rsa("test1.dkim2.com", "sel1"), "sel1")
+        .sign_at(&original, hop(), None, NOW)
+        .unwrap();
+    assert_eq!(
+        hybrid
+            .signature
+            .s
+            .iter()
+            .map(|value| value.group)
+            .collect::<Vec<_>>(),
+        vec![0, 0]
+    );
+    assert_eq!(verify(&hybrid).await, Dkim2Result::Pass);
+    let mut wrong_rsa = hybrid.clone();
+    wrong_rsa.signature.s[1].b[0] ^= 1;
+    assert_eq!(
+        verify(&wrong_rsa).await,
         fail(Dkim2Error::IncorrectSignature {
             i: 1,
-            selector: "ed25519".into()
+            selector: "sel1".into()
         })
     );
 }
 
-// -07 §14.5: key record problems are reported with the selector.
+// §14.5: key record problems are reported with the selector.
 #[tokio::test]
 async fn verify_public_key_errors() {
     let original = original();
@@ -1151,7 +1190,7 @@ async fn verify_public_key_errors() {
     }
 }
 
-// -07 §14.2: numbering gaps and instances without signatures are errors; no DKIM2 fields is none.
+// §14.2: numbering gaps and instances without signatures are errors; no DKIM2 fields is none.
 #[tokio::test]
 async fn verify_header_field_presence() {
     let instance = "Message-Instance: m=1; h=sha256:QQ==:QQ==;\r\n";
@@ -1253,7 +1292,7 @@ async fn verify_null_body_recipe() {
     let message2 = prepend(&signed, modified.as_bytes());
     assert_eq!(
         verify_raw(&message2, "gw@test2.dkim2.com", &["recipient@example.com"]).await,
-        Dkim2Result::Pass
+        fail(Dkim2Error::NullBodyRecipe(2))
     );
 }
 
@@ -1274,9 +1313,9 @@ async fn sign_multi_algorithm_then_verify() {
 
     assert_eq!(signed.signature.s.len(), 2);
     assert_eq!(signed.signature.s[0].selector, "ed25519");
-    assert_eq!(signed.signature.s[0].a, Algorithm::Ed25519Sha256);
+    assert_eq!(signed.signature.s[0].a, Algorithm::Ed25519Sha256.into());
     assert_eq!(signed.signature.s[1].selector, "sel1");
-    assert_eq!(signed.signature.s[1].a, Algorithm::RsaSha256);
+    assert_eq!(signed.signature.s[1].a, Algorithm::RsaSha256.into());
 
     let message = prepend(&signed, &original);
     assert_eq!(
@@ -1294,10 +1333,7 @@ async fn sign_multi_algorithm_then_verify() {
 async fn verify_rejects_wrong_envelope() {
     let envelope = Envelope::new("attacker@evil.example", ["recipient@example.com"]);
     let result = verify_file("simple-ed25519.eml", envelope).await;
-    assert!(
-        matches!(result, Dkim2Result::PermError(_)),
-        "got {result:?}"
-    );
+    assert!(matches!(result, Dkim2Result::Fail(_)), "got {result:?}");
 }
 
 #[tokio::test]
@@ -1417,7 +1453,7 @@ async fn verify_rejects_rcpt_not_in_rt() {
     assert!(
         matches!(
             result,
-            Dkim2Result::PermError(Error::Dkim2(Dkim2Error::RcptToMismatch { .. }))
+            Dkim2Result::Fail(Error::Dkim2(Dkim2Error::RcptToMismatch { .. }))
         ),
         "got {result:?}"
     );
@@ -1983,7 +2019,11 @@ async fn provisional_chain_holds_only_top_signature() {
     let envelope = ("relay@test2.dkim2.com", ["recipient@example.com"]);
 
     let full = verify(&parsed, envelope.0, &envelope.1, Verification::Full).await;
-    assert!(matches!(full.result(), Dkim2Result::PermError(_)));
+    assert!(
+        matches!(full.result(), Dkim2Result::Fail(_)),
+        "{:?}",
+        full.result()
+    );
     let provisional = verify(&parsed, envelope.0, &envelope.1, Verification::Provisional).await;
     assert_eq!(provisional.result(), &Dkim2Result::Pass);
     assert_eq!(
@@ -2184,7 +2224,7 @@ async fn from_authenticity_requires_one_clean_mailbox() {
                 &["recipient@example.com"]
             )
             .await,
-            perm(Dkim2Error::FromNotAuthentic(1)),
+            fail(Dkim2Error::FromNotAuthentic(1)),
             "verifier: {from_lines:?}"
         );
     }
@@ -2318,7 +2358,7 @@ async fn recipe_generator_handles_bare_line_breaks() {
                 &["recipient@example.com"]
             )
             .await,
-            Dkim2Result::Pass
+            fail(Dkim2Error::NullBodyRecipe(2))
         );
     }
 
@@ -2402,10 +2442,58 @@ async fn validity_proof_is_bound_to_raw_fields() {
         signer("test2.dkim2.com")
             .sign_at(tampered.as_bytes(), hop2(), Some(&proof), NOW)
             .unwrap_err(),
-        Error::Dkim2(Dkim2Error::NotValidlySigned)
+        Error::Dkim2(Dkim2Error::NotFullyVerified)
     );
     let copy = message1.clone();
     signer("test2.dkim2.com")
         .sign_at(&copy, hop2(), Some(&proof), NOW)
         .unwrap();
+}
+
+// §14.6 note: a key that cannot be fetched is a TEMPERROR, but it does not hide a FAIL found elsewhere.
+#[tokio::test]
+async fn temp_error_does_not_hide_fail() {
+    let original = original();
+    let signed = signer("test1.dkim2.com")
+        .hybrid_key(load_rsa("test1.dkim2.com", "sel1"), "unreachable")
+        .sign_at(
+            &original,
+            Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]),
+            None,
+            NOW,
+        )
+        .unwrap();
+    let resolver = MessageAuthenticator::new_system_conf().unwrap();
+    let caches = load_caches();
+    caches.txt_add(
+        "unreachable._domainkey.test1.dkim2.com.",
+        TxtRecord::Error(Error::Dns(DnsError::Resolver("timeout".into()))),
+        Instant::now() + Duration::new(3600, 0),
+    );
+    let verify = |raw: Vec<u8>| {
+        let (resolver, caches) = (&resolver, &caches);
+        async move {
+            let message = AuthenticatedMessage::parse(&raw).unwrap();
+            let params = caches.parameters(&message);
+            resolver
+                .verify_dkim2_(
+                    &message,
+                    Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]),
+                    params.txt_cache(),
+                    NOW,
+                    true,
+                    Verification::Full,
+                )
+                .await
+                .result()
+                .clone()
+        }
+    };
+    let mut message = prepend(&signed, &original);
+    assert!(matches!(
+        verify(message.clone()).await,
+        Dkim2Result::TempError(Error::Dkim2(Dkim2Error::PublicKeyFetch { i: 1, .. }))
+    ));
+    message.extend_from_slice(b"tampered\r\n");
+    assert!(matches!(verify(message).await, Dkim2Result::Fail(_)));
 }

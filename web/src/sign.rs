@@ -159,13 +159,13 @@ impl Dkim2Request {
         let (verified, validity) = match (&self.gate, has_dkim2) {
             (_, false) => (
                 None,
-                "New message: no DKIM2 header fields, so no validity check is needed (-07 §12)."
+                "New message: no DKIM2 header fields, so no validity check is needed (-08 §12)."
                     .to_string(),
             ),
             (Gate::OutOfBand, true) => (
                 None,
                 "Signed under an out-of-band arrangement: the received message was not verified \
-                 (-07 §12, §12.3)."
+                 (-08 §12, §12.3)."
                     .to_string(),
             ),
             (Gate::Verify, true) => {
@@ -177,12 +177,12 @@ impl Dkim2Request {
                     .verify_dkim2(params(&message, &cache), envelope)
                     .await;
                 if !matches!(output.result(), Dkim2Result::Pass) {
-                    return Err(not_validly_signed(&output));
+                    return Err(not_fully_verified(&output));
                 }
                 (
                     Some(output),
                     "The received message passed full verification with the received envelope, \
-                     so it is a Validly Signed DKIM2 Message (-07 §12, §13)."
+                     so it is a Fully Verified DKIM2 Message (-08 §12, §13)."
                         .to_string(),
                 )
             }
@@ -203,7 +203,7 @@ impl Dkim2Request {
     }
 }
 
-fn not_validly_signed(output: &Dkim2Output<'_>) -> String {
+fn not_fully_verified(output: &Dkim2Output<'_>) -> String {
     let (label, err) = dkim2_result_label(output.result());
     let reason = if err.is_empty() {
         label.to_string()
@@ -211,8 +211,8 @@ fn not_validly_signed(output: &Dkim2Output<'_>) -> String {
         format!("{label}: {err}")
     };
     format!(
-        "The received message is not a Validly Signed DKIM2 Message, so it cannot be signed \
-         without an out-of-band arrangement (-07 §12). Full verification with the received \
+        "The received message is not a Fully Verified DKIM2 Message, so it cannot be signed \
+         without an out-of-band arrangement (-08 §12). Full verification with the received \
          envelope returned {reason}"
     )
 }

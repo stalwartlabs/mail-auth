@@ -15,27 +15,29 @@ use crate::{AuthenticatedMessage, DnsError, Error, headers::Header};
 /// naming the check that failed.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum Dkim2Result {
-    /// The message is a Validly Signed DKIM2 Message: every signature
+    /// The message is a Fully Verified DKIM2 Message: every signature
     /// verified, every hash matched, the most recent signature matches the
     /// SMTP envelope, the chain of custody is unbroken and every `From`
     /// header field is Authentic. For a provisional verification, the message
-    /// is Provisionally Verified (§13.1).
+    /// is Provisionally Verified (§13.2).
     Pass,
-    /// The chain could be evaluated but a signature or a hash was not
-    /// correct.
+    /// Verification completed but the message is not a Fully Verified DKIM2
+    /// Message: a signature or a hash was not correct, a timestamp is out of
+    /// range, the envelope or chain of custody does not match, or a `From`
+    /// header field is not Authentic.
     Fail(crate::Error),
     /// The chain cannot be verified because of an unrecoverable problem, such
     /// as a malformed or missing header field or tag, a gap in the
-    /// numbering, an envelope or chain of custody mismatch, a timestamp out
-    /// of range, a missing, invalid or revoked public key, or a `From` header
-    /// field that is not Authentic.
+    /// numbering, an algorithm that is not implemented, or a missing,
+    /// invalid or revoked public key.
     PermError(crate::Error),
     /// A public key could not be fetched because of a temporary DNS error; a
     /// later attempt may succeed.
     TempError(crate::Error),
     /// The message has no `DKIM2-Signature` and no `Message-Instance` header
     /// field, so there was nothing to verify. This follows the `none` result
-    /// of DKIM and ARC; §14.2 itself has no such state.
+    /// of DKIM and ARC; §14.2 reports it as a PERMERROR ("No DKIM2 header
+    /// fields found").
     None,
 }
 
@@ -52,11 +54,11 @@ impl From<Error> for Dkim2Result {
 /// Which checks a DKIM2 verification performed.
 #[derive(Debug, PartialEq, Eq, Clone, Copy, Default)]
 pub enum Verification {
-    /// Every check of §14: the message is a Validly Signed DKIM2 Message
+    /// Every check of §14: the message is a Fully Verified DKIM2 Message
     /// when the result is [`Dkim2Result::Pass`].
     #[default]
     Full,
-    /// Only the checks for a Provisionally Verified message (§13.1): header
+    /// Only the checks for a Provisionally Verified message (§13.2): header
     /// field validity, timestamps, the envelope against the most recent
     /// signature, that signature and the hashes of the most recent
     /// `Message-Instance`.

@@ -25,7 +25,7 @@ impl SignatureValue {
     fn write(&self, writer: &mut impl Writer, empty: bool) {
         writer.write(self.selector.as_bytes());
         writer.write(b":");
-        writer.write(self.a.name().as_bytes());
+        writer.write(self.a.as_str().as_bytes());
         writer.write(b":");
         if !empty {
             writer.write_base64(&self.b);
@@ -64,10 +64,9 @@ impl Signature {
         }
 
         writer.write(b"; s=");
-        for (pos, value) in self.s.iter().enumerate() {
-            if pos > 0 {
-                writer.write(b",");
-            }
+        let mut previous = None;
+        for value in &self.s {
+            write_separator(writer, &mut previous, value.group);
             value.write(writer, empty_signature);
         }
         writer.write(b";");
@@ -104,10 +103,9 @@ impl MessageInstance {
         writer.write(b"m=");
         write_integer(writer, self.m as u64);
         writer.write(b"; h=");
-        for (pos, hash) in self.hashes.iter().enumerate() {
-            if pos > 0 {
-                writer.write(b",");
-            }
+        let mut previous = None;
+        for hash in &self.hashes {
+            write_separator(writer, &mut previous, hash.group);
             writer.write(hash.name.as_str().as_bytes());
             writer.write(b":");
             writer.write_base64(&hash.header_hash);
@@ -134,6 +132,14 @@ impl MessageInstance {
         writer.write(b"Message-Instance: ");
         self.write_value(writer);
         writer.write(b"\r\n");
+    }
+}
+
+fn write_separator(writer: &mut impl Writer, previous: &mut Option<u32>, group: u32) {
+    match previous.replace(group) {
+        Some(previous) if previous == group => writer.write(b","),
+        Some(_) => writer.write(b"|"),
+        None => {}
     }
 }
 
@@ -270,13 +276,21 @@ mod test {
             s: vec![
                 SignatureValue {
                     selector: "rsa2048".to_string(),
-                    a: Algorithm::RsaSha256,
+                    a: Algorithm::RsaSha256.into(),
                     b: (0u8..=255).cycle().take(256).collect(),
+                    group: 0,
                 },
                 SignatureValue {
                     selector: "ed25519".to_string(),
-                    a: Algorithm::Ed25519Sha256,
+                    a: Algorithm::Ed25519Sha256.into(),
                     b: (0u8..64).collect(),
+                    group: 1,
+                },
+                SignatureValue {
+                    selector: "mldsa44".to_string(),
+                    a: Algorithm::MlDsa44.into(),
+                    b: (0u8..=255).cycle().take(2420).collect(),
+                    group: 1,
                 },
             ],
             chain: ChainBinding::Envelope {
@@ -299,16 +313,19 @@ mod test {
                     name: Dkim2Hash::Sha256.into(),
                     header_hash: (0u8..32).collect(),
                     body_hash: (32u8..64).collect(),
+                    group: 0,
                 },
                 MessageHash {
                     name: Dkim2Hash::Sha512.into(),
                     header_hash: (64u8..128).collect(),
                     body_hash: (128u8..192).collect(),
+                    group: 0,
                 },
                 MessageHash {
                     name: HashName::Unknown("sha3-256".into()),
                     header_hash: (0u8..32).collect(),
                     body_hash: (32u8..64).collect(),
+                    group: 1,
                 },
             ],
             recipe: None,
@@ -332,7 +349,7 @@ mod test {
             String::from_utf8_lossy(&folded)
         );
         dump_folded(
-            "DKIM2-Signature (large: rsa2048 + ed25519, 2 recipients)",
+            "DKIM2-Signature (large: rsa2048 | ed25519,mldsa44, 2 recipients)",
             &folded,
         );
         assert_fold_is_transparent(b"DKIM2-Signature: ", &folded, &unfolded);
@@ -408,8 +425,9 @@ mod test {
             d: "example.com".to_string(),
             s: vec![SignatureValue {
                 selector: "sel".to_string(),
-                a: Algorithm::Ed25519Sha256,
+                a: Algorithm::Ed25519Sha256.into(),
                 b: vec![1, 2, 3, 4],
+                group: 0,
             }],
             chain: ChainBinding::Envelope {
                 mail_from: "<a@example.com>".to_string(),
@@ -444,6 +462,23 @@ mod test {
         assert!(out.contains("nd=relay.example"), "{out}");
         assert!(!out.contains("mf="), "{out}");
         assert!(!out.contains("rt="), "{out}");
+    }
+
+    // Entries of one group are joined with "," and groups with "|".
+    #[test]
+    fn group_separators() {
+        let mut buf = Vec::new();
+        big_signature().write_value(&mut buf, true);
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains("s=rsa2048:rsa-sha256:|ed25519:ed25519-sha256:,mldsa44:mldsa44:;"),
+            "{out}"
+        );
+        let out = big_instance().to_string();
+        assert!(
+            out.contains(",sha512:") && out.contains("|sha3-256:"),
+            "{out}"
+        );
     }
 
     #[test]

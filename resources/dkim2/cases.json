@@ -32,11 +32,11 @@
     "rcpt_to": [
       "<recipient@example.com>"
     ],
-    "expected": "fail",
+    "expected": "permerror",
     "now": 1782394396,
     "strict": true,
     "section": [],
-    "comments": ""
+    "comments": "an s= algorithm the Verifier has not implemented is a PERMERROR (-08 \u00a714.6)"
   },
   {
     "name": "algorithm_with_future",
@@ -45,11 +45,11 @@
     "rcpt_to": [
       "<recipient@example.com>"
     ],
-    "expected": "pass",
+    "expected": "permerror",
     "now": 1782394396,
     "strict": true,
     "section": [],
-    "comments": ""
+    "comments": "an unknown algorithm in a \",\" group makes the group a PERMERROR (-08 \u00a714.6)"
   },
   {
     "name": "domain_above_mailfrom",
@@ -73,13 +73,13 @@
     "rcpt_to": [
       "<recipient@example.com>"
     ],
-    "expected": "permerror",
+    "expected": "fail",
     "now": 1782394396,
     "strict": true,
     "section": [
       "10.8"
     ],
-    "comments": "mf= must match or be a subdomain of d= (\u00a710.8)"
+    "comments": "mf= must match or be a subdomain of d=, a FAIL (\u00a710.8, -08 \u00a714.4)"
   },
   {
     "name": "flags_whitespace",
@@ -474,7 +474,7 @@
     "comments": "SHA-256 and SHA-512 hashes, both checked (\u00a714.7)"
   },
   {
-    "name": "d2_07_mldsa44_ed25519",
+    "name": "d2_08_mldsa44",
     "file": "simple-mldsa44.eml",
     "mail_from": "<sender@test1.dkim2.com>",
     "rcpt_to": [
@@ -486,7 +486,7 @@
     "section": [
       "3.4"
     ],
-    "comments": "mldsa44-ed25519-sha512 composite signature (\u00a73.4)"
+    "comments": "pure ML-DSA-44 signature (\u00a73.4)"
   },
   {
     "name": "d2_07_nd_rt_subdomain",
@@ -525,13 +525,13 @@
     "rcpt_to": [
       "<recipient@example.com>"
     ],
-    "expected": "permerror",
+    "expected": "fail",
     "now": 1740002100,
     "strict": true,
     "section": [
       "14.3"
     ],
-    "comments": "t= more than one day ahead of delivery (\u00a714.3)"
+    "comments": "t= more than one day ahead of delivery, a FAIL (-08 \u00a714.3)"
   },
   {
     "name": "d2_07_from_not_authentic",
@@ -540,14 +540,14 @@
     "rcpt_to": [
       "<recipient@example.com>"
     ],
-    "expected": "permerror",
+    "expected": "fail",
     "now": 1740002100,
     "strict": true,
     "section": [
       "11",
       "14.8"
     ],
-    "comments": "From domain does not match d= of i=1 (\u00a711)"
+    "comments": "From domain does not match d= of i=1, a FAIL (\u00a711, -08 \u00a714.8)"
   },
   {
     "name": "d2_07_from_rewritten",
@@ -603,14 +603,14 @@
     "rcpt_to": [
       "<recipient@example.com>"
     ],
-    "expected": "permerror",
+    "expected": "fail",
     "now": 1740002100,
     "strict": true,
     "section": [
       "10.9",
       "14.2"
     ],
-    "comments": "more than two signatures with the same algorithm (\u00a710.9)"
+    "comments": "three ed25519 signatures in one \",\" group are allowed (-08 \u00a710.9); the group fails because two do not verify"
   },
   {
     "name": "d2_07_duplicate_hash",

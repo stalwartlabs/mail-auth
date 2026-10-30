@@ -10,7 +10,7 @@
 use super::{
     ChainBinding, Dkim2Error, Dkim2Hash, Dkim2Output, Dkim2Signer, Flag, MessageHash,
     MessageInstance, Signature, SignatureValue,
-    parse::{is_domain, is_textstring},
+    parse::{MAX_SIGNATURE_VALUES, is_domain, is_textstring},
     recipe::Recipe,
     verify::{StateHashes, check_custody, check_mail_from_domain, from_domain, is_from_authentic},
 };
@@ -128,8 +128,8 @@ where
     ///
     /// The next signature must be made by `next_domain`, and a chain cannot
     /// end with an imaginary hop: the verifier rejects a most recent
-    /// signature that carries `nd=`. The message is then not a Validly
-    /// Signed DKIM2 Message, so the signer adding the next signature needs
+    /// signature that carries `nd=`. The message is then not a Fully
+    /// Verified DKIM2 Message, so the signer adding the next signature needs
     /// [`Dkim2Signer::out_of_band_arrangement`].
     pub fn imaginary(next_domain: I) -> Self {
         Hop::Imaginary { next_domain }
@@ -188,7 +188,7 @@ impl Dkim2Signer<Ready> {
     /// # Errors
     ///
     /// Returns [`Error::Parse`] if the message cannot be parsed,
-    /// [`Dkim2Error::NotValidlySigned`] if the validity proof is missing or
+    /// [`Dkim2Error::NotFullyVerified`] if the validity proof is missing or
     /// does not match the message, [`Dkim2Error::FromNotAuthentic`] if the
     /// message is new (or its `From` changed) and its `From` domain is not
     /// the signing domain or a subdomain of it (§12.4), [`Dkim2Error::HeaderHashMismatch`] or
@@ -379,7 +379,7 @@ impl Dkim2Signer<Ready> {
             }
             StateHashes::default()
                 .check(instance, &modified.headers, Some(modified.raw_body()))
-                .map_err(Error::Dkim2)?;
+                .map_err(|failure| Error::Dkim2(failure.into_error()))?;
         }
         self.sign_internal(modified, hop, instance, verified, now())
             .map(|signature| Dkim2Signed {
@@ -456,7 +456,7 @@ impl Dkim2Signer<Ready> {
             && !self.out_of_band
             && !verified.is_some_and(|output| output.is_proof_for(parsed))
         {
-            return Err(Error::Dkim2(Dkim2Error::NotValidlySigned));
+            return Err(Error::Dkim2(Dkim2Error::NotFullyVerified));
         }
 
         let highest_m = instances.last().map(|h| h.header.m).unwrap_or(0);
@@ -499,7 +499,7 @@ impl Dkim2Signer<Ready> {
         {
             StateHashes::default()
                 .check(&highest.header, &parsed.headers, Some(parsed.raw_body()))
-                .map_err(Error::Dkim2)?;
+                .map_err(|failure| Error::Dkim2(failure.into_error()))?;
         }
 
         let mut flags = Vec::with_capacity(self.flags.len() + 1);
@@ -558,8 +558,9 @@ impl Dkim2Signer<Ready> {
                 .iter()
                 .map(|entry| SignatureValue {
                     selector: entry.selector.clone(),
-                    a: entry.key.algorithm(),
+                    a: entry.key.algorithm().into(),
                     b: Vec::new(),
+                    group: entry.group,
                 })
                 .collect(),
             chain,
@@ -602,16 +603,17 @@ impl Dkim2Signer<Ready> {
             return Err(Dkim2Error::SignatureSyntax(signature.i));
         }
 
+        if signature.s.len() > MAX_SIGNATURE_VALUES {
+            return Err(Dkim2Error::TooManySelectors(signature.i));
+        }
         for (pos, value) in signature.s.iter().enumerate() {
-            let mut same_algorithm = 1;
-            for other in signature.s.iter().skip(pos + 1) {
-                if value.selector.eq_ignore_ascii_case(&other.selector) {
-                    return Err(Dkim2Error::DuplicateSelector(signature.i));
-                }
-                same_algorithm += usize::from(value.a == other.a);
-            }
-            if same_algorithm > MAX_ENTRIES_PER_ALGORITHM {
-                return Err(Dkim2Error::TooManySelectors(signature.i));
+            if signature
+                .s
+                .iter()
+                .skip(pos + 1)
+                .any(|other| value.selector.eq_ignore_ascii_case(&other.selector))
+            {
+                return Err(Dkim2Error::DuplicateSelector(signature.i));
             }
         }
 
@@ -680,7 +682,6 @@ fn signing_domain(domain: &str, i: u32) -> crate::Result<String> {
 }
 
 const MAX_NONCE_LEN: usize = 64;
-const MAX_ENTRIES_PER_ALGORITHM: usize = 2;
 
 impl MessageInstance {
     /// Builds the `Message-Instance` a signer adds to `message`, if one is
@@ -752,6 +753,7 @@ impl MessageInstance {
                     name: (*hash).into(),
                     header_hash: digest(&header_hashes, *hash),
                     body_hash: digest(&body_hashes, *hash),
+                    group: 0,
                 })
                 .collect(),
             recipe,
@@ -819,7 +821,7 @@ pub(super) fn to_reverse_path(addr: &str) -> String {
 mod test {
     use super::{Dkim2Signer, Hop};
     use crate::{
-        crypto::{Algorithm, DkimKey, Ed25519Key, MlDsa44Ed25519Key, RsaKey, Sha256},
+        crypto::{Algorithm, DkimKey, Ed25519Key, MlDsa44Key, RsaKey, Sha256},
         dkim2::{Dkim2Hash, Dkim2Signed, MessageInstance},
     };
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
@@ -1028,7 +1030,7 @@ mod test {
             .signature
             .s
             .iter()
-            .any(|value| value.a == Algorithm::MlDsa44Ed25519Sha512)
+            .any(|value| value.a == Algorithm::MlDsa44.into())
         {
             return;
         }
@@ -1044,7 +1046,7 @@ mod test {
         );
     }
 
-    // SHA-512 hashes and the composite algorithm; ML-DSA signatures are randomized and checked by the verifier tests.
+    // SHA-512 hashes and ML-DSA-44; ML-DSA signatures are randomized and checked by the verifier tests.
     #[test]
     fn sign_golden_dkim2_07() {
         let recipient: &[&str] = &["recipient@example.com"];
@@ -1076,11 +1078,9 @@ mod test {
             panic!("expected PKCS8 key");
         };
         run_signer_vector(
-            Dkim2Signer::from_key(
-                MlDsa44Ed25519Key::from_pkcs8_der(der.secret_pkcs8_der()).unwrap(),
-            )
-            .domain("test1.dkim2.com")
-            .selector("mldsa44"),
+            Dkim2Signer::from_key(MlDsa44Key::from_pkcs8_der(der.secret_pkcs8_der()).unwrap())
+                .domain("test1.dkim2.com")
+                .selector("mldsa44"),
             "simple.eml",
             "sender@test1.dkim2.com",
             recipient,

@@ -1,7 +1,7 @@
 # mail-auth playground
 
 A static, browser-only demo of [mail-auth](https://github.com/stalwartlabs/mail-auth):
-DKIM, DKIM2 (draft-ietf-dkim-dkim2-spec-07) and DMARC compiled to WebAssembly. All signing happens client-side;
+DKIM, DKIM2 (draft-ietf-dkim-dkim2-spec-08) and DMARC compiled to WebAssembly. All signing happens client-side;
 no message or key ever leaves the page.
 
 This is a standalone crate (its own workspace) that depends on the parent

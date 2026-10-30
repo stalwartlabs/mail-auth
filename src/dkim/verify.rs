@@ -242,6 +242,7 @@ impl MessageAuthenticator {
                     | DkimResult::TempError(err) => {
                         let send_report = match err {
                             Error::Crypto(CryptoError::Library(_))
+                            | Error::Crypto(CryptoError::MalformedPublicKey)
                             | Error::Io(_)
                             | Error::Crypto(CryptoError::FailedVerification)
                             | Error::Dkim(DkimError::BodyHashMismatch)

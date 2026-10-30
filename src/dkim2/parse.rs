@@ -8,10 +8,10 @@
 //! field values, which are Tag=Value lists (§8).
 
 use super::{
-    ChainBinding, Dkim2Error, Dkim2Hash, Flag, HashName, MessageHash, MessageInstance, Signature,
-    SignatureValue, canonicalize::cmp_ignore_ascii_case, recipe::Recipe,
+    AlgorithmName, ChainBinding, Dkim2Error, Dkim2Hash, Flag, HashName, MessageHash,
+    MessageInstance, Signature, SignatureValue, recipe::Recipe,
 };
-use crate::{Error, crypto::Algorithm};
+use crate::{Error, crypto::Algorithm, utf8::to_str_lossy};
 use encodify::base64;
 use memchr::memchr;
 use std::collections::HashSet;
@@ -19,8 +19,9 @@ use std::collections::HashSet;
 const MAX_NONCE_LEN: usize = 64;
 const MAX_LABEL_LEN: usize = 63;
 const MAX_DOMAIN_LEN: usize = 253;
-const MAX_ENTRIES_PER_ALGORITHM: usize = 2;
+pub(crate) const MAX_SIGNATURE_VALUES: usize = 8;
 const INLINE_SCAN_LIMIT: usize = 16;
+const MAX_RECIPE_EXCERPT: usize = 64;
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
@@ -123,6 +124,7 @@ enum ParseError {
     TooManySelectors,
     DuplicateHash,
     InvalidJson,
+    InvalidRecipe,
 }
 
 impl ParseError {
@@ -134,9 +136,10 @@ impl ParseError {
             ParseError::TagUnexpected(tag) => Dkim2Error::SignatureTagUnexpected { i, tag },
             ParseError::DuplicateSelector => Dkim2Error::DuplicateSelector(i),
             ParseError::TooManySelectors => Dkim2Error::TooManySelectors(i),
-            ParseError::Syntax | ParseError::DuplicateHash | ParseError::InvalidJson => {
-                Dkim2Error::SignatureSyntax(i)
-            }
+            ParseError::Syntax
+            | ParseError::DuplicateHash
+            | ParseError::InvalidJson
+            | ParseError::InvalidRecipe => Dkim2Error::SignatureSyntax(i),
         })
     }
 
@@ -147,6 +150,10 @@ impl ParseError {
             ParseError::TagMissing(tag) => Dkim2Error::InstanceTagMissing { m, tag },
             ParseError::DuplicateHash => Dkim2Error::InstanceDuplicateHash(m),
             ParseError::InvalidJson => Dkim2Error::InvalidJson(m),
+            ParseError::InvalidRecipe => Dkim2Error::InvalidRecipe {
+                m,
+                value: recipe_excerpt(header),
+            },
             ParseError::Syntax
             | ParseError::TagUnexpected(_)
             | ParseError::DuplicateSelector
@@ -161,18 +168,21 @@ impl Signature {
     ///
     /// The value is a Tag=Value list (§8): tag names are case-sensitive,
     /// unrecognized tags (including upper-case variants of known ones) are
-    /// ignored, and a repeated tag name invalidates the field. `s=` entries
-    /// with an algorithm this crate does not implement are dropped after the
-    /// selector checks, so `s` can be empty. `mf=` and `rt=` are
+    /// ignored, and a repeated tag name invalidates the field. An empty value
+    /// is accepted only where the tag's ABNF allows it (`n=` and unrecognized
+    /// tags). `s=` entries are split into `|`-separated groups of
+    /// `,`-separated entries; entries with an algorithm this crate does not
+    /// implement are kept as [`AlgorithmName::Unknown`]. `mf=` and `rt=` are
     /// base64-decoded.
     ///
     /// # Errors
     ///
     /// Returns [`Dkim2Error::SignatureSyntax`] for a malformed tag list or
     /// value, a repeated tag or a nonce that is not up to 64 printable ASCII
-    /// characters; [`Dkim2Error::DuplicateSelector`] or
-    /// [`Dkim2Error::TooManySelectors`] when `s=` repeats a selector or has
-    /// more than two entries for one algorithm;
+    /// characters; [`Dkim2Error::DuplicateSelector`] when `s=` repeats a
+    /// selector; [`Dkim2Error::TooManySelectors`] when `s=` has more than
+    /// eight entries, a local limit on the public key lookups a signature
+    /// can cause;
     /// [`Dkim2Error::SignatureTagMissing`] if `i=`, `m=`, `t=`, `d=` or `s=`
     /// is missing, or if neither `nd=` nor both `mf=` and `rt=` are present;
     /// and [`Dkim2Error::SignatureTagUnexpected`] if `nd=` appears together
@@ -248,17 +258,19 @@ impl MessageInstance {
     /// field name).
     ///
     /// The value is a Tag=Value list (§8) with the same rules as
-    /// [`Signature::parse`]. Hash names are case-sensitive; unsupported ones
-    /// are kept as [`HashName::Unknown`]. The `r=` recipe is base64-decoded
-    /// and parsed and validated as JSON (§5).
+    /// [`Signature::parse`]. `h=` entries are split into `|`-separated groups
+    /// of `,`-separated entries. Hash names are case-sensitive; unsupported
+    /// ones are kept as [`HashName::Unknown`]. The `r=` recipe is
+    /// base64-decoded and parsed and validated as JSON (§5).
     ///
     /// # Errors
     ///
     /// Returns [`Dkim2Error::InstanceSyntax`] for a malformed tag list or
     /// value or a repeated tag, [`Dkim2Error::InstanceTagMissing`] if `m=`
     /// or `h=` is missing, [`Dkim2Error::InstanceDuplicateHash`] if `h=`
-    /// repeats a hash algorithm, and [`Dkim2Error::InvalidJson`] if the
-    /// recipe is not valid JSON or does not follow the recipe schema.
+    /// repeats a hash algorithm, [`Dkim2Error::InvalidJson`] if the recipe
+    /// is not valid JSON, and [`Dkim2Error::InvalidRecipe`] if it is valid
+    /// JSON that does not follow the recipe rules.
     pub fn parse(header: &[u8]) -> crate::Result<MessageInstance> {
         parse_instance(header).map_err(|err| err.into_instance_error(header))
     }
@@ -286,8 +298,13 @@ fn parse_instance(header: &[u8]) -> Result<MessageInstance, ParseError> {
                 let json = base64::LENIENT
                     .decode(value)
                     .map_err(|_| ParseError::Syntax)?;
-                instance.recipe =
-                    Some(Recipe::from_json(&json).map_err(|_| ParseError::InvalidJson)?);
+                instance.recipe = Some(Recipe::from_json(&json).map_err(|_| {
+                    if serde_json::from_slice::<serde::de::IgnoredAny>(&json).is_ok() {
+                        ParseError::InvalidRecipe
+                    } else {
+                        ParseError::InvalidJson
+                    }
+                })?);
             }
         }
     }
@@ -355,6 +372,16 @@ fn is_tag_value(value: &[u8]) -> bool {
     value
         .iter()
         .all(|&ch| ch.is_ascii_graphic() || matches!(ch, b' ' | b'\t' | b'\r' | b'\n'))
+}
+
+#[cold]
+fn recipe_excerpt(header: &[u8]) -> Box<str> {
+    let json = tag_list(header)
+        .flatten()
+        .find(|(name, _)| *name == b"r")
+        .and_then(|(_, value)| base64::LENIENT.decode(value).ok())
+        .unwrap_or_default();
+    to_str_lossy(json.get(..MAX_RECIPE_EXCERPT).unwrap_or(&json)).into()
 }
 
 #[cold]
@@ -426,15 +453,22 @@ pub(crate) fn is_textstring(value: &[u8]) -> bool {
 }
 
 fn decode_string(value: &[u8]) -> Result<String, ParseError> {
+    decode_base64string(value)
+        .and_then(|bytes| String::from_utf8(bytes).map_err(|_| ParseError::Syntax))
+}
+
+fn decode_base64string(value: &[u8]) -> Result<Vec<u8>, ParseError> {
+    if value.is_empty() {
+        return Err(ParseError::Syntax);
+    }
     base64::LENIENT
-        .decode_to_string(value)
+        .decode(value)
         .map_err(|_| ParseError::Syntax)
 }
 
 fn parse_flags(value: &[u8]) -> Result<Vec<Flag>, ParseError> {
     split_bytes(value, b',')
         .map(<[u8]>::trim_ascii)
-        .filter(|flag| !flag.is_empty())
         .map(|flag| {
             is_textstring(flag)
                 .then(|| Flag::parse_bytes(flag))
@@ -443,89 +477,49 @@ fn parse_flags(value: &[u8]) -> Result<Vec<Flag>, ParseError> {
         .collect()
 }
 
+fn groups(value: &[u8]) -> impl Iterator<Item = (u32, &[u8])> {
+    (0u32..)
+        .zip(split_bytes(value, b'|'))
+        .flat_map(|(group, sets)| split_bytes(sets, b',').map(move |set| (group, set)))
+}
+
 fn parse_signature_values(value: &[u8]) -> Result<Vec<SignatureValue>, ParseError> {
-    let mut values = Vec::with_capacity(2);
-    let mut inline: [(&[u8], &[u8]); INLINE_SCAN_LIMIT] = [(&[], &[]); INLINE_SCAN_LIMIT];
-    let mut spill = Vec::new();
-    let mut count = 0;
-    for set in split_bytes(value, b',') {
+    let mut values: Vec<SignatureValue> = Vec::with_capacity(2);
+    for (group, set) in groups(value) {
+        if values.len() == MAX_SIGNATURE_VALUES {
+            return Err(ParseError::TooManySelectors);
+        }
         let (selector, algorithm, signature) = split_triple(set).ok_or(ParseError::Syntax)?;
         if !is_dns_name(selector) || !is_textstring(algorithm) {
             return Err(ParseError::Syntax);
         }
-        match inline.get_mut(count) {
-            Some(slot) => *slot = (selector, algorithm),
-            None => {
-                if spill.is_empty() {
-                    spill.extend_from_slice(&inline);
-                }
-                spill.push((selector, algorithm));
-            }
-        }
-        count += 1;
-
-        let Some(algorithm) = Algorithm::parse_dkim2(algorithm) else {
-            continue;
-        };
-        let b = if signature.is_empty() {
-            Vec::new()
-        } else {
-            base64::LENIENT
-                .decode(signature)
-                .map_err(|_| ParseError::Syntax)?
-        };
+        let b = decode_base64string(signature)?;
         values.push(SignatureValue {
             selector: String::from_utf8_lossy(selector).into_owned(),
-            a: algorithm,
+            a: Algorithm::parse_dkim2(algorithm).map_or_else(
+                || AlgorithmName::Unknown(String::from_utf8_lossy(algorithm).into()),
+                AlgorithmName::Known,
+            ),
             b,
+            group,
         });
     }
 
-    if spill.is_empty() {
-        check_selectors_inline(inline.get(..count).unwrap_or_default())?;
-    } else {
-        check_selectors_sorted(&mut spill)?;
-    }
-    Ok(values)
-}
-
-fn check_selectors_inline(entries: &[(&[u8], &[u8])]) -> Result<(), ParseError> {
-    for (pos, (selector, algorithm)) in entries.iter().enumerate() {
-        let mut same_algorithm = 1;
-        for (other_selector, other_algorithm) in entries.iter().skip(pos + 1) {
-            if selector.eq_ignore_ascii_case(other_selector) {
-                return Err(ParseError::DuplicateSelector);
-            }
-            same_algorithm += usize::from(algorithm == other_algorithm);
-        }
-        if same_algorithm > MAX_ENTRIES_PER_ALGORITHM {
-            return Err(ParseError::TooManySelectors);
-        }
-    }
-    Ok(())
-}
-
-fn check_selectors_sorted(entries: &mut [(&[u8], &[u8])]) -> Result<(), ParseError> {
-    entries.sort_unstable_by(|(a, _), (b, _)| cmp_ignore_ascii_case(a, b));
-    if entries
-        .windows(2)
-        .any(|pair| matches!(pair, [(a, _), (b, _)] if a.eq_ignore_ascii_case(b)))
-    {
-        return Err(ParseError::DuplicateSelector);
-    }
-    entries.sort_unstable_by_key(|(_, algorithm)| *algorithm);
-    if entries.windows(MAX_ENTRIES_PER_ALGORITHM + 1).any(|run| {
-        run.iter()
-            .all(|(_, algorithm)| run.first().is_some_and(|(_, first)| first == algorithm))
+    if values.iter().enumerate().any(|(pos, value)| {
+        values
+            .iter()
+            .skip(pos + 1)
+            .any(|other| value.selector.eq_ignore_ascii_case(&other.selector))
     }) {
-        return Err(ParseError::TooManySelectors);
+        Err(ParseError::DuplicateSelector)
+    } else {
+        Ok(values)
     }
-    Ok(())
 }
 
 fn parse_hashes(value: &[u8]) -> Result<Vec<MessageHash>, ParseError> {
     let mut hashes = Vec::with_capacity(1);
-    for set in split_bytes(value, b',') {
+    for (group, set) in groups(value) {
         let (name, header_hash, body_hash) = split_triple(set).ok_or(ParseError::Syntax)?;
         if !is_textstring(name) {
             return Err(ParseError::Syntax);
@@ -535,12 +529,9 @@ fn parse_hashes(value: &[u8]) -> Result<Vec<MessageHash>, ParseError> {
                 || HashName::Unknown(String::from_utf8_lossy(name).into()),
                 HashName::Known,
             ),
-            header_hash: base64::LENIENT
-                .decode(header_hash)
-                .map_err(|_| ParseError::Syntax)?,
-            body_hash: base64::LENIENT
-                .decode(body_hash)
-                .map_err(|_| ParseError::Syntax)?,
+            header_hash: decode_base64string(header_hash)?,
+            body_hash: decode_base64string(body_hash)?,
+            group,
         });
     }
 
@@ -594,7 +585,7 @@ impl Flag {
 mod test {
     use super::*;
     use crate::AuthenticatedMessage;
-    use crate::dkim2::HashName;
+    use crate::dkim2::{AlgorithmName, HashName};
     use mail_parser::MessageParser;
 
     #[test]
@@ -624,6 +615,7 @@ mod test {
             b"garbage no equals",
             b"i=; m=; t=; d=;",
             b"i=1; m=1; t=0; d=example.com; mf=; s=sel",
+            b"i=1; m=1; t=0; d=example.com; mf=YQ==; rt=Yg==; s=||,|",
             b"i=1; m=1; t=0; d=example.com; mf=; s=",
             b"i=1; m=1; t=0; d=example.com; mf=; s=,,",
             b"i=1; m=1; t=0; d=example.com; mf=; s=sel:rsa-sha256:",
@@ -655,7 +647,7 @@ mod test {
 
     #[test]
     fn signature_parse_reordered_tags_and_multi_sset() {
-        let v = b"f=feedback; m=2; s=sel:rsa-sha256:AAAA,sel2:ed25519-sha256:BBBB; i=3; d=ex.com; mf=; rt=Yg==; t=5; xunknown=zz";
+        let v = b"f=feedback; m=2; s=sel:rsa-sha256:AAAA,sel2:ed25519-sha256:BBBB; i=3; d=ex.com; mf=YQ==; rt=Yg==; t=5; xunknown=zz";
         let sig = Signature::parse(v).unwrap();
         assert_eq!(sig.i, 3);
         assert_eq!(sig.m, 2);
@@ -717,7 +709,7 @@ mod test {
         ));
     }
 
-    // -07 §8: tag names are case-sensitive, so M= is an unknown tag and is ignored.
+    // §8: tag names are case-sensitive, so M= is an unknown tag and is ignored.
     #[test]
     fn upper_case_tags_are_unknown() {
         let v: &[u8] = b"i=1; m=1; M=2; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=sel:rsa-sha256:QQ==;";
@@ -762,30 +754,47 @@ mod test {
             Err(Error::Dkim2(Dkim2Error::DuplicateSelector(7)))
         ));
         assert!(matches!(
-            sig("a:rsa-sha256:QQ==,b:rsa-sha256:QQ==,c:rsa-sha256:QQ=="),
-            Err(Error::Dkim2(Dkim2Error::TooManySelectors(7)))
+            sig("a:rsa-sha256:QQ==|A:ed25519-sha256:QQ=="),
+            Err(Error::Dkim2(Dkim2Error::DuplicateSelector(7)))
         ));
-        assert!(matches!(
-            sig("a:x-new:QQ==,b:x-new:QQ==,c:x-new:QQ==,d:ed25519-sha256:QQ=="),
-            Err(Error::Dkim2(Dkim2Error::TooManySelectors(7)))
-        ));
-        let many = (0..20)
+        assert!(sig("a:rsa-sha256:QQ==,b:rsa-sha256:QQ==,c:rsa-sha256:QQ==").is_ok());
+        let many = (0..8)
             .map(|n| format!("s{n}:alg{n}:QQ=="))
             .collect::<Vec<_>>()
             .join(",");
         assert!(sig(&many).is_ok());
         assert!(matches!(
-            sig(&format!("{many},S3:x:QQ==")),
-            Err(Error::Dkim2(Dkim2Error::DuplicateSelector(7)))
-        ));
-        assert!(matches!(
-            sig(&format!("{many},z:alg3:QQ==,y:alg3:QQ==")),
+            sig(&format!("{many}|z:x:QQ==")),
             Err(Error::Dkim2(Dkim2Error::TooManySelectors(7)))
         ));
+        assert!(matches!(
+            sig("s0:x:QQ==,S0:y:QQ=="),
+            Err(Error::Dkim2(Dkim2Error::DuplicateSelector(7)))
+        ));
 
-        let parsed = sig("a:mldsa44-ed25519-sha512:QQ==,b:RSA-SHA256:QQ==").unwrap();
-        assert_eq!(parsed.s.len(), 1);
-        assert_eq!(parsed.s[0].a, Algorithm::MlDsa44Ed25519Sha512);
+        let parsed = sig("a:mldsa44:QQ==,b:RSA-SHA256:QQ==|c:mldsa44-ed25519-sha512:QQ==").unwrap();
+        assert_eq!(
+            parsed
+                .s
+                .iter()
+                .map(|value| (value.a.clone(), value.group))
+                .collect::<Vec<_>>(),
+            vec![
+                (AlgorithmName::Known(Algorithm::MlDsa44), 0),
+                (AlgorithmName::Unknown("RSA-SHA256".into()), 0),
+                (AlgorithmName::Unknown("mldsa44-ed25519-sha512".into()), 1),
+            ]
+        );
+        for value in [
+            "a:rsa-sha256:QQ==|",
+            "|a:rsa-sha256:QQ==",
+            "a:rsa-sha256:QQ==,|b:x:QQ==",
+        ] {
+            assert!(matches!(
+                sig(value),
+                Err(Error::Dkim2(Dkim2Error::SignatureSyntax(7)))
+            ));
+        }
     }
 
     #[test]
@@ -817,19 +826,23 @@ mod test {
             MessageInstance::parse(format!("m=3; h={many},h7:QQ==:QQ==;").as_bytes()),
             Err(Error::Dkim2(Dkim2Error::InstanceDuplicateHash(3)))
         ));
+        assert!(matches!(
+            MessageInstance::parse(b"m=3; h=sha256:QQ==:QQ==|sha256:Qg==:Qg==;"),
+            Err(Error::Dkim2(Dkim2Error::InstanceDuplicateHash(3)))
+        ));
         let instance =
-            MessageInstance::parse(b"m=3; h=sha512:QQ==:QQ==, SHA256:QQ==:QQ==, sha3:Qg==:Qg==;")
+            MessageInstance::parse(b"m=3; h=sha512:QQ==:QQ==, SHA256:QQ==:QQ== | sha3:Qg==:Qg==;")
                 .unwrap();
         assert_eq!(
             instance
                 .hashes
                 .iter()
-                .map(|hash| hash.name.clone())
+                .map(|hash| (hash.name.clone(), hash.group))
                 .collect::<Vec<_>>(),
             vec![
-                HashName::Known(Dkim2Hash::Sha512),
-                HashName::Unknown("SHA256".into()),
-                HashName::Unknown("sha3".into()),
+                (HashName::Known(Dkim2Hash::Sha512), 0),
+                (HashName::Unknown("SHA256".into()), 0),
+                (HashName::Unknown("sha3".into()), 1),
             ]
         );
         let mut written = Vec::new();
@@ -944,20 +957,15 @@ mod test {
         ));
     }
 
+    // -08 §14.6: an unknown algorithm is kept so that it counts as a PERMERROR in its group.
     #[test]
-    fn unknown_algorithm_in_s_is_ignored() {
+    fn unknown_algorithm_in_s_is_kept() {
         let v: &[u8] =
-            b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=banana:banana:,sel:ed25519-sha256:QQ==;";
+            b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=banana:banana:QQ==|sel:ed25519-sha256:QQ==;";
         let sig = Signature::parse(v).unwrap();
-        assert_eq!(sig.s.len(), 1);
-        assert_eq!(sig.s[0].selector, "sel");
-    }
-
-    #[test]
-    fn only_unknown_algorithms_yields_empty_s() {
-        let v: &[u8] = b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=banana:banana:;";
-        let sig = Signature::parse(v).unwrap();
-        assert!(sig.s.is_empty());
+        assert_eq!(sig.s.len(), 2);
+        assert_eq!(sig.s[0].a, AlgorithmName::Unknown("banana".into()));
+        assert_eq!(sig.s[1].selector, "sel");
     }
 
     #[test]
@@ -1009,19 +1017,66 @@ mod test {
     }
 
     #[test]
-    fn rsa_sha1_set_is_dropped() {
-        let v: &[u8] =
-            b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=sel:rsa-sha1:QQ==,sel2:ed25519-sha256:QQ==;";
-        let sig = Signature::parse(v).unwrap();
-        assert_eq!(sig.s.len(), 1);
-        assert_eq!(sig.s[0].selector, "sel2");
-    }
-
-    #[test]
-    fn only_rsa_sha1_yields_empty_s() {
+    fn rsa_sha1_is_unknown() {
         let v: &[u8] = b"i=1; m=1; t=0; d=ex.com; mf=YQ==; rt=Yg==; s=sel:rsa-sha1:QQ==;";
         let sig = Signature::parse(v).unwrap();
-        assert!(sig.s.is_empty());
+        assert_eq!(sig.s[0].a, AlgorithmName::Unknown("rsa-sha1".into()));
+    }
+
+    // -08 §8: an empty value is allowed unless the tag's own ABNF needs at least one character.
+    #[test]
+    fn empty_tag_values() {
+        let base = "i=1; m=1; t=0; d=ex.com;";
+        let rest = "mf=YQ==; rt=Yg==; s=sel:rsa-sha256:QQ==;";
+        let parse = |tags: &str| Signature::parse(format!("{base} {tags}").as_bytes());
+        for extra in ["n=", "x=", "x= ;", "n=;x=;"] {
+            assert!(parse(&format!("{rest} {extra}")).is_ok(), "{extra}");
+        }
+        assert_eq!(
+            parse(&format!("{rest} n=;")).unwrap().n.as_deref(),
+            Some("")
+        );
+        for tags in [
+            "mf=; rt=Yg==; s=sel:rsa-sha256:QQ==;",
+            "mf=YQ==; rt=; s=sel:rsa-sha256:QQ==;",
+            "mf=YQ==; rt=Yg==,; s=sel:rsa-sha256:QQ==;",
+            "mf=YQ==; rt=Yg==; s=sel:rsa-sha256:;",
+            "mf=YQ==; rt=Yg==; s=;",
+            "mf=YQ==; rt=Yg==; s=sel:rsa-sha256:QQ==; f=;",
+            "mf=YQ==; rt=Yg==; s=sel:rsa-sha256:QQ==; f=feedback,;",
+        ] {
+            assert!(parse(tags).is_err(), "{tags}");
+        }
+        assert!(MessageInstance::parse(b"m=1; h=sha256:QQ==:QQ==; x=;").is_ok());
+        for instance in [
+            "m=1; h=sha256:QQ==:QQ==; r=;",
+            "m=1; h=sha256::QQ==;",
+            "m=1; h=sha256:QQ==:;",
+            "m=1; h=;",
+        ] {
+            assert!(
+                MessageInstance::parse(instance.as_bytes()).is_err(),
+                "{instance}"
+            );
+        }
+    }
+
+    // -08 §14.2: valid JSON that breaks the recipe rules is an invalid Recipe, not invalid JSON.
+    #[test]
+    fn invalid_recipe_is_distinguished_from_invalid_json() {
+        let instance = |json: &[u8]| {
+            let mut hdr = b"m=2; h=sha256:QQ==:Qg==; r=".to_vec();
+            base64::STANDARD.encode_append(json, &mut hdr);
+            MessageInstance::parse(&hdr)
+        };
+        assert!(matches!(
+            instance(b"{\"h\":"),
+            Err(Error::Dkim2(Dkim2Error::InvalidJson(2)))
+        ));
+        assert!(matches!(
+            instance(br#"{"h":{"From":[{"d":"a","u":"b"}]}}"#),
+            Err(Error::Dkim2(Dkim2Error::InvalidRecipe { m: 2, .. }))
+        ));
     }
 
     #[test]

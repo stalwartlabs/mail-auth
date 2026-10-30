@@ -7,13 +7,10 @@
 //! Signing and verification keys backed by `aws-lc-rs`.
 
 use super::{
-    Algorithm, CryptoError, HashContext, HashImpl, HashOutput, Sha1, Sha256, Sha512, SigningKey,
-    VerifyingKey,
+    Algorithm, CryptoError, ED25519_PUBLIC_KEY_LEN, HashContext, HashImpl, HashOutput,
+    MLDSA44_MESSAGE_CAPACITY, Sha1, Sha256, Sha512, SigningKey, VerifyingKey,
     aws_lc_mldsa::MlDsa44,
-    composite::{
-        self, ED25519_PUBLIC_KEY_LEN, LABEL, PUBLIC_KEY_LEN, PrivateKey, PublicKey, SIGNATURE_LEN,
-        Seed, library_error, message_representative,
-    },
+    mldsa::{self, CONTEXT, SIGNATURE_LEN, Seed, library_error},
     rsa_private_key_heap_size,
 };
 use crate::{
@@ -354,7 +351,7 @@ impl VerifyingKey for RsaPublicKey {
             )
             .verify(&data, signature)
             .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
-            Algorithm::Ed25519Sha256 | Algorithm::MlDsa44Ed25519Sha512 => {
+            Algorithm::Ed25519Sha256 | Algorithm::MlDsa44 => {
                 Err(Error::Crypto(CryptoError::IncompatibleAlgorithms))
             }
         }
@@ -374,7 +371,7 @@ impl VerifyingKey for RsaPublicKey {
             )
             .verify(input, signature)
             .map_err(|_| Error::Crypto(CryptoError::FailedVerification)),
-            Algorithm::Ed25519Sha256 | Algorithm::MlDsa44Ed25519Sha512 => {
+            Algorithm::Ed25519Sha256 | Algorithm::MlDsa44 => {
                 Err(Error::Crypto(CryptoError::IncompatibleAlgorithms))
             }
         }
@@ -390,15 +387,18 @@ impl VerifyingKey for RsaPublicKey {
 }
 
 pub(crate) struct Ed25519PublicKey {
-    inner: UnparsedPublicKey<Vec<u8>>,
+    inner: UnparsedPublicKey<[u8; ED25519_PUBLIC_KEY_LEN]>,
 }
 
 impl Ed25519PublicKey {
     pub(crate) fn verifying_key_from_bytes(
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
+        let key: [u8; ED25519_PUBLIC_KEY_LEN] = bytes
+            .try_into()
+            .map_err(|_| Error::Crypto(CryptoError::MalformedPublicKey))?;
         Ok(Box::new(Self {
-            inner: UnparsedPublicKey::new(&ED25519, bytes.to_vec()),
+            inner: UnparsedPublicKey::new(&ED25519, key),
         }))
     }
 }
@@ -433,27 +433,21 @@ impl VerifyingKey for Ed25519PublicKey {
             .verify(hasher.complete().as_ref(), signature)
             .map_err(|_| Error::Crypto(CryptoError::FailedVerification))
     }
-
-    fn heap_size(&self) -> usize {
-        self.inner.as_ref().len()
-    }
 }
 
-/// An ML-DSA-44/Ed25519 composite private key for `mldsa44-ed25519-sha512`
-/// signing (DKIM2 only), the `id-MLDSA44-Ed25519-SHA512` algorithm of
-/// draft-ietf-lamps-pq-composite-sigs.
+/// An ML-DSA-44 private key for `mldsa44` signing (DKIM2 only,
+/// draft-ietf-dkim-dkim2-spec Section 3.4).
 ///
-/// The private key is the 32-byte ML-DSA-44 seed followed by the 32-byte
-/// Ed25519 seed. ML-DSA-44 signatures are hedged (randomized), as FIPS 204
-/// recommends, so signing the same input twice gives different signatures.
-pub struct MlDsa44Ed25519Key {
-    mldsa: MlDsa44,
-    ed25519: Ed25519KeyPair,
+/// Signatures use "pure" ML-DSA-44 (FIPS 204) with the `DKIM2` context
+/// string. They are hedged (randomized), as the specification recommends, so
+/// signing the same input twice gives different signatures.
+pub struct MlDsa44Key {
+    inner: MlDsa44,
 }
 
-impl MlDsa44Ed25519Key {
+impl MlDsa44Key {
     /// Generates a new random key and returns it as PKCS #8 DER bytes (the
-    /// `id-MLDSA44-Ed25519-SHA512` private key encoding), ready for
+    /// RFC 9881 seed-only private key encoding), ready for
     /// [`from_pkcs8_der`](Self::from_pkcs8_der).
     ///
     /// # Errors
@@ -461,108 +455,93 @@ impl MlDsa44Ed25519Key {
     /// Returns [`Error::Crypto`] with [`CryptoError::Library`] if the system
     /// random number generator fails.
     pub fn generate_pkcs8() -> Result<Vec<u8>> {
-        let mut mldsa = Seed::default();
-        let mut ed25519 = Seed::default();
-        aws_lc_rs::rand::fill(&mut mldsa)
-            .and_then(|()| aws_lc_rs::rand::fill(&mut ed25519))
+        let mut seed = Seed::default();
+        aws_lc_rs::rand::fill(&mut seed)
             .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?;
-        Ok(composite::pkcs8_der(&mldsa, &ed25519))
+        Ok(mldsa::pkcs8_der(&seed))
     }
 
-    /// Loads a key from PKCS #8 DER bytes holding an
-    /// `id-MLDSA44-Ed25519-SHA512` private key.
+    /// Loads a key from PKCS #8 DER bytes holding an ML-DSA-44 private key in
+    /// the RFC 9881 seed-only or both (seed and expanded key) form. The key
+    /// is derived from the seed.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Crypto`] with [`CryptoError::Library`] if the key
-    /// cannot be decoded.
+    /// cannot be decoded or has no seed.
     pub fn from_pkcs8_der(pkcs8_der: &[u8]) -> Result<Self> {
-        Self::from_private_key(PrivateKey::from_pkcs8_der(pkcs8_der)?)
+        Self::from_seed(mldsa::seed_from_pkcs8_der(pkcs8_der)?)
     }
 
-    /// Loads a key from its 64-byte raw form: the ML-DSA-44 seed followed by
-    /// the Ed25519 seed.
+    /// Loads a key from its 32-byte seed.
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Crypto`] with [`CryptoError::Library`] if the key has
-    /// the wrong length or cannot be expanded.
+    /// Returns [`Error::Crypto`] with [`CryptoError::Library`] if the seed
+    /// has the wrong length or cannot be expanded.
     pub fn from_raw_private_key(raw: &[u8]) -> Result<Self> {
-        Self::from_private_key(PrivateKey::from_raw(raw)?)
+        Self::from_seed(mldsa::seed_from_raw(raw)?)
     }
 
-    fn from_private_key(key: PrivateKey<'_>) -> Result<Self> {
-        Ok(Self {
-            mldsa: MlDsa44::from_seed(key.mldsa)
-                .ok_or_else(|| library_error("Invalid ML-DSA-44 seed"))?,
-            ed25519: Ed25519KeyPair::from_seed_unchecked(key.ed25519)
-                .map_err(|err| Error::Crypto(CryptoError::Library(err.to_string())))?,
-        })
+    fn from_seed(seed: &Seed) -> Result<Self> {
+        MlDsa44::from_seed(seed)
+            .map(|inner| Self { inner })
+            .ok_or_else(|| library_error("Invalid ML-DSA-44 seed"))
     }
 
-    /// Returns the 1344-byte composite public key (the ML-DSA-44 public key
-    /// followed by the Ed25519 public key), as published in the `p=` tag of
-    /// a `k=mldsa44-ed25519-sha512` key record.
+    /// Returns the 1312-byte ML-DSA-44 public key, as published in the `p=`
+    /// tag of a `k=mldsa44` key record.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Crypto`] with [`CryptoError::Library`] if the backend
-    /// cannot export the ML-DSA-44 public key.
+    /// cannot export the public key.
     pub fn public_key(&self) -> Result<Vec<u8>> {
-        let mldsa = self
-            .mldsa
+        self.inner
             .public_key()
-            .ok_or_else(|| library_error("Cannot export the ML-DSA-44 public key"))?;
-        let mut key = Vec::with_capacity(PUBLIC_KEY_LEN);
-        key.extend_from_slice(&mldsa);
-        key.extend_from_slice(self.ed25519.public_key().as_ref());
-        Ok(key)
+            .map(Vec::from)
+            .ok_or_else(|| library_error("Cannot export the ML-DSA-44 public key"))
     }
 }
 
-impl SigningKey for MlDsa44Ed25519Key {
-    type Hasher = Sha512;
+impl SigningKey for MlDsa44Key {
+    type Hasher = Sha256;
 
     fn sign(&self, input: impl Writable) -> Result<Vec<u8>> {
-        let representative = message_representative(input);
-        let mldsa = self
-            .mldsa
-            .sign(&representative, LABEL)
-            .ok_or_else(|| library_error("ML-DSA-44 signing failed"))?;
-        let mut signature = Vec::with_capacity(SIGNATURE_LEN);
-        signature.extend_from_slice(&mldsa);
-        signature.extend_from_slice(self.ed25519.sign(&representative).as_ref());
-        Ok(signature)
+        let mut message = Vec::with_capacity(MLDSA44_MESSAGE_CAPACITY);
+        input.write(&mut message);
+        self.inner
+            .sign(&message, CONTEXT)
+            .map(Vec::from)
+            .ok_or_else(|| library_error("ML-DSA-44 signing failed"))
     }
 
     fn algorithm(&self) -> Algorithm {
-        Algorithm::MlDsa44Ed25519Sha512
+        Algorithm::MlDsa44
     }
 
     fn heap_size(&self) -> usize {
-        MLDSA44_PRIVATE_KEY_HEAP_SIZE + ED25519_PRIVATE_KEY_HEAP_SIZE
+        MLDSA44_PRIVATE_KEY_HEAP_SIZE
     }
 }
 
-pub(crate) struct MlDsa44Ed25519PublicKey {
-    mldsa: MlDsa44,
-    ed25519: UnparsedPublicKey<[u8; ED25519_PUBLIC_KEY_LEN]>,
+pub(crate) struct MlDsa44PublicKey {
+    inner: MlDsa44,
 }
 
-impl MlDsa44Ed25519PublicKey {
+impl MlDsa44PublicKey {
     pub(crate) fn verifying_key_from_bytes(
         bytes: &[u8],
     ) -> Result<Box<dyn VerifyingKey + Send + Sync>> {
-        let key = PublicKey::from_bytes(bytes)?;
+        let key = mldsa::public_key_from_bytes(bytes)?;
         Ok(Box::new(Self {
-            mldsa: MlDsa44::from_public_key(key.mldsa)
-                .ok_or_else(|| library_error("Invalid ML-DSA-44 public key"))?,
-            ed25519: UnparsedPublicKey::new(&ED25519, *key.ed25519),
+            inner: MlDsa44::from_public_key(key)
+                .ok_or(Error::Crypto(CryptoError::MalformedPublicKey))?,
         }))
     }
 }
 
-impl VerifyingKey for MlDsa44Ed25519PublicKey {
+impl VerifyingKey for MlDsa44PublicKey {
     fn verify<'a>(
         &self,
         _: &mut dyn Iterator<Item = (&'a [u8], &'a [u8])>,
@@ -574,18 +553,13 @@ impl VerifyingKey for MlDsa44Ed25519PublicKey {
     }
 
     fn verify_bytes(&self, input: &[u8], signature: &[u8], algorithm: Algorithm) -> Result<()> {
-        if !matches!(algorithm, Algorithm::MlDsa44Ed25519Sha512) {
+        if !matches!(algorithm, Algorithm::MlDsa44) {
             return Err(Error::Crypto(CryptoError::IncompatibleAlgorithms));
         }
-        let signature = composite::Signature::from_bytes(signature)
-            .ok_or(Error::Crypto(CryptoError::FailedVerification))?;
-        let representative = message_representative(input);
-        if self.mldsa.verify(&representative, LABEL, signature.mldsa)
-            && self
-                .ed25519
-                .verify(&representative, signature.ed25519)
-                .is_ok()
-        {
+        let signature: &[u8; SIGNATURE_LEN] = signature
+            .try_into()
+            .map_err(|_| Error::Crypto(CryptoError::FailedVerification))?;
+        if self.inner.verify(input, CONTEXT, signature) {
             Ok(())
         } else {
             Err(Error::Crypto(CryptoError::FailedVerification))

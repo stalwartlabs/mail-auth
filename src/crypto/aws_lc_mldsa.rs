@@ -5,10 +5,10 @@
  */
 
 //! ML-DSA-44 with a signature context string, through the AWS-LC `EVP` API.
-//! `aws-lc-rs` only exposes ML-DSA with an empty context, which the
-//! composite signature cannot use.
+//! `aws-lc-rs` only exposes ML-DSA with an empty context, which DKIM2 cannot
+//! use.
 
-use super::composite::{MLDSA44_PUBLIC_KEY_LEN, MLDSA44_SIGNATURE_LEN, Seed};
+use super::mldsa::{PUBLIC_KEY_LEN, SIGNATURE_LEN, Seed};
 use aws_lc_sys::{
     EVP_DigestSign, EVP_DigestSignInit, EVP_DigestVerify, EVP_DigestVerifyInit, EVP_MD_CTX,
     EVP_MD_CTX_free, EVP_MD_CTX_new, EVP_PKEY, EVP_PKEY_CTX,
@@ -42,31 +42,27 @@ impl MlDsa44 {
         .map(Self)
     }
 
-    pub(crate) fn from_public_key(key: &[u8; MLDSA44_PUBLIC_KEY_LEN]) -> Option<Self> {
-        // SAFETY: key is readable for MLDSA44_PUBLIC_KEY_LEN bytes, which AWS-LC copies; a null return is handled by NonNull::new.
+    pub(crate) fn from_public_key(key: &[u8; PUBLIC_KEY_LEN]) -> Option<Self> {
+        // SAFETY: key is readable for PUBLIC_KEY_LEN bytes, which AWS-LC copies; a null return is handled by NonNull::new.
         NonNull::new(unsafe {
             EVP_PKEY_pqdsa_new_raw_public_key(NID_MLDSA44, key.as_ptr(), key.len())
         })
         .map(Self)
     }
 
-    pub(crate) fn public_key(&self) -> Option<[u8; MLDSA44_PUBLIC_KEY_LEN]> {
-        let mut key = [0u8; MLDSA44_PUBLIC_KEY_LEN];
+    pub(crate) fn public_key(&self) -> Option<[u8; PUBLIC_KEY_LEN]> {
+        let mut key = [0u8; PUBLIC_KEY_LEN];
         let mut len = key.len();
         // SAFETY: self.0 is a valid EVP_PKEY and key is writable for len bytes (its capacity), so at most len bytes are written; status and len are checked.
         let status =
             unsafe { EVP_PKEY_get_raw_public_key(self.0.as_ptr(), key.as_mut_ptr(), &mut len) };
-        (status == SUCCESS && len == MLDSA44_PUBLIC_KEY_LEN).then_some(key)
+        (status == SUCCESS && len == PUBLIC_KEY_LEN).then_some(key)
     }
 
-    pub(crate) fn sign(
-        &self,
-        message: &[u8],
-        context: &[u8],
-    ) -> Option<[u8; MLDSA44_SIGNATURE_LEN]> {
+    pub(crate) fn sign(&self, message: &[u8], context: &[u8]) -> Option<[u8; SIGNATURE_LEN]> {
         let ctx = DigestContext::new()?;
         let pctx = ctx.init(self, Operation::Sign)?;
-        let mut signature = [0u8; MLDSA44_SIGNATURE_LEN];
+        let mut signature = [0u8; SIGNATURE_LEN];
         let mut len = signature.len();
         // SAFETY: ctx is live and initialized for signing, and pctx is owned by ctx; context, message and signature are valid for their lengths, with len set to the
         // capacity of signature (AWS-LC copies the context and rejects more than 255 bytes); both return codes are checked.
@@ -84,14 +80,14 @@ impl MlDsa44 {
                 message.len(),
             )
         };
-        (status == SUCCESS && len == MLDSA44_SIGNATURE_LEN).then_some(signature)
+        (status == SUCCESS && len == SIGNATURE_LEN).then_some(signature)
     }
 
     pub(crate) fn verify(
         &self,
         message: &[u8],
         context: &[u8],
-        signature: &[u8; MLDSA44_SIGNATURE_LEN],
+        signature: &[u8; SIGNATURE_LEN],
     ) -> bool {
         let Some(ctx) = DigestContext::new() else {
             return false;

@@ -248,9 +248,10 @@ impl From<HashAlgorithm> for u64 {
 impl From<Algorithm> for HashAlgorithm {
     fn from(a: Algorithm) -> Self {
         match a {
-            Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 => HashAlgorithm::Sha256,
+            Algorithm::RsaSha256 | Algorithm::Ed25519Sha256 | Algorithm::MlDsa44 => {
+                HashAlgorithm::Sha256
+            }
             Algorithm::RsaSha1 => HashAlgorithm::Sha1,
-            Algorithm::MlDsa44Ed25519Sha512 => HashAlgorithm::Sha512,
         }
     }
 }

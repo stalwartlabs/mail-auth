@@ -287,10 +287,9 @@ impl TxtRecordParser for DomainKey {
                                 key_type = VerifyingKeyType::Ed25519;
                             }
                             b'm' | b'M'
-                                if header.match_bytes(b"ldsa44-ed25519-sha512")
-                                    && header.seek_tag_end() =>
+                                if header.match_bytes(b"ldsa44") && header.seek_tag_end() =>
                             {
-                                key_type = VerifyingKeyType::MlDsa44Ed25519;
+                                key_type = VerifyingKeyType::MlDsa44;
                             }
                             b';' => (),
                             _ => {

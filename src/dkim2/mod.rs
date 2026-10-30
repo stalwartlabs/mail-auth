@@ -15,10 +15,11 @@
 //!
 //! Implemented specifications:
 //!
-//! - [draft-ietf-dkim-dkim2-spec-07](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/):
+//! - [draft-ietf-dkim-dkim2-spec-08](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/):
 //!   DKIM2 Signatures. Section references (`§`) in this module point to this draft.
 //! - [draft-ietf-dkim-dkim2-dns](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-dns/):
-//!   DKIM2 DNS Records, including the `mldsa44-ed25519-sha512` key type.
+//!   DKIM2 DNS Records. Pure ML-DSA-44 keys are published with `k=mldsa44`,
+//!   which the DNS draft does not define yet.
 //!
 //! Sign with [`Dkim2Signer`]. Verify a message with
 //! [`MessageAuthenticator::verify_dkim2`](crate::MessageAuthenticator::verify_dkim2)
@@ -59,12 +60,14 @@ pub use sign::{Dkim2Signed, Envelope, Hop};
 /// and [`selector`](Dkim2Signer::selector) sets the selector of the first key,
 /// which yields a `Dkim2Signer<`[`Ready`](crate::signer::Ready)`>`. Only a
 /// ready signer can sign. Optional settings on a ready signer:
-/// [`additional_key`](Dkim2Signer::additional_key) adds one more signature
-/// under another selector and algorithm, [`hashes`](Dkim2Signer::hashes)
+/// [`additional_key`](Dkim2Signer::additional_key) adds an alternative
+/// signature under another selector (`|`),
+/// [`hybrid_key`](Dkim2Signer::hybrid_key) adds a signature that must pass
+/// together with the previous one (`,`), [`hashes`](Dkim2Signer::hashes)
 /// selects the `Message-Instance` hash algorithms, [`flags`](Dkim2Signer::flags)
 /// sets the `f=` tag, [`nonce`](Dkim2Signer::nonce) sets the `n=` tag and
 /// [`out_of_band_arrangement`](Dkim2Signer::out_of_band_arrangement) allows
-/// signing messages that are not Validly Signed DKIM2 Messages.
+/// signing messages that are not Fully Verified DKIM2 Messages.
 ///
 /// The signing methods ([`sign`](Dkim2Signer::sign),
 /// [`sign_revised`](Dkim2Signer::sign_revised),
@@ -116,6 +119,7 @@ pub struct Dkim2Signer<State = NeedDomain> {
 pub(crate) struct KeyEntry {
     pub(crate) key: DkimKey,
     pub(crate) selector: String,
+    pub(crate) group: u32,
 }
 
 /// A parsed `DKIM2-Signature` header field (§10).
@@ -136,7 +140,8 @@ pub struct Signature {
     pub t: u64,
     /// `d=`: signing domain, used to look up the public key (§10.8).
     pub d: String,
-    /// `s=`: one signature value per selector and algorithm (§10.9).
+    /// `s=`: one signature value per selector, ordered by
+    /// [`group`](SignatureValue::group) (§10.9).
     pub s: Vec<SignatureValue>,
     /// `mf=` and `rt=` (the SMTP envelope of the hop), or `nd=` (the domain
     /// of the next signer) (§10.5 to §10.7).
@@ -152,17 +157,57 @@ pub struct Signature {
 /// One entry of the `s=` tag of a `DKIM2-Signature` (§10.9).
 ///
 /// A signature carries one entry per signing key, which gives algorithmic
-/// dexterity: each entry names its own selector and algorithm.
+/// agility: each entry names its own selector and algorithm. Entries that
+/// share a [`group`](Self::group) are separated by `,` and all of them must
+/// pass; groups are separated by `|` and the signature passes if any group
+/// does.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct SignatureValue {
     /// Selector under which the public key is published, queried as
     /// `<selector>._domainkey.<d>`.
     pub selector: String,
-    /// Signing algorithm (`rsa-sha256`, `ed25519-sha256` or
-    /// `mldsa44-ed25519-sha512`).
-    pub a: Algorithm,
+    /// Signing algorithm (`rsa-sha256`, `ed25519-sha256` or `mldsa44`), or
+    /// the name of one this crate does not implement.
+    pub a: AlgorithmName,
     /// Raw signature bytes (base64-decoded).
     pub b: Vec<u8>,
+    /// Index of the `|`-separated group the entry belongs to, starting at 0.
+    /// Entries of one group are contiguous.
+    pub group: u32,
+}
+
+/// The algorithm name of a [`SignatureValue`]: an algorithm this crate
+/// implements, or the name of one it does not, which never passes (§14.6).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AlgorithmName {
+    /// A supported algorithm.
+    Known(Algorithm),
+    /// An unsupported algorithm, kept verbatim.
+    Unknown(Box<str>),
+}
+
+impl AlgorithmName {
+    /// Returns the algorithm name as it appears in the `s=` tag.
+    pub fn as_str(&self) -> &str {
+        match self {
+            AlgorithmName::Known(algorithm) => algorithm.name(),
+            AlgorithmName::Unknown(name) => name,
+        }
+    }
+
+    /// Returns the supported algorithm, or `None` for an unknown name.
+    pub fn known(&self) -> Option<Algorithm> {
+        match self {
+            AlgorithmName::Known(algorithm) => Some(*algorithm),
+            AlgorithmName::Unknown(_) => None,
+        }
+    }
+}
+
+impl From<Algorithm> for AlgorithmName {
+    fn from(algorithm: Algorithm) -> Self {
+        AlgorithmName::Known(algorithm)
+    }
 }
 
 /// How a `DKIM2-Signature` links to the next hop in the chain of custody
@@ -233,7 +278,7 @@ pub struct MessageInstance {
     /// `m=`: revision number, starting at 1 for the originator (§9.1).
     pub m: u32,
     /// `h=`: header and body hashes of this revision, one entry per hash
-    /// algorithm (§9.3).
+    /// algorithm, ordered by [`group`](MessageHash::group) (§9.3).
     pub hashes: Vec<MessageHash>,
     /// `r=`: recipe that recreates the previous revision from this one, or
     /// `None` if the tag is absent (§9.2).
@@ -274,7 +319,7 @@ impl Dkim2Hash {
 }
 
 /// The hash name of a [`MessageHash`]: an algorithm this crate implements, or
-/// the name of one it does not, which verifiers disregard (§3.5).
+/// the name of one it does not, which never passes (§14.7).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HashName {
     /// A supported algorithm.
@@ -308,6 +353,10 @@ impl From<Dkim2Hash> for HashName {
 }
 
 /// One entry of the `h=` tag of a `Message-Instance` (§9.3 and §6).
+///
+/// Entries that share a [`group`](Self::group) are separated by `,` and all
+/// of them must pass; groups are separated by `|` and the hashes pass if any
+/// group does.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MessageHash {
     /// Hash algorithm name.
@@ -316,6 +365,9 @@ pub struct MessageHash {
     pub header_hash: Vec<u8>,
     /// Raw digest of the body hash (§6.1).
     pub body_hash: Vec<u8>,
+    /// Index of the `|`-separated group the entry belongs to, starting at 0.
+    /// Entries of one group are contiguous.
+    pub group: u32,
 }
 
 impl Signature {

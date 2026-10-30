@@ -50,7 +50,7 @@ Sent via the friends@${domain} list
 const ALGORITHMS = {
   rsa: "RSA-SHA256",
   ed25519: "Ed25519-SHA256",
-  "mldsa44-ed25519-sha512": "MLDSA44-Ed25519-SHA512",
+  "mldsa44": "MLDSA44",
 };
 
 const TXT_CHUNK = 255;
@@ -183,7 +183,7 @@ function refreshContextStrips() {
     el.innerHTML = `${dns}<a href="#" data-goto="settings">Settings</a>`;
   });
   $("d1-algo-note").hidden =
-    state.identity?.algorithm !== "mldsa44-ed25519-sha512";
+    state.identity?.algorithm !== "mldsa44";
 }
 
 function hostOf(url) {

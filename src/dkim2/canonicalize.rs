@@ -150,7 +150,6 @@ pub(super) fn is_non_signed_header(name: &[u8]) -> bool {
         b"arc-message-signature",
         b"arc-seal",
         b"authentication-results",
-        b"auto-submitted",
         b"delivered-to",
         b"dkim-signature",
         b"dkim2-signature",
@@ -160,7 +159,6 @@ pub(super) fn is_non_signed_header(name: &[u8]) -> bool {
         b"received",
         b"return-path",
         b"sio-label-history",
-        b"vbr-info",
         b"x400-received",
         b"x400-trace",
     ) || matches!(name, [b'x' | b'X', b'-', ..])
@@ -197,11 +195,9 @@ mod test {
             "Received-SPF",
             "received-dkim2",
             "Apparently-To",
-            "auto-submitted",
             "DL-Expansion-History",
             "Original-Recipient",
             "SIO-Label-History",
-            "VBR-Info",
             "X400-Received",
             "x400-trace",
         ] {
@@ -220,6 +216,8 @@ mod test {
             "receivedx",
             "x400",
             "x",
+            "Auto-Submitted",
+            "vbr-info",
         ] {
             assert!(
                 !is_non_signed_header(name.as_bytes()),

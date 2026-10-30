@@ -14,7 +14,7 @@ use crate::{
 
 impl Dkim2Signer<NeedDomain> {
     /// Starts a signer with its first private key (RSA-SHA256,
-    /// Ed25519-SHA256 or MLDSA44-Ed25519-SHA512). Continue with
+    /// Ed25519-SHA256 or ML-DSA-44). Continue with
     /// [`domain`](Self::domain).
     pub fn from_key(key: impl Into<DkimKey>) -> Dkim2Signer<NeedDomain> {
         Dkim2Signer {
@@ -22,6 +22,7 @@ impl Dkim2Signer<NeedDomain> {
             keys: vec![KeyEntry {
                 key: key.into(),
                 selector: String::new(),
+                group: 0,
             }],
             domain: String::new(),
             hashes: vec![Dkim2Hash::Sha256],
@@ -66,24 +67,50 @@ impl Dkim2Signer<NeedSelector> {
 }
 
 impl Dkim2Signer<Ready> {
-    /// Adds another signing key under its own selector.
+    /// Adds another signing key under its own selector as an alternative to
+    /// the keys added before it.
     ///
-    /// Each key adds one entry to the `s=` tag of the same signature
-    /// (algorithmic dexterity, §10.9). Selectors must be distinct, and at
-    /// most two keys may use the same algorithm; signing fails with
+    /// The key adds a new `|`-separated group to the `s=` tag of the same
+    /// signature (algorithmic agility, §10.9): the signature passes when
+    /// either this key or an earlier group verifies, so a Verifier that does
+    /// not implement one of the algorithms can still check the others.
+    /// Selectors must be distinct and a signature holds at most eight keys;
+    /// signing fails with
     /// [`Dkim2Error::DuplicateSelector`](super::Dkim2Error::DuplicateSelector)
     /// or [`Dkim2Error::TooManySelectors`](super::Dkim2Error::TooManySelectors)
     /// otherwise.
-    pub fn additional_key(mut self, key: impl Into<DkimKey>, selector: impl Into<String>) -> Self {
+    pub fn additional_key(self, key: impl Into<DkimKey>, selector: impl Into<String>) -> Self {
+        let group = self
+            .keys
+            .last()
+            .map_or(0, |entry| entry.group.saturating_add(1));
+        self.push_key(key.into(), selector.into(), group)
+    }
+
+    /// Adds another signing key under its own selector that must verify
+    /// together with the key added before it.
+    ///
+    /// The key joins the last `|`-separated group of the `s=` tag with a `,`
+    /// (a "hybrid" signature, §10.9): that group passes only when every key
+    /// in it verifies. The same limits as
+    /// [`additional_key`](Self::additional_key) apply.
+    pub fn hybrid_key(self, key: impl Into<DkimKey>, selector: impl Into<String>) -> Self {
+        let group = self.keys.last().map_or(0, |entry| entry.group);
+        self.push_key(key.into(), selector.into(), group)
+    }
+
+    fn push_key(mut self, key: DkimKey, selector: String, group: u32) -> Self {
         self.keys.push(KeyEntry {
-            key: key.into(),
-            selector: selector.into(),
+            key,
+            selector,
+            group,
         });
         self
     }
 
     /// Sets the hash algorithms of the `Message-Instance` header fields this
-    /// signer adds (§3.1 and §9.3). Repeated algorithms are added once; an
+    /// signer adds (§3.1 and §9.3). They form a single `,`-separated group,
+    /// so all of them must match. Repeated algorithms are added once; an
     /// empty list keeps the default, SHA-256 only.
     pub fn hashes(mut self, hashes: impl IntoIterator<Item = Dkim2Hash>) -> Self {
         let mut selected = Vec::with_capacity(2);
@@ -129,7 +156,7 @@ impl Dkim2Signer<Ready> {
     }
 
     /// Declares an out-of-band arrangement (§12 and §12.3) that allows this
-    /// signer to sign messages that are not Validly Signed DKIM2 Messages,
+    /// signer to sign messages that are not Fully Verified DKIM2 Messages,
     /// such as a message whose most recent signature carries `nd=` for an
     /// imaginary hop made by the same system. Without it, a message that
     /// already has DKIM2 header fields is signed only with a passing full

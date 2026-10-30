@@ -57,11 +57,7 @@ pub fn generate_key(
             "rsa",
         ),
         "ed25519" => (DkimKeyPair::generate_ed25519(), "PRIVATE KEY", "ed25519"),
-        "mldsa44-ed25519-sha512" => (
-            DkimKeyPair::generate_mldsa44_ed25519(),
-            "PRIVATE KEY",
-            "mldsa44-ed25519-sha512",
-        ),
+        "mldsa44" => (DkimKeyPair::generate_mldsa44(), "PRIVATE KEY", "mldsa44"),
         other => return Err(format!("Unknown algorithm: {other}")),
     };
     let pair = pair.map_err(|err| err.to_string())?;
@@ -85,10 +81,7 @@ pub fn inspect_key(
     let (k, public_key) = match load_key(key_pem, algorithm)? {
         DkimKey::Rsa(key) => ("rsa", key.public_key()),
         DkimKey::Ed25519(key) => ("ed25519", key.public_key()),
-        DkimKey::MlDsa44Ed25519(key) => (
-            "mldsa44-ed25519-sha512",
-            key.public_key().map_err(|err| err.to_string())?,
-        ),
+        DkimKey::MlDsa44(key) => ("mldsa44", key.public_key().map_err(|err| err.to_string())?),
     };
     if public_key.is_empty() {
         return Err("Could not derive the public key".to_string());

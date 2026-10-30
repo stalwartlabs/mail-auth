@@ -587,6 +587,7 @@ impl AsAuthResult for Error {
             Error::Crypto(CryptoError::IncompatibleAlgorithms) => {
                 "incompatible record/signature algorithms"
             }
+            Error::Crypto(CryptoError::MalformedPublicKey) => "malformed public key",
             Error::Dns(DnsError::Resolver(_)) => "dns error",
             Error::Dns(DnsError::RecordNotFound(_)) => "dns record not found",
             Error::Dkim(DkimError::UnsupportedVersion) => "unsupported version",

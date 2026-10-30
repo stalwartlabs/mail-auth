@@ -11,17 +11,17 @@ protocols. The library aims to be fast, safe and correct while supporting all ma
 Features:
 
 - **DomainKeys Identified Mail v2 (DKIMv2)**:
-  - Implements [draft-ietf-dkim-dkim2-spec-07](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/).
-  - ED25519-SHA256, RSA-SHA256 and post-quantum MLDSA44-Ed25519-SHA512 (ML-DSA-44 + Ed25519 composite) signing and chain verification, with SHA-256 and SHA-512 message hashes.
-  - Algorithmic dexterity: a single `DKIM2-Signature` can carry several signatures under different selectors and algorithms.
+  - Implements [draft-ietf-dkim-dkim2-spec-08](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/).
+  - ED25519-SHA256, RSA-SHA256 and post-quantum ML-DSA-44 signing and chain verification, with SHA-256 and SHA-512 message hashes.
+  - Algorithmic agility: a single `DKIM2-Signature` can carry several signatures under different selectors and algorithms, combined as alternatives (`|`) or as hybrids that must all verify (`,`).
   - SMTP envelope (MAIL FROM / RCPT TO) and next-domain chain binding, with per-hop `Message-Instance` hashes and modification recipes.
-  - Authentic `From` checks, full and provisional (§13.1) verification, and a signer that only extends Validly Signed DKIM2 Messages.
+  - Authentic `From` checks, full and provisional (§13.2) verification, and a signer that only extends Fully Verified DKIM2 Messages.
   - Verifiable delivery status notification (DSN) authentication.
 - **DomainKeys Identified Mail v1 (DKIMv1)**:
   - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 signing and verification.
   - DKIM Authorized Third-Party Signatures.
   - DKIM failure reporting records (RFC 6651).
-  - Key-pair generation for RSA, Ed25519 and the DKIM2 MLDSA44-Ed25519 composite (enabled by the `generate` feature).
+  - Key-pair generation for RSA, Ed25519 and the DKIM2 ML-DSA-44 algorithm (enabled by the `generate` feature).
 - **Sender Policy Framework (SPF)**:
   - Policy evaluation.
   - SPF failure reporting modifiers (RFC 6652).
@@ -346,9 +346,10 @@ To fuzz the library with `cargo-fuzz`:
 ## Conformed RFCs
 
 ### DKIM2
-- [draft-ietf-dkim-dkim2-spec-07 - DKIM2 Signatures](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/)
+- [draft-ietf-dkim-dkim2-spec-08 - DKIM2 Signatures](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/)
 - [draft-ietf-dkim-dkim2-dns - DKIM2 DNS Records](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-dns/)
-- [draft-ietf-lamps-pq-composite-sigs - Composite ML-DSA](https://datatracker.ietf.org/doc/draft-ietf-lamps-pq-composite-sigs/) (`id-MLDSA44-Ed25519-SHA512`)
+- [FIPS 204 - Module-Lattice-Based Digital Signature Standard](https://csrc.nist.gov/pubs/fips/204/final) (ML-DSA-44)
+- [RFC 9881 - ML-DSA in X.509](https://datatracker.ietf.org/doc/rfc9881/) (ML-DSA-44 private key encoding)
 
 ### DKIM1
 - [RFC 6376 - DomainKeys Identified Mail (DKIM) Signatures](https://datatracker.ietf.org/doc/html/rfc6376)

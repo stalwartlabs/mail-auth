@@ -215,9 +215,9 @@ fn dkim2_check(output: &Dkim2Output<'_>, message: &AuthenticatedMessage<'_>) -> 
     let (status, top_err) = dkim2_result_label(output.result());
     let mut detail = String::new();
     match output.verification() {
-        Verification::Full => detail.push_str("Full verification (-07 §14)"),
+        Verification::Full => detail.push_str("Full verification (-08 §14)"),
         Verification::Provisional => detail.push_str(
-            "Provisional verification (-07 §13.1): only the most recent signature and \
+            "Provisional verification (-08 §13.2): only the most recent signature and \
              Message-Instance were checked",
         ),
     }
@@ -270,7 +270,7 @@ fn dkim2_check(output: &Dkim2Output<'_>, message: &AuthenticatedMessage<'_>) -> 
 fn signature_summary(signature: &Signature) -> String {
     let mut line = format!("i={} m={} d={}", signature.i, signature.m, signature.d);
     for value in &signature.s {
-        let _ = write!(line, " s={}:{}", value.selector, algorithm_name(value.a));
+        let _ = write!(line, " s={}:{}", value.selector, value.a.as_str());
     }
     match &signature.chain {
         ChainBinding::Envelope { mail_from, rcpt_to } => {

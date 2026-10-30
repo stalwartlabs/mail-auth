@@ -2,7 +2,19 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.14.2] - Unreleased
+## [0.15.0] - 2026-10-30
+
+### Added
+- DKIM2: updated to [draft-ietf-dkim-dkim2-spec-08](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-08) (from -07).
+- DKIM2: pure ML-DSA-44 (`mldsa44`) signatures, published as `k=mldsa44` with the raw public key (`crypto::MlDsa44Key`, `DkimKeyPair::generate_mldsa44`).
+- DKIM2: AND (`,`) and OR (`|`) groups in `s=` and `h=`; `Dkim2Signer::additional_key` adds an alternative key and the new `hybrid_key` a key that must also verify.
+
+### Changed
+- DKIM2: timestamp, envelope, chain of custody and `From` errors are now `Fail` instead of `PermError`, and a null body recipe fails full verification.
+- DKIM2: `Dkim2Error::NotValidlySigned` is renamed `NotFullyVerified`, and several errors were added or replaced to match the -08 result texts.
+
+### Removed
+- DKIM2: the `mldsa44-ed25519-sha512` composite algorithm.
 
 ### Fixed
 - DKIM: relaxed body canonicalization now ignores whitespace-only lines at the end of the body (RFC 6376, Section 3.4.4), which produced a `bh=` that other implementations rejected (#62).

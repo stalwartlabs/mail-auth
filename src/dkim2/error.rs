@@ -35,11 +35,25 @@ pub enum Dkim2Error {
     InstanceNotSigned(u32),
     /// The `Message-Instance` lists the same hash algorithm twice.
     InstanceDuplicateHash(u32),
-    /// The recipe (`r=` tag) of the `Message-Instance` is not valid JSON or
-    /// does not follow the recipe schema (§5).
+    /// The recipe (`r=` tag) of the `Message-Instance` is not valid JSON.
     InvalidJson(u32),
-    /// The `Message-Instance` has no hash with a supported algorithm.
-    NoValidHash(u32),
+    /// The recipe (`r=` tag) of the `Message-Instance` is valid JSON but does
+    /// not follow the recipe rules (§5).
+    InvalidRecipe {
+        /// Revision number (`m=`) of the instance.
+        m: u32,
+        /// The start of the recipe JSON, at most 64 bytes.
+        value: Box<str>,
+    },
+    /// An `h=` hash name is not an algorithm this crate implements.
+    UnknownHash {
+        /// Revision number (`m=`) of the instance.
+        m: u32,
+        /// The unknown hash name.
+        name: Box<str>,
+    },
+    /// No `|`-separated group of `h=` hashes passed.
+    NoHashGroupPassed(u32),
     /// No `DKIM2-Signature` with this `i=`, for example a message with a
     /// `Message-Instance` but no signature.
     SignatureMissing(u32),
@@ -65,7 +79,8 @@ pub enum Dkim2Error {
     },
     /// The `s=` tag names the same selector twice.
     DuplicateSelector(u32),
-    /// The `s=` tag has more than two entries with the same algorithm.
+    /// The `s=` tag has more than eight entries, a local limit on the public
+    /// key lookups a signature can cause.
     TooManySelectors(u32),
     /// The signature sequence numbering does not run from 1 without gaps;
     /// carries the first missing `i=`.
@@ -136,9 +151,17 @@ pub enum Dkim2Error {
         /// Selector of the key.
         selector: Box<str>,
     },
-    /// The public key record or the key itself is malformed, or an RSA key
-    /// is shorter than 1024 bits.
+    /// The public key record has a syntax error.
     PublicKeySyntax {
+        /// Sequence number (`i=`) of the signature.
+        i: u32,
+        /// Selector of the key.
+        selector: Box<str>,
+    },
+    /// The public key is malformed: an Ed25519 key that is not 32 octets, an
+    /// ML-DSA-44 key that is not 1312 octets, an RSA key that cannot be
+    /// decoded or is shorter than 1024 bits (§14.5).
+    PublicKeyMalformed {
         /// Sequence number (`i=`) of the signature.
         i: u32,
         /// Selector of the key.
@@ -158,24 +181,22 @@ pub enum Dkim2Error {
         /// Selector of the key.
         selector: Box<str>,
     },
-    /// No `s=` entry of the signature verified.
+    /// An `s=` signature value does not verify.
     IncorrectSignature {
         /// Sequence number (`i=`) of the signature.
         i: u32,
-        /// Selector of the first entry that failed.
+        /// Selector of the entry that failed.
         selector: Box<str>,
     },
-    /// Some `s=` entries of the signature verified and others did not.
-    PartialSignatureFailure {
+    /// An `s=` entry names an algorithm this crate does not implement.
+    UnknownAlgorithm {
         /// Sequence number (`i=`) of the signature.
         i: u32,
-        /// Selector of the first entry that verified.
-        passed: Box<str>,
-        /// Selector of the first entry that failed.
-        failed: Box<str>,
+        /// Selector of the entry.
+        selector: Box<str>,
     },
-    /// The signature has no `s=` entry with a supported algorithm.
-    NoValidAlgorithm(u32),
+    /// No `|`-separated group of `s=` signatures passed.
+    NoSignatureGroupPassed(u32),
     /// The header fields hash does not match the `Message-Instance`.
     HeaderHashMismatch {
         /// Revision number (`m=`) of the instance.
@@ -190,6 +211,10 @@ pub enum Dkim2Error {
         /// Hash algorithm that did not match.
         hash: Dkim2Hash,
     },
+    /// A `Message-Instance` with this `m=` has a null body recipe, so the
+    /// body hashes of the instances below it cannot be checked and the
+    /// message is not a Fully Verified DKIM2 Message (§13).
+    NullBodyRecipe(u32),
     /// A `From` header field is not Authentic (§11): its domain does not
     /// relaxed-match `d=` of the signature that covers it, or it has no
     /// single address with a domain name.
@@ -207,7 +232,7 @@ pub enum Dkim2Error {
     /// The message to sign already has DKIM2 header fields but no passing
     /// full verification of it was supplied, and the signer has no
     /// out-of-band arrangement (§12).
-    NotValidlySigned,
+    NotFullyVerified,
 }
 
 impl Display for Dkim2Error {
@@ -225,8 +250,14 @@ impl Display for Dkim2Error {
             Dkim2Error::InvalidJson(m) => {
                 write!(f, "Message-Instance m={m} contains invalid JSON")
             }
-            Dkim2Error::NoValidHash(m) => {
-                write!(f, "Message-Instance m={m} has no valid hash algorithms")
+            Dkim2Error::InvalidRecipe { m, value } => {
+                write!(f, "Message-Instance m={m} Recipe {value} is invalid")
+            }
+            Dkim2Error::UnknownHash { m, name } => {
+                write!(f, "Message-Instance m={m} algorithm {name} unknown")
+            }
+            Dkim2Error::NoHashGroupPassed(m) => {
+                write!(f, "Message-Instance m={m} no group of hashes passed")
             }
             Dkim2Error::SignatureMissing(i) => write!(f, "DKIM2-Signature i={i} missing"),
             Dkim2Error::SignatureSyntax(i) => write!(f, "DKIM2-Signature i={i} syntax error"),
@@ -299,6 +330,12 @@ impl Display for Dkim2Error {
                     "DKIM2-Signature i={i} public key {selector} has a syntax error"
                 )
             }
+            Dkim2Error::PublicKeyMalformed { i, selector } => {
+                write!(
+                    f,
+                    "DKIM2-Signature i={i} public key {selector} is malformed"
+                )
+            }
             Dkim2Error::PublicKeyAlgorithmMismatch { i, selector } => {
                 write!(
                     f,
@@ -317,14 +354,14 @@ impl Display for Dkim2Error {
                     "DKIM2-Signature i={i} selector {selector} incorrect signature"
                 )
             }
-            Dkim2Error::PartialSignatureFailure { i, passed, failed } => {
+            Dkim2Error::UnknownAlgorithm { i, selector } => {
                 write!(
                     f,
-                    "DKIM2-Signature i={i} signature {passed} signature {failed} failed"
+                    "DKIM2-Signature i={i} selector {selector} algorithm unknown"
                 )
             }
-            Dkim2Error::NoValidAlgorithm(i) => {
-                write!(f, "DKIM2-Signature i={i} has no valid signature algorithms")
+            Dkim2Error::NoSignatureGroupPassed(i) => {
+                write!(f, "DKIM2-Signature i={i} no group of signatures passed")
             }
             Dkim2Error::HeaderHashMismatch { m, hash } => {
                 write!(
@@ -340,6 +377,12 @@ impl Display for Dkim2Error {
                     hash.name()
                 )
             }
+            Dkim2Error::NullBodyRecipe(m) => {
+                write!(
+                    f,
+                    "Message-Instance m={m} has a null Recipe, earlier body hashes cannot be checked"
+                )
+            }
             Dkim2Error::FromNotAuthentic(i) => {
                 write!(f, "DKIM2-Signature i={i} matching From is not authentic")
             }
@@ -353,8 +396,8 @@ impl Display for Dkim2Error {
                 write!(f, "Message body cannot be reconstructed (null body recipe)")
             }
             Dkim2Error::RecipeSyntax => write!(f, "Message-Instance recipe syntax error"),
-            Dkim2Error::NotValidlySigned => {
-                write!(f, "Message is not a Validly Signed DKIM2 Message")
+            Dkim2Error::NotFullyVerified => {
+                write!(f, "Message is not a Fully Verified DKIM2 Message")
             }
         }
     }
