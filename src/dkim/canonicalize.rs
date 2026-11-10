@@ -15,8 +15,29 @@ use crate::{
 /// Incremental body hasher for streaming DKIM signing.
 ///
 /// This struct allows body content to be fed in chunks while maintaining
-/// the canonicalization state between calls.
-pub(crate) struct BodyHasher<H> {
+/// the canonicalization state between calls. It is also usable on its own by a
+/// verifier that receives the body in chunks and needs the `bh=` body hash
+/// without holding the whole body: that digest is the [`HashContext::complete`]
+/// of the context returned by [`finish`](Self::finish).
+///
+/// # Example
+///
+/// ```rust
+/// use mail_auth::crypto::{HashAlgorithm, HashContext, HashImpl, Sha256};
+/// use mail_auth::dkim::{BodyHasher, Canonicalization};
+///
+/// let mut hasher = BodyHasher::new(Sha256::hasher(), Canonicalization::Simple, 0);
+/// hasher.write(b"Hello ");
+/// hasher.write(b"world\r\n");
+/// let (hasher, bytes_hashed) = hasher.finish();
+///
+/// assert_eq!(bytes_hashed, 13);
+/// assert_eq!(
+///     hasher.complete().as_ref(),
+///     HashAlgorithm::Sha256.hash(&b"Hello world\r\n"[..]).as_ref()
+/// );
+/// ```
+pub struct BodyHasher<H> {
     hasher: H,
     canonicalization: Canonicalization,
     body_length_limit: u64,

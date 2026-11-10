@@ -41,6 +41,7 @@ pub mod sign;
 pub mod streaming;
 pub mod verify;
 
+pub use canonicalize::BodyHasher;
 pub use output::{DkimOutput, DkimResult};
 pub use record::{AtpsRecord, DkimReportRecord, DomainKey, VerifySignature};
 pub(crate) use record::{
