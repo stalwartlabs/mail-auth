@@ -16,11 +16,13 @@ resolver = "2"
 doctest = false
 
 [features]
-default = ["aws-lc-rs", "dns-hickory"]
-aws-lc-rs = ["dep:aws-lc-rs", "dep:aws-lc-sys", "dns-hickory", "hickory-resolver/tls-aws-lc-rs", "hickory-resolver/dnssec-aws-lc-rs", "hickory-resolver/rustls-platform-verifier"]
+default = ["aws-lc-rs", "dns-hickory", "rustls-platform-verifier"]
+aws-lc-rs = ["dep:aws-lc-rs", "dep:aws-lc-sys", "dns-hickory", "hickory-resolver/tls-aws-lc-rs", "hickory-resolver/dnssec-aws-lc-rs"]
 rust-crypto = ["rsa", "rand", "ed25519-dalek", "sha1", "sha2", "ml-dsa"]
 generate = ["rsa", "rand"]
 dns-hickory = ["dep:hickory-resolver"]
+rustls-platform-verifier = ["dns-hickory", "hickory-resolver/rustls-platform-verifier"]
+webpki-roots = ["dns-hickory", "hickory-resolver/webpki-roots"]
 dns-doh = ["dep:reqwest", "dep:web-time", "dep:hickory-proto"]
 arc = []
 test = []
