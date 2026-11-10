@@ -218,6 +218,54 @@ impl<'x> AuthenticatedMessage<'x> {
         }
     }
 
+    /// Parses a raw RFC 5322 message whose DKIM body hashes are supplied by the
+    /// caller instead of recomputed from the body.
+    ///
+    /// Each entry of `body_hashes` is a `(canonicalization, hash algorithm, l=,
+    /// digest)` tuple, the same shape the parser records internally. Only the
+    /// header block has to be in `raw_message`: `b=` covers headers only
+    /// (RFC 6376, Section 3.7), so the body's one role in verification is the
+    /// digest [`finalize`](Self::finalize) would otherwise compute over
+    /// `raw_message[body_offset..]`. [`BodyHasher`](crate::dkim::BodyHasher)
+    /// produces those digests as the body arrives in chunks, with `finish`
+    /// applied once at end of body, and each digest must cover what
+    /// [`raw_body`](Self::raw_body) would return for the complete message.
+    ///
+    /// Every other part of [`parse_with_opts`](Self::parse_with_opts) runs the
+    /// same way. A signature whose triple is missing from the set verifies as
+    /// `neutral` with
+    /// [`DkimError::BodyHashMismatch`](crate::dkim::DkimError::BodyHashMismatch).
+    pub fn parse_with_body_hashes(
+        raw_message: &'x [u8],
+        prepend_headers: Option<&'x [u8]>,
+        strict: bool,
+        body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
+    ) -> Option<Self> {
+        let mut message = AuthenticatedMessage {
+            raw_message,
+            headers: Vec::with_capacity(EXPECTED_HEADER_COUNT),
+            body_hashes,
+            ..Default::default()
+        };
+
+        if let Some(headers) = prepend_headers {
+            message.parse_headers(headers, strict);
+        }
+
+        let body_offset = message.parse_headers(raw_message, strict);
+
+        if !message.headers.is_empty() {
+            if let Some(offset) = body_offset {
+                message.body_offset = offset as u32;
+            } else {
+                message.body_offset = raw_message.len() as u32;
+            }
+            Some(message.finalize_sorted())
+        } else {
+            None
+        }
+    }
+
     fn parse_headers(&mut self, headers: &'x [u8], strict: bool) -> Option<usize> {
         let mut headers = HeaderParser::new(headers);
 
@@ -380,6 +428,10 @@ impl<'x> AuthenticatedMessage<'x> {
             *bh = ha.hash(cb.canonical_body(body, *l)).as_ref().to_vec();
         }
 
+        self.finalize_sorted()
+    }
+
+    fn finalize_sorted(mut self) -> Self {
         #[cfg(feature = "arc")]
         if !self.as_headers.is_empty() && !self.has_arc_errors {
             self.as_headers.sort_unstable_by_key(|h| h.header.i);

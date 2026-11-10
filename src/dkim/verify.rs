@@ -121,12 +121,17 @@ impl MessageAuthenticator {
             }
 
             let ha = HashAlgorithm::from(signature.a);
-            let bh = &message
+            let Some((_, _, _, bh)) = message
                 .body_hashes
                 .iter()
                 .find(|(c, h, l, _)| c == &signature.cb && h == &ha && l == &signature.l)
-                .unwrap()
-                .3;
+            else {
+                output.push(
+                    DkimOutput::neutral(Error::Dkim(DkimError::BodyHashMismatch))
+                        .with_signature(signature),
+                );
+                continue;
+            };
 
             if bh != &signature.bh {
                 output.push(
@@ -646,6 +651,99 @@ pub(crate) mod test {
 
             assert_eq!(dkim.last().unwrap().result(), &DkimResult::Pass);
         }
+    }
+
+    #[tokio::test]
+    async fn dkim_verify_precomputed_body_hashes() {
+        use crate::crypto::{HashContext, HashImpl, Sha256};
+        use crate::dkim::BodyHasher;
+
+        let mut test_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        test_dir.push("resources");
+        test_dir.push("dkim");
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+
+        for file_name in fs::read_dir(test_dir).unwrap() {
+            let file_name = file_name.unwrap().path();
+            let test = String::from_utf8(fs::read(&file_name).unwrap()).unwrap();
+            let (dns_records, raw_message) = test.split_once("\n\n").unwrap();
+            let caches = new_cache(dns_records);
+            let raw_message = raw_message.replace('\n', "\r\n");
+
+            let full = AuthenticatedMessage::parse(raw_message.as_bytes()).unwrap();
+
+            let mut body_hashes = Vec::new();
+            for header in full.dkim_signatures() {
+                let signature = &header.header;
+                assert_eq!(
+                    HashAlgorithm::from(signature.a),
+                    HashAlgorithm::Sha256,
+                    "{}",
+                    file_name.display()
+                );
+
+                if body_hashes
+                    .iter()
+                    .any(|(cb, _, l, _)| *cb == signature.cb && *l == signature.l)
+                {
+                    continue;
+                }
+
+                let mut hasher =
+                    BodyHasher::new(<Sha256 as HashImpl>::hasher(), signature.cb, signature.l);
+                for chunk in full.raw_body().chunks(7) {
+                    hasher.write(chunk);
+                }
+                let (hasher, _) = hasher.finish();
+
+                let digest = hasher.complete().as_ref().to_vec();
+                assert_eq!(digest, signature.bh, "{}", file_name.display());
+                body_hashes.push((signature.cb, HashAlgorithm::Sha256, signature.l, digest));
+            }
+
+            let message = AuthenticatedMessage::parse_with_body_hashes(
+                full.raw_headers(),
+                None,
+                true,
+                body_hashes,
+            )
+            .unwrap();
+            assert!(message.raw_body().is_empty());
+
+            let dkim = resolver
+                .verify_dkim_(caches.parameters(&message), 1667843664)
+                .await;
+            assert_eq!(
+                dkim.last().unwrap().result(),
+                &DkimResult::Pass,
+                "{}",
+                file_name.display()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn dkim_verify_missing_body_hash_is_neutral() {
+        let raw = concat!(
+            "DKIM-Signature: v=1; a=rsa-sha256; d=example.com; s=s; h=From; ",
+            "bh=YWJj; b=YWJj\r\n",
+            "From: a@example.com\r\n\r\nbody\r\n"
+        );
+        let mut message =
+            AuthenticatedMessage::parse_with_body_hashes(raw.as_bytes(), None, true, Vec::new())
+                .unwrap();
+        message.body_hashes.clear();
+
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = DummyCaches::new();
+
+        let dkim = resolver
+            .verify_dkim_(caches.parameters(&message), 1667843664)
+            .await;
+        assert_eq!(
+            dkim.last().unwrap().result(),
+            &DkimResult::Neutral(crate::Error::Dkim(crate::dkim::DkimError::BodyHashMismatch))
+        );
     }
 
     #[test]
