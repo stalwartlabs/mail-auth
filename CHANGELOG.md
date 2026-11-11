@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.0] - 2026-11-11
+
+### Added
+- `webpki-roots` feature: TLS resolvers verify against Mozilla's root certificates compiled into the binary (#65).
+
+### Changed
+- The `aws-lc-rs` feature no longer enables the operating system's certificate store for TLS resolvers; it moved to the new `rustls-platform-verifier` feature, enabled by default. Builds with `default-features = false` that use TLS resolvers must enable `rustls-platform-verifier` or `webpki-roots` (#65).
+
 ## [0.15.1] - 2026-10-30
 
 ### Added
