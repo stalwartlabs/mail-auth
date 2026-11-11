@@ -51,6 +51,13 @@ DNS lookups (used by SPF, DMARC, and DKIM/DKIM2 key retrieval) are backed by a s
 
 Enable exactly one; building with both, or with neither, is a compile error.
 
+With `dns-hickory`, TLS resolvers (`new_cloudflare_tls()`, `new_quad9_tls()`, or a `ResolverConfig` with TLS name servers) verify server certificates against a root store chosen with Cargo features:
+
+- `rustls-platform-verifier` (default): the operating system's certificate store, via [rustls-platform-verifier](https://crates.io/crates/rustls-platform-verifier).
+- `webpki-roots`: Mozilla's root certificates compiled into the binary, via [webpki-roots](https://crates.io/crates/webpki-roots), without using the operating system's store.
+
+To use `webpki-roots`, disable default features and enable it alongside your other features. A build with neither has no root certificates, so TLS resolvers cannot connect; UDP/TCP resolvers are unaffected.
+
 ### WebAssembly (WASM)
 
 mail-auth compiles and runs on `wasm32-unknown-unknown` (browsers, edge runtimes). The WASM-capable configuration pairs the pure-Rust crypto backend with DNS-over-HTTPS:
