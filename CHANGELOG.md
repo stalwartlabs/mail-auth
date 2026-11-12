@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.1] - Unreleased
+
+### Added
+- DKIM2: `Dkim2Signer::sign_streaming` returns a `Dkim2SigningStream`, which signs a message fed in chunks while buffering only its header section, as `DkimSigningStream` does for DKIM1 (#66).
+
 ## [0.16.0] - 2026-11-11
 
 ### Added

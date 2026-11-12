@@ -42,6 +42,7 @@ pub mod output;
 pub mod parse;
 pub mod recipe;
 pub mod sign;
+pub mod streaming;
 pub mod verify;
 
 #[cfg(test)]
@@ -52,6 +53,7 @@ pub use error::Dkim2Error;
 pub use output::{ChainLink, Dkim2Output, Dkim2Result, Verification};
 pub use recipe::{BodyRecipe, HeaderRecipe, Recipe, Step};
 pub use sign::{Dkim2Signed, Envelope, Hop};
+pub use streaming::Dkim2SigningStream;
 
 /// DKIM2 message signer (§12).
 ///

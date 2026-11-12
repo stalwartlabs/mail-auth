@@ -608,6 +608,15 @@ pub(crate) struct StateHashes {
 }
 
 impl StateHashes {
+    /// Starts with precomputed body digests, for a message whose body was
+    /// hashed while streaming and is not available to [`check`](Self::check).
+    pub(crate) fn with_body(body: Digests) -> Self {
+        StateHashes {
+            header: Default::default(),
+            body,
+        }
+    }
+
     pub(crate) fn check(
         &mut self,
         instance: &MessageInstance,
