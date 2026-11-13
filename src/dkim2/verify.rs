@@ -608,6 +608,13 @@ pub(crate) struct StateHashes {
 }
 
 impl StateHashes {
+    pub(crate) fn with_body(body: Digests) -> Self {
+        StateHashes {
+            header: Default::default(),
+            body,
+        }
+    }
+
     pub(crate) fn check(
         &mut self,
         instance: &MessageInstance,

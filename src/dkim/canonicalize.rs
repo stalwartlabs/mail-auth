@@ -7,10 +7,7 @@
 //! DKIM1 header and body canonicalization (RFC 6376, Section 3.4).
 
 use super::{Canonicalization, Signature};
-use crate::{
-    crypto::HashContext,
-    headers::{HeaderStream, Writable, Writer},
-};
+use crate::headers::{HeaderStream, Writable, Writer};
 
 /// Incremental body hasher for streaming DKIM signing.
 ///
@@ -72,10 +69,7 @@ impl<H: Writer> BodyHasher<H> {
     /// Applies the final canonicalization rules (trailing CRLF handling)
     /// and returns the completed hash context along with the number of
     /// body bytes that were processed.
-    pub fn finish(mut self) -> (H, u64)
-    where
-        H: HashContext,
-    {
+    pub fn finish(mut self) -> (H, u64) {
         if !self.done {
             self.done = true;
             self.state.finish(self.canonicalization, &mut self.hasher);

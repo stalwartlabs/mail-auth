@@ -304,7 +304,7 @@ impl Dkim2Signer<Ready> {
         let new_instance =
             MessageInstance::from_message(&modified, Some(&original.try_into()?), &self.hashes)?;
 
-        self.sign_internal(&modified, hop, new_instance.as_ref(), verified, now)
+        self.sign_internal(&modified, hop, new_instance.as_ref(), verified, now, None)
             .map(|signature| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
@@ -381,7 +381,7 @@ impl Dkim2Signer<Ready> {
                 .check(instance, &modified.headers, Some(modified.raw_body()))
                 .map_err(|failure| Error::Dkim2(failure.into_error()))?;
         }
-        self.sign_internal(modified, hop, instance, verified, now())
+        self.sign_internal(modified, hop, instance, verified, now(), None)
             .map(|signature| Dkim2Signed {
                 message_instance: None,
                 signature,
@@ -404,7 +404,7 @@ impl Dkim2Signer<Ready> {
         let message = message.try_into()?;
         let new_instance = MessageInstance::from_message(&message, None, &self.hashes)?;
 
-        self.sign_internal(&message, hop, new_instance.as_ref(), verified, now)
+        self.sign_internal(&message, hop, new_instance.as_ref(), verified, now, None)
             .map(|signature| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
@@ -429,20 +429,21 @@ impl Dkim2Signer<Ready> {
         let message = modified.try_into()?;
         let new_instance = MessageInstance::from_recipe(&message, Some(recipe), &self.hashes);
 
-        self.sign_internal(&message, hop, new_instance.as_ref(), verified, now)
+        self.sign_internal(&message, hop, new_instance.as_ref(), verified, now, None)
             .map(|signature| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
             })
     }
 
-    fn sign_internal<'x, A, R, I>(
+    pub(crate) fn sign_internal<'x, A, R, I>(
         &self,
         parsed: &AuthenticatedMessage<'x>,
         hop: Hop<A, R, I>,
         new_instance: Option<&MessageInstance>,
         verified: Option<&Dkim2Output<'_>>,
         now: u64,
+        body: Option<Digests>,
     ) -> crate::Result<Signature>
     where
         A: AsRef<str>,
@@ -497,7 +498,8 @@ impl Dkim2Signer<Ready> {
             && let Some(highest) = instances.last()
             && !verified.is_some_and(|output| output.covers(parsed.raw_message))
         {
-            StateHashes::default()
+            body.map(StateHashes::with_body)
+                .unwrap_or_default()
                 .check(&highest.header, &parsed.headers, Some(parsed.raw_body()))
                 .map_err(|failure| Error::Dkim2(failure.into_error()))?;
         }
@@ -720,6 +722,15 @@ impl MessageInstance {
         recipe: Option<Recipe>,
         hashes: &[Dkim2Hash],
     ) -> Option<Self> {
+        Self::from_recipe_with_body(message, recipe, hashes, None)
+    }
+
+    pub(crate) fn from_recipe_with_body(
+        message: &AuthenticatedMessage<'_>,
+        recipe: Option<Recipe>,
+        hashes: &[Dkim2Hash],
+        body: Option<Digests>,
+    ) -> Option<Self> {
         let instances = message.dkim2_instances.as_slice();
 
         if !instances.is_empty() && recipe.is_none() {
@@ -732,7 +743,7 @@ impl MessageInstance {
             }
         }
         let header_hashes = header_digests(message.headers.iter().copied(), wanted);
-        let body_hashes = body_digests(message.raw_body(), wanted);
+        let body_hashes = body.unwrap_or_else(|| body_digests(message.raw_body(), wanted));
         let digest = |digests: &Digests, hash: Dkim2Hash| {
             digests
                 .get(hash.index())
@@ -818,7 +829,7 @@ pub(super) fn to_reverse_path(addr: &str) -> String {
 }
 
 #[cfg(test)]
-mod test {
+pub(super) mod test {
     use super::{Dkim2Signer, Hop};
     use crate::{
         crypto::{Algorithm, DkimKey, Ed25519Key, MlDsa44Key, RsaKey, Sha256},
@@ -827,9 +838,9 @@ mod test {
     use rustls_pki_types::{PrivateKeyDer, pem::PemObject};
     use std::{borrow::Cow, path::PathBuf};
 
-    const TIMESTAMP: u64 = 1740000000;
+    pub(in crate::dkim2) const TIMESTAMP: u64 = 1740000000;
 
-    fn normalize_crlf(message: &[u8]) -> Cow<'_, [u8]> {
+    pub(in crate::dkim2) fn normalize_crlf(message: &[u8]) -> Cow<'_, [u8]> {
         let mut needs_fix = false;
         let mut iter = message.iter().peekable();
         while let Some(&ch) = iter.next() {
@@ -864,7 +875,7 @@ mod test {
         Cow::Owned(out)
     }
 
-    fn resource(parts: &[&str]) -> PathBuf {
+    pub(in crate::dkim2) fn resource(parts: &[&str]) -> PathBuf {
         let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         path.push("resources/dkim2");
         for part in parts {
@@ -950,7 +961,7 @@ mod test {
             .unwrap();
     }
 
-    fn load_ed25519(domain: &str, selector: &str) -> Ed25519Key {
+    pub(in crate::dkim2) fn load_ed25519(domain: &str, selector: &str) -> Ed25519Key {
         let pem = std::fs::read(resource(&[
             "keys",
             &format!("{selector}._domainkey.{domain}.pem"),
@@ -962,7 +973,7 @@ mod test {
         Ed25519Key::from_pkcs8_maybe_unchecked_der(der.secret_pkcs8_der()).unwrap()
     }
 
-    fn load_rsa(domain: &str, selector: &str) -> RsaKey<Sha256> {
+    pub(in crate::dkim2) fn load_rsa(domain: &str, selector: &str) -> RsaKey<Sha256> {
         let pem = std::fs::read(resource(&[
             "keys",
             &format!("{selector}._domainkey.{domain}.pem"),
@@ -1013,6 +1024,7 @@ mod test {
                 instance.as_ref(),
                 None,
                 TIMESTAMP,
+                None,
             )
             .map(|signature| Dkim2Signed {
                 message_instance: instance,
