@@ -2,21 +2,17 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.16.1] - Unreleased
-
-### Added
-- DKIM2: `Dkim2Signer::sign_streaming` returns a `Dkim2SigningStream`, which signs a message fed in chunks while buffering only its header section, as `DkimSigningStream` does for DKIM1 (#66).
-
-### Fixed
-- DKIM1: `DkimSigningStream` hashed the body from the first `\r\n\r\n` instead of where the header section ends, so a header line without a colon or a bare LF empty line produced a body hash that did not verify.
-
-## [0.16.0] - 2026-11-11
+## [0.16.0] - Unreleased
 
 ### Added
 - `webpki-roots` feature: TLS resolvers verify against Mozilla's root certificates compiled into the binary (#65).
+- DKIM2: `Dkim2Signer::sign_streaming` returns a `Dkim2SigningStream`, which signs a message fed in chunks while buffering only its header section, as `DkimSigningStream` does for DKIM1 (#66).
 
 ### Changed
 - The `aws-lc-rs` feature no longer enables the operating system's certificate store for TLS resolvers; it moved to the new `rustls-platform-verifier` feature, enabled by default. Builds with `default-features = false` that use TLS resolvers must enable `rustls-platform-verifier` or `webpki-roots` (#65).
+
+### Fixed
+- DKIM1: `DkimSigningStream` hashed the body from the first `\r\n\r\n` instead of where the header section ends, so a header line without a colon or a bare LF empty line produced a body hash that did not verify.
 
 ## [0.15.1] - 2026-10-30
 
