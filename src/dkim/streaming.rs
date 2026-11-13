@@ -142,8 +142,12 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
                     if self.template.l > 0 { u64::MAX } else { 0 },
                 );
 
-                body_hasher.write(&header_section[boundary_pos..]);
-                header_section.truncate(boundary_pos - 2);
+                let body_start = header_section
+                    .get(..boundary_pos)
+                    .and_then(body_offset)
+                    .unwrap_or(boundary_pos);
+                body_hasher.write(header_section.get(body_start..).unwrap_or_default());
+                header_section.truncate(body_start);
 
                 self.state = SigningState::HashingBody {
                     header_section,
@@ -161,7 +165,8 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
     ///
     /// The current system time is used for `t=` (and as the base of `x=`
     /// when an expiration is set). A stream that never saw the header/body
-    /// boundary is treated as a message with headers only and an empty body.
+    /// boundary splits the buffered message into headers and body as
+    /// [`DkimSigner::sign`] does.
     ///
     /// # Errors
     ///
@@ -191,10 +196,10 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
                     if self.template.l > 0 { u64::MAX } else { 0 },
                 );
 
-                let header_len = match find_header_boundary(&buffer) {
-                    Some(boundary_pos) => {
-                        body_hasher.write(&buffer[boundary_pos..]);
-                        boundary_pos - 2
+                let header_len = match body_offset(&buffer) {
+                    Some(body_start) => {
+                        body_hasher.write(buffer.get(body_start..).unwrap_or_default());
+                        body_start
                     }
                     None => {
                         buffer.extend_from_slice(b"\r\n");
@@ -285,6 +290,12 @@ impl<T: SigningKey> DkimSigningStream<'_, T> {
 
         Ok(signature)
     }
+}
+
+fn body_offset(header_section: &[u8]) -> Option<usize> {
+    let mut headers = HeaderIterator::new(header_section);
+    headers.by_ref().for_each(drop);
+    headers.body_offset()
 }
 
 /// Find the header/body boundary (\r\n\r\n) and return the position after it
@@ -430,6 +441,45 @@ mod test {
         let streamed_sig = stream.finish().unwrap();
 
         assert_eq!(reference_sig.bh, streamed_sig.bh);
+    }
+
+    // Streaming hashes the body from the header parser's boundary, not from the first CRLFCRLF.
+    #[test]
+    fn streaming_sign_matches_parser_boundary() {
+        let pk_rsa = RsaKey::<Sha256>::from_key_der(PrivateKeyDer::Pkcs1(
+            PrivatePkcs1KeyDer::from_pem_slice(RSA_PRIVATE_KEY.as_bytes()).unwrap(),
+        ))
+        .unwrap();
+
+        let signer = DkimSigner::from_key(pk_rsa)
+            .domain("example.com")
+            .selector("default")
+            .headers(["From"]);
+
+        for message in [
+            "From: a@example.com\r\nno colon\r\nSubject: x\r\n\r\nbody\r\n",
+            "From: a@example.com\r\nSubject: x\n\nbody\r\n\r\nmore\r\n",
+            "From: a@example.com\r\nSubject: x\r\n\nbody\r\n\r\nmore\r\n",
+            "From: a@example.com\r\nno colon\r\nSubject: x\r\nbody\r\n",
+            "From: a@example.com\nSubject: x\n\nLF only\n",
+            "From: a@example.com\r\nSubject: x",
+        ] {
+            let expected = signer
+                .sign_stream(HeaderIterator::new(message.as_bytes()), TIMESTAMP)
+                .unwrap();
+            for size in [1, 2, 3, 5, 7, message.len()] {
+                let mut stream = signer.sign_streaming();
+                for chunk in message.as_bytes().chunks(size) {
+                    stream.write(chunk);
+                }
+                let streamed = stream.finish_at(TIMESTAMP).unwrap();
+                assert_eq!(
+                    (&expected.bh, &expected.h, &expected.b),
+                    (&streamed.bh, &streamed.h, &streamed.b),
+                    "{message:?}, chunk size {size}"
+                );
+            }
+        }
     }
 
     #[test]

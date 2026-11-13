@@ -15,7 +15,7 @@ use crate::{
     AuthenticatedMessage, Error,
     crypto::{HashContext, HashImpl, Sha256, Sha512},
     dkim::{Canonicalization, canonicalize::BodyHasher, streaming::find_header_boundary},
-    headers::{HeaderIterator, Writer},
+    headers::Writer,
     signer::Ready,
 };
 
@@ -61,12 +61,8 @@ use crate::{
 /// ```
 pub struct Dkim2SigningStream<'a> {
     signer: &'a Dkim2Signer<Ready>,
-    /// The header section, including the empty line, once the boundary has
-    /// been found; until then, everything written so far.
     buffer: Vec<u8>,
-    /// Length of the prefix of `buffer` already searched for the boundary.
     scanned: usize,
-    /// Hashes the body, once the boundary has been found.
     body: Option<BodyHasher<BodyDigests>>,
 }
 
@@ -98,16 +94,30 @@ impl Dkim2SigningStream<'_> {
         }
 
         self.buffer.extend_from_slice(chunk);
-        match find_header_boundary(&self.buffer[self.scanned..]) {
-            Some(pos) => {
-                let boundary = self.scanned + pos;
-                let mut body = BodyDigests::hasher(self.signer, &self.buffer[..boundary]);
-                body.write(&self.buffer[boundary..]);
-                self.buffer.truncate(boundary);
-                self.body = Some(body);
-            }
-            None => self.scanned = self.buffer.len().saturating_sub(3),
-        }
+        let Some(boundary) = self
+            .buffer
+            .get(self.scanned..)
+            .and_then(find_header_boundary)
+            .map(|pos| self.scanned + pos)
+        else {
+            self.scanned = self.buffer.len().saturating_sub(3);
+            return;
+        };
+
+        let header_section = self.buffer.get(..boundary).unwrap_or_default();
+        let (body_offset, mut body) = match AuthenticatedMessage::parse(header_section) {
+            Some(message) => (
+                message.body_offset(),
+                BodyDigests::hasher(self.signer, &message),
+            ),
+            None => (
+                boundary,
+                BodyDigests::hasher_for(self.signer.hashes.iter().copied()),
+            ),
+        };
+        body.write(self.buffer.get(body_offset..).unwrap_or_default());
+        self.buffer.truncate(body_offset);
+        self.body = Some(body);
     }
 
     /// Consumes the stream and signs the message for `hop`.
@@ -146,29 +156,27 @@ impl Dkim2SigningStream<'_> {
     {
         let message = AuthenticatedMessage::parse(&self.buffer).ok_or(Error::Parse)?;
         let body = self.body.unwrap_or_else(|| {
-            // No `\r\n\r\n` boundary was seen, so the whole message is
-            // buffered: hash its body as `sign` does.
-            let mut body = BodyDigests::hasher(self.signer, message.raw_headers());
+            let mut body = BodyDigests::hasher(self.signer, &message);
             body.write(message.raw_body());
             body
         });
         let body = body.finish().0.complete();
 
-        let new_instance = MessageInstance::from_recipe_with_body(
-            &message,
-            None,
-            &self.signer.hashes,
-            Some(body.clone()),
-        );
-        self.signer
-            .sign_internal(
-                &message,
-                hop,
-                new_instance.as_ref(),
-                verified,
-                now,
-                Some(body),
+        let (new_instance, body) = if message.dkim2_instances.is_empty() {
+            (
+                MessageInstance::from_recipe_with_body(
+                    &message,
+                    None,
+                    &self.signer.hashes,
+                    Some(body),
+                ),
+                None,
             )
+        } else {
+            (None, Some(body))
+        };
+        self.signer
+            .sign_internal(&message, hop, new_instance.as_ref(), verified, now, body)
             .map(|signature| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
@@ -176,29 +184,37 @@ impl Dkim2SigningStream<'_> {
     }
 }
 
-/// Receives the canonicalized body (§6.1) and computes each DKIM2 body hash
-/// that signing needs.
 struct BodyDigests {
     sha256: Option<<Sha256 as HashImpl>::Context>,
     sha512: Option<<Sha512 as HashImpl>::Context>,
 }
 
 impl BodyDigests {
-    /// Starts hashing the body of a message with this header section.
-    ///
-    /// A new `Message-Instance` uses the signer's hashes. A message that
-    /// already has one may be checked against its most recent instance
-    /// instead, which can use any hash, so it gets all of them.
-    fn hasher(signer: &Dkim2Signer<Ready>, header_section: &[u8]) -> BodyHasher<Self> {
-        let has_instance = HeaderIterator::new(header_section)
-            .any(|(name, _)| name.trim_ascii().eq_ignore_ascii_case(b"Message-Instance"));
-        let wanted = |hash| has_instance || signer.hashes.contains(&hash);
+    fn hasher(signer: &Dkim2Signer<Ready>, message: &AuthenticatedMessage<'_>) -> BodyHasher<Self> {
+        match message.dkim2_instances.last() {
+            Some(highest) => Self::hasher_for(
+                highest
+                    .header
+                    .hashes
+                    .iter()
+                    .filter_map(|hash| hash.name.known()),
+            ),
+            None => Self::hasher_for(signer.hashes.iter().copied()),
+        }
+    }
 
-        // DKIM1 "simple" canonicalization with no length limit.
+    fn hasher_for(hashes: impl IntoIterator<Item = Dkim2Hash>) -> BodyHasher<Self> {
+        let mut wanted = [false; Dkim2Hash::COUNT];
+        for hash in hashes {
+            if let Some(slot) = wanted.get_mut(hash.index()) {
+                *slot = true;
+            }
+        }
+        let [sha256, sha512] = wanted;
         BodyHasher::new(
             BodyDigests {
-                sha256: wanted(Dkim2Hash::Sha256).then(Sha256::hasher),
-                sha512: wanted(Dkim2Hash::Sha512).then(Sha512::hasher),
+                sha256: sha256.then(Sha256::hasher),
+                sha512: sha512.then(Sha512::hasher),
             },
             Canonicalization::Simple,
             0,
@@ -206,10 +222,10 @@ impl BodyDigests {
     }
 
     fn complete(self) -> Digests {
-        let mut digests = Digests::default();
-        digests[Dkim2Hash::Sha256.index()] = self.sha256.map(HashContext::complete);
-        digests[Dkim2Hash::Sha512.index()] = self.sha512.map(HashContext::complete);
-        digests
+        [
+            self.sha256.map(HashContext::complete),
+            self.sha512.map(HashContext::complete),
+        ]
     }
 }
 
@@ -268,8 +284,6 @@ mod test {
         Hop::real("sender@test1.dkim2.com", ["recipient@example.com"])
     }
 
-    /// Streams `message` in chunks of every size, asserts that each result
-    /// equals what `sign` returns, and returns that.
     fn assert_streams_as_signed(
         signer: &Dkim2Signer<Ready>,
         message: &[u8],
@@ -291,8 +305,7 @@ mod test {
         expected
     }
 
-    // Every fixture, and body canonicalization (§6.1) and truncation edge
-    // cases, signed by every signer in chunks of any size.
+    // Streaming equals sign_at for every fixture, signer, chunk size and body or boundary edge case.
     #[test]
     fn streaming_matches_sign() {
         let _lenient = LenientFrom::new();
@@ -332,6 +345,9 @@ mod test {
             "From: sender@test1.dkim2.com\r\nSubject: x",
             "From: sender@test1.dkim2.com\r\nSubject: x\r",
             "From: sender@test1.dkim2.com\nSubject: x\n\nLF only\n\n",
+            "From: sender@test1.dkim2.com\r\nno colon\r\nSubject: x\r\n\r\nbody\r\n",
+            "From: sender@test1.dkim2.com\r\nSubject: x\n\nbody\r\n\r\nmore\r\n",
+            "From: sender@test1.dkim2.com\r\nSubject: x\r\n\nbody\r\n\r\nmore\r\n",
         ] {
             messages.push((format!("{message:?}"), message.as_bytes().to_vec()));
         }
@@ -342,8 +358,11 @@ mod test {
                 let signed = assert_streams_as_signed(&signer, message, originator_hop(), &what);
                 assert!(signed.is_ok(), "{what}: {signed:?}");
             }
-            // Input `sign` cannot parse either.
-            for message in ["", "From: sender@test1.dkim2.com"] {
+            for message in [
+                "",
+                "From: sender@test1.dkim2.com",
+                "\r\n\r\nFrom: sender@test1.dkim2.com\r\n\r\nbody\r\n",
+            ] {
                 let what = format!("{message:?} with {name}");
                 let signed =
                     assert_streams_as_signed(&signer, message.as_bytes(), originator_hop(), &what);
@@ -352,10 +371,7 @@ mod test {
         }
     }
 
-    // A forwarder that does not change the message checks it against the
-    // most recent Message-Instance (§12.1). The streamed body digests must be
-    // used for that check, including a hash the forwarder itself does not
-    // use, and a changed body must still be rejected.
+    // An unchanged forwarder checks the streamed body against the newest Message-Instance.
     #[test]
     fn streaming_forwarder_checks_body_against_instance() {
         let message = normalize_crlf(&std::fs::read(resource(&["emails", "simple.eml"])).unwrap())

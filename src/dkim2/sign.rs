@@ -436,9 +436,6 @@ impl Dkim2Signer<Ready> {
             })
     }
 
-    /// Signs `parsed` for `hop`. `body` holds its body digests when its body
-    /// was hashed while streaming and is not in `parsed`; with `None`, they
-    /// are computed from `parsed.raw_body()` when needed.
     pub(crate) fn sign_internal<'x, A, R, I>(
         &self,
         parsed: &AuthenticatedMessage<'x>,
@@ -728,9 +725,6 @@ impl MessageInstance {
         Self::from_recipe_with_body(message, recipe, hashes, None)
     }
 
-    /// As [`from_recipe`](Self::from_recipe), with `body` holding the body
-    /// digests when the body was hashed while streaming and is not in
-    /// `message`.
     pub(crate) fn from_recipe_with_body(
         message: &AuthenticatedMessage<'_>,
         recipe: Option<Recipe>,
