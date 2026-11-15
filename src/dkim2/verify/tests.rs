@@ -421,6 +421,68 @@ async fn signer_detects_unrecorded_changes() {
     assert_eq!(revised.message_instance.as_ref().map(|mi| mi.m), Some(2));
 }
 
+// A proof does not cover header fields prepended when the signed message was parsed.
+#[tokio::test]
+async fn signer_detects_prepended_headers() {
+    let original = original();
+    let message1 = prepend(
+        &signer("test1.dkim2.com")
+            .sign_at(
+                &original,
+                Hop::real("sender@test1.dkim2.com", ["list@test2.dkim2.com"]),
+                None,
+                NOW,
+            )
+            .unwrap(),
+        &original,
+    );
+    let parsed1 = AuthenticatedMessage::parse(&message1).unwrap();
+    let proof = verify(
+        &parsed1,
+        "sender@test1.dkim2.com",
+        &["list@test2.dkim2.com"],
+        Verification::Full,
+    )
+    .await;
+    assert_eq!(proof.result(), &Dkim2Result::Pass);
+    let hop2 = || Hop::real("relay@test2.dkim2.com", ["recipient@example.com"]);
+    let mismatch = Error::Dkim2(Dkim2Error::HeaderHashMismatch {
+        m: 1,
+        hash: Dkim2Hash::Sha256,
+    });
+
+    let reparsed = AuthenticatedMessage::parse_with_opts(&message1, None, true).unwrap();
+    signer("test2.dkim2.com")
+        .sign_with_message_instance(&reparsed, None, hop2(), Some(&proof))
+        .unwrap();
+
+    let extra = b"Reply-To: list@test2.dkim2.com\r\n";
+    let forwarded = AuthenticatedMessage::parse_with_opts(&message1, Some(extra), true).unwrap();
+    assert_eq!(
+        signer("test2.dkim2.com")
+            .sign_with_message_instance(&forwarded, None, hop2(), Some(&proof))
+            .unwrap_err(),
+        mismatch
+    );
+
+    let forwarded = AuthenticatedMessage::parse_with_opts(&message1, Some(extra), true).unwrap();
+    let other = AuthenticatedMessage::parse_with_opts(
+        &message1,
+        Some(b"Reply-To: other@test2.dkim2.com\r\n"),
+        true,
+    )
+    .unwrap();
+    let forwarded_proof = verify(
+        &forwarded,
+        "sender@test1.dkim2.com",
+        &["list@test2.dkim2.com"],
+        Verification::Full,
+    )
+    .await;
+    assert!(!forwarded_proof.covers(&other));
+    assert!(forwarded_proof.covers(&forwarded));
+}
+
 // Local checks of the signer: chain of custody, mf=/d=, exploded flag, selectors and nonce.
 #[tokio::test]
 async fn signer_local_checks() {

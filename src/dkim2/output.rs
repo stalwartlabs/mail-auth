@@ -8,6 +8,7 @@
 
 use super::{Flag, MessageInstance, Signature};
 use crate::{AuthenticatedMessage, DnsError, Error, headers::Header};
+use std::ptr;
 
 /// Outcome of a DKIM2 verification (§14.1).
 ///
@@ -80,6 +81,7 @@ pub struct Dkim2Output<'x> {
     pub(crate) chain: Vec<ChainLink<'x>>,
     pub(crate) verification: Verification,
     pub(crate) raw_message: &'x [u8],
+    pub(crate) headers: &'x [(&'x [u8], &'x [u8])],
     pub(crate) signature_fields: &'x [Header<'x, Signature>],
     pub(crate) instance_fields: &'x [Header<'x, MessageInstance>],
 }
@@ -169,8 +171,11 @@ impl<'x> Dkim2Output<'x> {
             && same_values(self.instance_fields, &message.dkim2_instances)
     }
 
-    pub(crate) fn covers(&self, raw_message: &[u8]) -> bool {
-        !self.raw_message.is_empty() && std::ptr::eq(self.raw_message, raw_message)
+    pub(crate) fn covers(&self, message: &AuthenticatedMessage<'_>) -> bool {
+        !self.raw_message.is_empty()
+            && ptr::eq(self.raw_message, message.raw_message)
+            && (ptr::eq(self.headers, message.headers.as_slice())
+                || self.headers == message.headers.as_slice())
     }
 }
 
@@ -189,6 +194,7 @@ impl From<Dkim2Result> for Dkim2Output<'_> {
             chain: Vec::new(),
             verification: Verification::Full,
             raw_message: &[],
+            headers: &[],
             signature_fields: &[],
             instance_fields: &[],
         }

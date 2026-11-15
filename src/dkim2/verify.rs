@@ -227,6 +227,7 @@ impl MessageAuthenticator {
             chain,
             verification,
             raw_message: message.raw_message,
+            headers: &message.headers,
             signature_fields: signatures,
             instance_fields: instances,
         }

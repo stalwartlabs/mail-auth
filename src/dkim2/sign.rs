@@ -496,7 +496,7 @@ impl Dkim2Signer<Ready> {
 
         if new_instance.is_none()
             && let Some(highest) = instances.last()
-            && !verified.is_some_and(|output| output.covers(parsed.raw_message))
+            && !verified.is_some_and(|output| output.covers(parsed))
         {
             body.map(StateHashes::with_body)
                 .unwrap_or_default()
