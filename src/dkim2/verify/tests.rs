@@ -2559,3 +2559,344 @@ async fn temp_error_does_not_hide_fail() {
     message.extend_from_slice(b"tampered\r\n");
     assert!(matches!(verify(message).await, Dkim2Result::Fail(_)));
 }
+
+// ---------------------------------------------------------------------------
+// Verification and signing of a message parsed by a `MessageStream`.
+// ---------------------------------------------------------------------------
+
+mod streamed {
+    use super::*;
+    use crate::{
+        dkim2::MessageInstance,
+        stream::{MessageStream, StreamedMessage},
+    };
+
+    const CHUNKS: &[usize] = &[1, 2, 3, 5, 7, 13, 64, 8192, usize::MAX];
+
+    fn stream(raw: &[u8], chunk: usize) -> StreamedMessage {
+        stream_with(MessageStream::new(), raw, chunk)
+    }
+
+    fn stream_with(mut stream: MessageStream, raw: &[u8], chunk: usize) -> StreamedMessage {
+        for chunk in raw.chunks(chunk.min(raw.len().max(1))) {
+            stream.write(chunk);
+        }
+        stream.finish().unwrap()
+    }
+
+    // The fixture has bare LF line endings; on the wire a message has CRLF.
+    fn crlf_original() -> Vec<u8> {
+        crate::dkim2::sign::test::normalize_crlf(&original()).into_owned()
+    }
+
+    fn first_hop(original: &[u8]) -> Vec<u8> {
+        prepend(
+            &signer("test1.dkim2.com")
+                .sign_at(original, hop1(), None, NOW)
+                .unwrap(),
+            original,
+        )
+    }
+
+    fn hop1() -> Hop<&'static str, [&'static str; 1], String> {
+        Hop::real("sender@test1.dkim2.com", ["list@test2.dkim2.com"])
+    }
+
+    fn hop2() -> Hop<&'static str, [&'static str; 1], String> {
+        Hop::real("relay@test2.dkim2.com", ["recipient@example.com"])
+    }
+
+    async fn verify_hop1<'x>(message: &'x AuthenticatedMessage<'x>) -> Dkim2Output<'x> {
+        verify(
+            message,
+            "sender@test1.dkim2.com",
+            &["list@test2.dkim2.com"],
+            Verification::Full,
+        )
+        .await
+    }
+
+    async fn assert_final_passes(raw: &[u8]) {
+        let parsed = AuthenticatedMessage::parse(raw).unwrap();
+        let output = verify(
+            &parsed,
+            "relay@test2.dkim2.com",
+            &["recipient@example.com"],
+            Verification::Full,
+        )
+        .await;
+        assert_eq!(output.result(), &Dkim2Result::Pass, "{:?}", output.error());
+        assert_eq!(output.chain().len(), 2);
+    }
+
+    // A Forwarder verifies and signs an unchanged message from the stream.
+    #[tokio::test]
+    async fn forward_unchanged() {
+        forward_unchanged_of(first_hop(&crlf_original())).await;
+        // No CRLF boundary: the input stays buffered as the header section.
+        forward_unchanged_of(first_hop(&original())).await;
+    }
+
+    async fn forward_unchanged_of(message1: Vec<u8>) {
+        let parsed1 = AuthenticatedMessage::parse(&message1).unwrap();
+        let proof1 = verify_hop1(&parsed1).await;
+        let expected = signer("test2.dkim2.com")
+            .sign_at(&message1, hop2(), Some(&proof1), NOW)
+            .unwrap();
+        // The parsed-message method equals `sign` on a buffered message too.
+        assert_eq!(
+            signer("test2.dkim2.com")
+                .sign_message_at(&parsed1, None, hop2(), Some(&proof1), NOW)
+                .unwrap(),
+            expected
+        );
+
+        for &chunk in CHUNKS {
+            let streamed = stream(&message1, chunk);
+            assert!(!streamed.needs_body());
+            let message = streamed.message();
+            assert!(message.is_streamed());
+            assert!(message.raw_body().is_empty());
+            // Only the hash the Message-Instance names is computed.
+            let digests = &message.streamed_body.as_ref().unwrap().dkim2;
+            assert!(digests[Dkim2Hash::Sha256.index()].is_some());
+            assert!(digests[Dkim2Hash::Sha512.index()].is_none());
+
+            let proof = verify_hop1(&message).await;
+            assert_eq!(proof.result(), &Dkim2Result::Pass, "{:?}", proof.error());
+
+            let signed = signer("test2.dkim2.com")
+                .sign_message_at(&message, None, hop2(), Some(&proof), NOW)
+                .unwrap();
+            assert_eq!(signed, expected, "chunk {chunk}");
+            assert!(signed.message_instance.is_none());
+            assert_final_passes(&prepend(&signed, &message1)).await;
+
+            // The public method that takes a parsed message.
+            signer("test2.dkim2.com")
+                .sign_with_message_instance(&message, None, hop2(), Some(&proof))
+                .unwrap();
+        }
+    }
+
+    // A changed body is caught from the streamed digests.
+    #[tokio::test]
+    async fn body_change_fails() {
+        let mut tampered = first_hop(&crlf_original());
+        tampered.extend_from_slice(b"Footer\r\n");
+        let expected = verify_raw(
+            &tampered,
+            "sender@test1.dkim2.com",
+            &["list@test2.dkim2.com"],
+        )
+        .await;
+        assert_eq!(
+            expected,
+            fail(Dkim2Error::BodyHashMismatch {
+                m: 1,
+                hash: Dkim2Hash::Sha256
+            })
+        );
+        for &chunk in CHUNKS {
+            let streamed = stream(&tampered, chunk);
+            let message = streamed.message();
+            assert_eq!(
+                verify_hop1(&message).await.result(),
+                &expected,
+                "chunk {chunk}"
+            );
+        }
+    }
+
+    // A Reviser that adds a signed header field gets its recipe from two
+    // streamed messages.
+    #[tokio::test]
+    async fn forward_adding_header_fields() {
+        let message1 = first_hop(&crlf_original());
+        let parsed1 = AuthenticatedMessage::parse(&message1).unwrap();
+        let proof1 = verify_hop1(&parsed1).await;
+        let extra = b"X-Forwarded-To: recipient@example.com\r\nReply-To: list@test2.dkim2.com\r\n";
+        let modified = [extra.as_slice(), &message1].concat();
+        let expected = signer("test2.dkim2.com")
+            .sign_revised_at(&message1, &modified, hop2(), Some(&proof1), NOW)
+            .unwrap();
+        assert_eq!(expected.message_instance.as_ref().map(|mi| mi.m), Some(2));
+        assert_final_passes(&prepend(&expected, &modified)).await;
+
+        for &chunk in CHUNKS {
+            let streamed = stream(&message1, chunk);
+            let original = streamed.message();
+            let proof = verify_hop1(&original).await;
+            assert_eq!(proof.result(), &Dkim2Result::Pass, "{:?}", proof.error());
+
+            let forwarded = streamed.message_with_headers(extra).unwrap();
+            let signed = signer("test2.dkim2.com")
+                .sign_message_at(&forwarded, Some(&original), hop2(), Some(&proof), NOW)
+                .unwrap();
+            assert_eq!(signed, expected, "chunk {chunk}");
+
+            // Signing the changed message as unchanged is refused.
+            assert_eq!(
+                signer("test2.dkim2.com")
+                    .sign_message_at(&forwarded, None, hop2(), Some(&proof), NOW)
+                    .unwrap_err(),
+                Error::Dkim2(Dkim2Error::HeaderHashMismatch {
+                    m: 1,
+                    hash: Dkim2Hash::Sha256
+                }),
+                "chunk {chunk}"
+            );
+        }
+    }
+
+    // A new Message-Instance needs the signer's hash, declared before the body.
+    #[tokio::test]
+    async fn new_instance_needs_declared_hash() {
+        let original = crlf_original();
+        let expected = signer("test1.dkim2.com")
+            .sign_at(&original, hop1(), None, NOW)
+            .unwrap();
+        for &chunk in CHUNKS {
+            let undeclared = stream(&original, chunk);
+            let message = undeclared.message();
+            assert_eq!(
+                signer("test1.dkim2.com")
+                    .sign_message_at(&message, None, hop1(), None, NOW)
+                    .unwrap_err(),
+                Error::BodyNotAvailable,
+                "chunk {chunk}"
+            );
+            assert!(
+                MessageInstance::from_message(&message, None, &[Dkim2Hash::Sha256])
+                    .unwrap()
+                    .is_none()
+            );
+
+            let declared = stream_with(
+                MessageStream::new().also_hash_dkim2(Dkim2Hash::Sha256),
+                &original,
+                chunk,
+            );
+            let message = declared.message();
+            assert_eq!(
+                signer("test1.dkim2.com")
+                    .sign_message_at(&message, None, hop1(), None, NOW)
+                    .unwrap(),
+                expected,
+                "chunk {chunk}"
+            );
+            // A hash that was not declared is still refused.
+            assert_eq!(
+                signer("test1.dkim2.com")
+                    .hashes([Dkim2Hash::Sha512])
+                    .sign_message_at(&message, None, hop1(), None, NOW)
+                    .unwrap_err(),
+                Error::BodyNotAvailable
+            );
+        }
+    }
+
+    // A prepended Message-Instance naming a hash the stream did not compute
+    // is refused, not checked against the missing body.
+    #[tokio::test]
+    async fn instance_hash_not_computed() {
+        let original = crlf_original();
+        let signed = signer("test1.dkim2.com")
+            .hashes([Dkim2Hash::Sha512])
+            .sign_at(&original, hop1(), None, NOW)
+            .unwrap()
+            .to_header();
+        let streamed = stream_with(
+            MessageStream::new().also_hash_dkim2(Dkim2Hash::Sha256),
+            &original,
+            64,
+        );
+        assert_eq!(
+            streamed
+                .message_with_headers(signed.as_bytes())
+                .unwrap_err(),
+            Error::BodyNotAvailable
+        );
+
+        let declared = stream_with(
+            MessageStream::new().also_hash_dkim2(Dkim2Hash::Sha512),
+            &original,
+            64,
+        );
+        let message = declared.message_with_headers(signed.as_bytes()).unwrap();
+        assert_eq!(verify_hop1(&message).await.result(), &Dkim2Result::Pass);
+    }
+
+    // An earlier hop changed the body: full verification needs the body.
+    #[tokio::test]
+    async fn upstream_body_recipe_needs_body() {
+        let message1 = first_hop(&crlf_original());
+        let parsed1 = AuthenticatedMessage::parse(&message1).unwrap();
+        let proof1 = verify_hop1(&parsed1).await;
+        let mut modified = message1.clone();
+        modified.extend_from_slice(b"Footer\r\n");
+        let message2 = prepend(
+            &signer("test2.dkim2.com")
+                .sign_revised_at(&message1, &modified, hop2(), Some(&proof1), NOW)
+                .unwrap(),
+            &modified,
+        );
+        assert_final_passes(&message2).await;
+
+        for &chunk in CHUNKS {
+            let streamed = stream(&message2, chunk);
+            assert!(streamed.needs_body());
+            let message = streamed.message();
+            let full = verify(
+                &message,
+                "relay@test2.dkim2.com",
+                &["recipient@example.com"],
+                Verification::Full,
+            )
+            .await;
+            assert_eq!(
+                full.result(),
+                &Dkim2Result::TempError(Error::Dkim2(Dkim2Error::BodyNotAvailable(2))),
+                "chunk {chunk}"
+            );
+            let provisional = verify(
+                &message,
+                "relay@test2.dkim2.com",
+                &["recipient@example.com"],
+                Verification::Provisional,
+            )
+            .await;
+            assert_eq!(provisional.result(), &Dkim2Result::Pass, "chunk {chunk}");
+        }
+    }
+
+    // A body recipe cannot be made from streamed messages.
+    #[tokio::test]
+    async fn revised_body_is_refused() {
+        let message1 = first_hop(&crlf_original());
+        let mut modified = message1.clone();
+        modified.extend_from_slice(b"Footer\r\n");
+        let streamed1 = stream(&message1, 64);
+        let streamed2 = stream(&modified, 64);
+        let original = streamed1.message();
+        let proof = verify_hop1(&original).await;
+        let changed = streamed2.message();
+        let buffered = AuthenticatedMessage::parse(&modified).unwrap();
+        // The same length, with one body byte changed.
+        let mut replaced = message1.clone();
+        let last = replaced.len() - 3;
+        replaced[last] ^= 1;
+        let streamed3 = stream(&replaced, 64);
+        let replaced = streamed3.message();
+        assert_eq!(streamed3.body.len, streamed1.body.len);
+
+        for modified in [&changed, &buffered, &replaced] {
+            assert_eq!(
+                signer("test2.dkim2.com")
+                    .sign_message_at(modified, Some(&original), hop2(), Some(&proof), NOW)
+                    .unwrap_err(),
+                Error::BodyNotAvailable
+            );
+        }
+    }
+}

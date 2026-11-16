@@ -47,6 +47,10 @@ pub enum Error {
     Parse,
     /// A required tag or parameter was missing from a header or record.
     MissingParameters,
+    /// The body of a streamed message is not held, and the operation needs
+    /// it or a body hash that the
+    /// [`MessageStream`](crate::stream::MessageStream) did not compute.
+    BodyNotAvailable,
     /// None of the headers selected for signing are present in the message,
     /// so there is nothing to sign.
     NoHeadersFound,
@@ -81,6 +85,9 @@ impl Display for Error {
         match self {
             Error::Parse => write!(f, "Parse error"),
             Error::MissingParameters => write!(f, "Missing parameters"),
+            Error::BodyNotAvailable => {
+                write!(f, "The body of a streamed message is not available")
+            }
             Error::NoHeadersFound => write!(f, "No headers found"),
             Error::Io(e) => write!(f, "I/O error: {e}"),
             Error::Base64 => write!(f, "Base64 encode or decode error."),

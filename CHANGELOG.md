@@ -7,6 +7,8 @@ All notable changes to this project will be documented in this file. This projec
 ### Added
 - `webpki-roots` feature: TLS resolvers verify against Mozilla's root certificates compiled into the binary (#65).
 - DKIM2: `Dkim2Signer::sign_streaming` returns a `Dkim2SigningStream`, which signs a message fed in chunks while buffering only its header section, as `DkimSigningStream` does for DKIM1 (#66).
+- `stream::MessageStream` parses a message fed in chunks into a `StreamedMessage`, which buffers only the header section and keeps the body as the hashes that DKIM, ARC and DKIM2 need. Its `message()` works with `verify_dkim`, `verify_arc`, `verify_dkim2`, DMARC and `ArcSealer::seal`; an operation that needs the body, or a hash the stream did not compute, fails with `Error::BodyNotAvailable` or `Dkim2Error::BodyNotAvailable` (#68).
+- DKIM2: `Dkim2Signer::sign_message` and `sign_revised_message` sign already parsed messages, including streamed ones (#68).
 
 ### Changed
 - The `aws-lc-rs` feature no longer enables the operating system's certificate store for TLS resolvers; it moved to the new `rustls-platform-verifier` feature, enabled by default. Builds with `default-features = false` that use TLS resolvers must enable `rustls-platform-verifier` or `webpki-roots` (#65).
