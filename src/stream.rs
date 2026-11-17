@@ -162,8 +162,6 @@ impl MessageStream {
         }
     }
 
-    /// Parses the buffered header section, starts the body hashers it asks
-    /// for, and moves any buffered body bytes into them.
     fn start_body(&mut self, header_end: usize) {
         let header_section = self.buffer.get(..header_end).unwrap_or_default();
         let parsed = AuthenticatedMessage::parse_with_opts(header_section, None, self.strict);
@@ -218,7 +216,6 @@ impl MessageStream {
     /// Returns [`Error::Parse`] when no header field could be parsed.
     pub fn finish(mut self) -> crate::Result<StreamedMessage> {
         if self.body.is_none() {
-            // No boundary was seen: the whole input is the header section.
             self.start_body(self.buffer.len());
         }
         let body = self
@@ -356,8 +353,7 @@ mod test {
         .headers(["From", "To", "Subject", "DKIM-Signature"])
     }
 
-    // Every DKIM and ARC fixture: streamed DKIM and ARC verification and the
-    // ARC seal equal the buffered ones, with no body held.
+    // Streamed DKIM, ARC and seal results equal the buffered ones on every fixture.
     #[tokio::test]
     async fn dkim_and_arc_match_buffered() {
         let resolver = MessageAuthenticator::new_system_conf().unwrap();
@@ -414,7 +410,6 @@ mod test {
                         assert_eq!(s_seal.signature.h, seal.signature.h, "{what}");
                     }
 
-                    // A changed body fails the same way.
                     let mut tampered = raw.to_vec();
                     tampered.extend_from_slice(b"extra\r\n");
                     let t_buffered = AuthenticatedMessage::parse(&tampered).unwrap();
@@ -441,8 +436,7 @@ mod test {
         assert!(fixtures >= 8, "{fixtures}");
     }
 
-    // Sealing a streamed message without its body hash is an error, never a
-    // seal over an empty body.
+    // Sealing without the declared body hash fails instead of hashing an empty body.
     #[tokio::test]
     async fn seal_without_declared_hash_is_an_error() {
         let raw = b"From: a@manchego.org\r\nTo: b@example.org\r\nSubject: x\r\n\r\nbody\r\n";
@@ -475,8 +469,7 @@ mod test {
         );
     }
 
-    // A body length tag: the hash covers the first `l=` bytes only, and a
-    // prepended signature whose hash was not declared is refused.
+    // Body length tags hash the first l= bytes; undeclared prepended hashes are refused.
     #[test]
     fn body_length_and_undeclared_signature() {
         let raw = b"From: a@manchego.org\r\nTo: b@example.org\r\nSubject: x\r\n\r\nline one\r\nline two\r\n";
@@ -518,7 +511,6 @@ mod test {
                 "chunk {chunk}"
             );
 
-            // The stream did not compute a simple body hash.
             let other = signer(false)
                 .body_length(false)
                 .sign(raw)

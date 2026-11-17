@@ -75,7 +75,6 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Ready> {
         }
 
         if let Some(body) = message.streamed_body.as_deref() {
-            // The body is not held: the hash has to come from the stream.
             if set.signature.l > 0 {
                 set.signature.l = body.len;
             }

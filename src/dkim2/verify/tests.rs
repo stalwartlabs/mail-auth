@@ -2560,10 +2560,6 @@ async fn temp_error_does_not_hide_fail() {
     assert!(matches!(verify(message).await, Dkim2Result::Fail(_)));
 }
 
-// ---------------------------------------------------------------------------
-// Verification and signing of a message parsed by a `MessageStream`.
-// ---------------------------------------------------------------------------
-
 mod streamed {
     use super::*;
     use crate::{
@@ -2584,7 +2580,6 @@ mod streamed {
         stream.finish().unwrap()
     }
 
-    // The fixture has bare LF line endings; on the wire a message has CRLF.
     fn crlf_original() -> Vec<u8> {
         crate::dkim2::sign::test::normalize_crlf(&original()).into_owned()
     }
@@ -2633,7 +2628,6 @@ mod streamed {
     #[tokio::test]
     async fn forward_unchanged() {
         forward_unchanged_of(first_hop(&crlf_original())).await;
-        // No CRLF boundary: the input stays buffered as the header section.
         forward_unchanged_of(first_hop(&original())).await;
     }
 
@@ -2643,7 +2637,6 @@ mod streamed {
         let expected = signer("test2.dkim2.com")
             .sign_at(&message1, hop2(), Some(&proof1), NOW)
             .unwrap();
-        // The parsed-message method equals `sign` on a buffered message too.
         assert_eq!(
             signer("test2.dkim2.com")
                 .sign_message_at(&parsed1, None, hop2(), Some(&proof1), NOW)
@@ -2657,7 +2650,6 @@ mod streamed {
             let message = streamed.message();
             assert!(message.is_streamed());
             assert!(message.raw_body().is_empty());
-            // Only the hash the Message-Instance names is computed.
             let digests = &message.streamed_body.as_ref().unwrap().dkim2;
             assert!(digests[Dkim2Hash::Sha256.index()].is_some());
             assert!(digests[Dkim2Hash::Sha512.index()].is_none());
@@ -2672,7 +2664,6 @@ mod streamed {
             assert!(signed.message_instance.is_none());
             assert_final_passes(&prepend(&signed, &message1)).await;
 
-            // The public method that takes a parsed message.
             signer("test2.dkim2.com")
                 .sign_with_message_instance(&message, None, hop2(), Some(&proof))
                 .unwrap();
@@ -2708,8 +2699,7 @@ mod streamed {
         }
     }
 
-    // A Reviser that adds a signed header field gets its recipe from two
-    // streamed messages.
+    // A Reviser adding a signed header field gets its recipe from two streamed messages.
     #[tokio::test]
     async fn forward_adding_header_fields() {
         let message1 = first_hop(&crlf_original());
@@ -2735,7 +2725,6 @@ mod streamed {
                 .unwrap();
             assert_eq!(signed, expected, "chunk {chunk}");
 
-            // Signing the changed message as unchanged is refused.
             assert_eq!(
                 signer("test2.dkim2.com")
                     .sign_message_at(&forwarded, None, hop2(), Some(&proof), NOW)
@@ -2766,10 +2755,15 @@ mod streamed {
                 Error::BodyNotAvailable,
                 "chunk {chunk}"
             );
-            assert!(
-                MessageInstance::from_message(&message, None, &[Dkim2Hash::Sha256])
-                    .unwrap()
-                    .is_none()
+            assert_eq!(
+                MessageInstance::from_message(&message, None, &[Dkim2Hash::Sha256]).unwrap_err(),
+                Error::BodyNotAvailable,
+                "chunk {chunk}"
+            );
+            assert_eq!(
+                MessageInstance::from_recipe(&message, None, &[Dkim2Hash::Sha256]).unwrap_err(),
+                Error::BodyNotAvailable,
+                "chunk {chunk}"
             );
 
             let declared = stream_with(
@@ -2785,7 +2779,6 @@ mod streamed {
                 expected,
                 "chunk {chunk}"
             );
-            // A hash that was not declared is still refused.
             assert_eq!(
                 signer("test1.dkim2.com")
                     .hashes([Dkim2Hash::Sha512])
@@ -2796,8 +2789,7 @@ mod streamed {
         }
     }
 
-    // A prepended Message-Instance naming a hash the stream did not compute
-    // is refused, not checked against the missing body.
+    // A prepended Message-Instance naming an uncomputed hash is refused.
     #[tokio::test]
     async fn instance_hash_not_computed() {
         let original = crlf_original();
@@ -2882,7 +2874,6 @@ mod streamed {
         let proof = verify_hop1(&original).await;
         let changed = streamed2.message();
         let buffered = AuthenticatedMessage::parse(&modified).unwrap();
-        // The same length, with one body byte changed.
         let mut replaced = message1.clone();
         let last = replaced.len() - 3;
         replaced[last] ^= 1;
