@@ -74,30 +74,44 @@ impl<T: SigningKey<Hasher = Sha256>> ArcSealer<T, Ready> {
             return Err(Error::NoHeadersFound);
         }
 
-        if set.signature.l > 0 {
-            set.signature.l = message.raw_message.len() as u64 - message.body_offset as u64;
+        if let Some(body) = message.streamed_body.as_deref() {
+            if set.signature.l > 0 {
+                set.signature.l = body.len;
+            }
+            let ha = HashAlgorithm::from(set.signature.a);
+            set.signature.bh = message
+                .body_hashes
+                .iter()
+                .find(|(c, h, l, _)| {
+                    c == &set.signature.cb && h == &ha && (*l == 0 || *l == set.signature.l)
+                })
+                .map(|(_, _, _, bh)| bh.clone())
+                .ok_or(Error::BodyNotAvailable)?;
+        } else {
+            if set.signature.l > 0 {
+                set.signature.l = message.raw_message.len() as u64 - message.body_offset as u64;
+            }
+            let ha = HashAlgorithm::from(set.signature.a);
+            set.signature.bh =
+                match message.body_hashes.iter().find(|(c, h, l, _)| {
+                    c == &set.signature.cb && h == &ha && l == &set.signature.l
+                }) {
+                    Some((_, _, _, bh)) => bh.clone(),
+                    None => self
+                        .key
+                        .hash(
+                            set.signature.cb.canonical_body(
+                                message
+                                    .raw_message
+                                    .get(message.body_offset as usize..)
+                                    .unwrap_or_default(),
+                                u64::MAX,
+                            ),
+                        )
+                        .as_ref()
+                        .to_vec(),
+                };
         }
-        let ha = HashAlgorithm::from(set.signature.a);
-        set.signature.bh = match message
-            .body_hashes
-            .iter()
-            .find(|(c, h, l, _)| c == &set.signature.cb && h == &ha && l == &set.signature.l)
-        {
-            Some((_, _, _, bh)) => bh.clone(),
-            None => self
-                .key
-                .hash(
-                    set.signature.cb.canonical_body(
-                        message
-                            .raw_message
-                            .get(message.body_offset as usize..)
-                            .unwrap_or_default(),
-                        u64::MAX,
-                    ),
-                )
-                .as_ref()
-                .to_vec(),
-        };
 
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)

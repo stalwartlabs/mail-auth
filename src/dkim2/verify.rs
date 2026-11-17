@@ -301,7 +301,7 @@ impl MessageAuthenticator {
         match verification {
             Verification::Full => check_instances(message, signatures, instances, body_present),
             Verification::Provisional => instances.last().map_or(Ok(()), |header| {
-                StateHashes::default().check(
+                StateHashes::for_message(message).check(
                     &header.header,
                     &message.headers,
                     body_present.then(|| message.raw_body()),
@@ -609,6 +609,15 @@ pub(crate) struct StateHashes {
 }
 
 impl StateHashes {
+    /// The starting hashes for `message`: empty, or the body digests of a
+    /// streamed message.
+    pub(crate) fn for_message(message: &AuthenticatedMessage<'_>) -> Self {
+        match message.streamed_body.as_deref() {
+            Some(body) => Self::with_body(body.dkim2.clone()),
+            None => Self::default(),
+        }
+    }
+
     pub(crate) fn with_body(body: Digests) -> Self {
         StateHashes {
             header: Default::default(),
@@ -707,7 +716,7 @@ fn check_instances(
     instances: &[Header<'_, MessageInstance>],
     body_present: bool,
 ) -> Result<(), Failure> {
-    let mut hashes = StateHashes::default();
+    let mut hashes = StateHashes::for_message(message);
     let mut header_buffer;
     let mut body_buffer;
     let mut headers: Cow<'_, [(&[u8], &[u8])]> = Cow::Borrowed(&message.headers);
@@ -741,6 +750,9 @@ fn check_instances(
         }
 
         match (&recipe.body, body) {
+            (BodyRecipe::Steps(_), Some(_)) if message.is_streamed() => {
+                return Err(Failure::TempError(Dkim2Error::BodyNotAvailable(instance.m)));
+            }
             (BodyRecipe::Steps(steps), Some(current)) => {
                 let mut previous = Vec::with_capacity(current.len());
                 apply_body_recipe(&body_lines(current), steps, &mut previous);

@@ -576,6 +576,7 @@ impl AsAuthResult for Error {
         header.push_str(match self {
             Error::Parse => "dns record parse error",
             Error::MissingParameters => "missing parameters",
+            Error::BodyNotAvailable => "body not available",
             Error::NoHeadersFound => "no headers found",
             Error::Crypto(CryptoError::Library(_)) => "verification failed",
             Error::Io(_) => "i/o error",

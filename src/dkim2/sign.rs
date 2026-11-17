@@ -377,13 +377,93 @@ impl Dkim2Signer<Ready> {
             if instance.m != expected {
                 return Err(Error::Dkim2(Dkim2Error::InstanceSyntax(instance.m)));
             }
-            StateHashes::default()
+            let named = instance.hashes.iter().filter_map(|hash| hash.name.known());
+            modified
+                .streamed_dkim2_digests(named)?
+                .map(StateHashes::with_body)
+                .unwrap_or_default()
                 .check(instance, &modified.headers, Some(modified.raw_body()))
                 .map_err(|failure| Error::Dkim2(failure.into_error()))?;
         }
-        self.sign_internal(modified, hop, instance, verified, now(), None)
+        let body = modified.streamed_dkim2_digests([])?;
+        self.sign_internal(modified, hop, instance, verified, now(), body)
             .map(|signature| Dkim2Signed {
                 message_instance: None,
+                signature,
+            })
+    }
+
+    /// Signs an already parsed message whose content has not changed.
+    ///
+    /// Same as [`sign`](Self::sign), for a message that is already parsed,
+    /// such as the one a [`MessageStream`](crate::stream::MessageStream)
+    /// yields.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`sign`](Self::sign), except that parsing cannot fail, and
+    /// [`Error::BodyNotAvailable`] if the message was streamed without a
+    /// DKIM2 hash this signature needs (see
+    /// [`MessageStream::also_hash_dkim2`](crate::stream::MessageStream::also_hash_dkim2)).
+    pub fn sign_message<'x, A, R, I>(
+        &self,
+        message: &AuthenticatedMessage<'x>,
+        hop: Hop<A, R, I>,
+        verified: Option<&Dkim2Output<'_>>,
+    ) -> crate::Result<Dkim2Signed>
+    where
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
+    {
+        self.sign_message_at(message, None, hop, verified, now())
+    }
+
+    /// Signs an already parsed message whose content changed.
+    ///
+    /// Same as [`sign_revised`](Self::sign_revised), for messages that are
+    /// already parsed. Streamed messages can only differ in their header
+    /// fields: a body recipe needs both bodies.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`sign_message`](Self::sign_message), and
+    /// [`Error::BodyNotAvailable`] if a message was streamed and the bodies
+    /// differ or cannot be compared.
+    pub fn sign_revised_message<'x, A, R, I>(
+        &self,
+        original: &AuthenticatedMessage<'x>,
+        modified: &AuthenticatedMessage<'x>,
+        hop: Hop<A, R, I>,
+        verified: Option<&Dkim2Output<'_>>,
+    ) -> crate::Result<Dkim2Signed>
+    where
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
+    {
+        self.sign_message_at(modified, Some(original), hop, verified, now())
+    }
+
+    pub(crate) fn sign_message_at<'x, A, R, I>(
+        &self,
+        message: &AuthenticatedMessage<'x>,
+        original: Option<&AuthenticatedMessage<'x>>,
+        hop: Hop<A, R, I>,
+        verified: Option<&Dkim2Output<'_>>,
+        now: u64,
+    ) -> crate::Result<Dkim2Signed>
+    where
+        A: AsRef<str>,
+        R: IntoIterator<Item: AsRef<str>>,
+        I: Into<String>,
+    {
+        let new_instance = MessageInstance::from_message(message, original, &self.hashes)?;
+        let body = message.streamed_dkim2_digests([])?;
+
+        self.sign_internal(message, hop, new_instance.as_ref(), verified, now, body)
+            .map(|signature| Dkim2Signed {
+                message_instance: new_instance,
                 signature,
             })
     }
@@ -427,7 +507,7 @@ impl Dkim2Signer<Ready> {
     {
         recipe.validate()?;
         let message = modified.try_into()?;
-        let new_instance = MessageInstance::from_recipe(&message, Some(recipe), &self.hashes);
+        let new_instance = MessageInstance::from_recipe(&message, Some(recipe), &self.hashes)?;
 
         self.sign_internal(&message, hop, new_instance.as_ref(), verified, now, None)
             .map(|signature| Dkim2Signed {
@@ -699,7 +779,9 @@ impl MessageInstance {
     /// # Errors
     ///
     /// Returns [`Dkim2Error::HeaderNotRepresentable`] when [`Recipe::diff`]
-    /// cannot record a changed header field.
+    /// cannot record a changed header field, and [`Error::BodyNotAvailable`]
+    /// as [`from_recipe`](Self::from_recipe) does, or when a streamed body
+    /// changed.
     pub fn from_message(
         message: &AuthenticatedMessage<'_>,
         original: Option<&AuthenticatedMessage<'_>>,
@@ -709,7 +791,7 @@ impl MessageInstance {
             .map(|original| Recipe::diff(original, message))
             .transpose()?
             .filter(|r| !r.headers.is_empty() || r.body != BodyRecipe::None);
-        Ok(Self::from_recipe(message, recipe, hashes))
+        Self::from_recipe(message, recipe, hashes)
     }
 
     /// Builds a `Message-Instance` for `message` carrying `recipe`.
@@ -717,12 +799,22 @@ impl MessageInstance {
     /// Returns `None` only when `recipe` is `None` and `message` already has
     /// a `Message-Instance`. The instance number is one more than the highest
     /// existing `m=` and the hashes of `message` use `hashes`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::BodyNotAvailable`] when `message` was streamed
+    /// without the body digest of one of `hashes` (see
+    /// [`MessageStream::also_hash_dkim2`](crate::stream::MessageStream::also_hash_dkim2)).
     pub fn from_recipe(
         message: &AuthenticatedMessage<'_>,
         recipe: Option<Recipe>,
         hashes: &[Dkim2Hash],
-    ) -> Option<Self> {
-        Self::from_recipe_with_body(message, recipe, hashes, None)
+    ) -> crate::Result<Option<Self>> {
+        if recipe.is_none() && !message.dkim2_instances.is_empty() {
+            return Ok(None);
+        }
+        let body = message.streamed_dkim2_digests(hashes.iter().copied())?;
+        Ok(Self::from_recipe_with_body(message, recipe, hashes, body))
     }
 
     pub(crate) fn from_recipe_with_body(

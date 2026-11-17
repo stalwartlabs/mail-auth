@@ -70,6 +70,10 @@ name = "canonicalize"
 harness = false
 required-features = ["test"]
 
+[[bench]]
+name = "parse"
+harness = false
+
 [[example]]
 name = "arc_seal"
 required-features = ["arc", "aws-lc-rs"]

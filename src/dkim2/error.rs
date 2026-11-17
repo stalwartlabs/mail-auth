@@ -215,6 +215,9 @@ pub enum Dkim2Error {
     /// body hashes of the instances below it cannot be checked and the
     /// message is not a Fully Verified DKIM2 Message (§13).
     NullBodyRecipe(u32),
+    /// The `Message-Instance` with this `m=` has a body recipe, and the
+    /// message was streamed, so the earlier body cannot be rebuilt.
+    BodyNotAvailable(u32),
     /// A `From` header field is not Authentic (§11): its domain does not
     /// relaxed-match `d=` of the signature that covers it, or it has no
     /// single address with a domain name.
@@ -375,6 +378,12 @@ impl Display for Dkim2Error {
                     f,
                     "Message-Instance m={m} body hash {} mismatch",
                     hash.name()
+                )
+            }
+            Dkim2Error::BodyNotAvailable(m) => {
+                write!(
+                    f,
+                    "Message-Instance m={m} needs the body of a streamed message"
                 )
             }
             Dkim2Error::NullBodyRecipe(m) => {

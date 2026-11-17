@@ -32,6 +32,7 @@ pub(crate) mod sampling;
 pub(crate) mod scan;
 pub mod signer;
 pub mod spf;
+pub mod stream;
 #[cfg(any(feature = "test", fuzzing))]
 #[doc(hidden)]
 pub mod testing;

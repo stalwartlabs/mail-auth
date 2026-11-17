@@ -184,7 +184,7 @@ impl Dkim2SigningStream<'_> {
     }
 }
 
-struct BodyDigests {
+pub(crate) struct BodyDigests {
     sha256: Option<<Sha256 as HashImpl>::Context>,
     sha512: Option<<Sha512 as HashImpl>::Context>,
 }
@@ -203,7 +203,7 @@ impl BodyDigests {
         }
     }
 
-    fn hasher_for(hashes: impl IntoIterator<Item = Dkim2Hash>) -> BodyHasher<Self> {
+    pub(crate) fn hasher_for(hashes: impl IntoIterator<Item = Dkim2Hash>) -> BodyHasher<Self> {
         let mut wanted = [false; Dkim2Hash::COUNT];
         for hash in hashes {
             if let Some(slot) = wanted.get_mut(hash.index()) {
@@ -221,7 +221,7 @@ impl BodyDigests {
         )
     }
 
-    fn complete(self) -> Digests {
+    pub(crate) fn complete(self) -> Digests {
         [
             self.sha256.map(HashContext::complete),
             self.sha512.map(HashContext::complete),

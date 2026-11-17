@@ -133,6 +133,26 @@ On WASM, DoH requests are issued through the browser Fetch API, randomness comes
     assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
 ```
 
+### Streaming Verification
+
+```rust
+    // Feed the message in chunks: only the header section is buffered,
+    // the body is hashed as it arrives
+    let mut stream = MessageStream::new();
+    for chunk in RFC5322_MESSAGE.as_bytes().chunks(8192) {
+        stream.write(chunk);
+    }
+    let streamed = stream.finish().unwrap();
+    let authenticated_message = streamed.message();
+
+    // Verify as usual
+    let authenticator = MessageAuthenticator::new_cloudflare_tls().unwrap();
+    let result = authenticator.verify_dkim(&authenticated_message).await;
+    assert!(result.iter().all(|s| s.result() == &DkimResult::Pass));
+```
+
+A hash needed for a signature added later (an ARC seal, a new DKIM2 `Message-Instance`) is declared before the body arrives with `also_hash` or `also_hash_dkim2`. A DKIM2 chain in which an earlier hop changed the body cannot be fully verified from a stream; `StreamedMessage::needs_body` reports it, so the message can be buffered and parsed instead.
+
 ### DKIM1 Signing
 
 ```rust

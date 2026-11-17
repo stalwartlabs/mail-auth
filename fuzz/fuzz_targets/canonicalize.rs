@@ -11,7 +11,10 @@ use mail_auth::{
     AuthenticatedMessage,
     crypto::Ed25519Key,
     dkim::{Canonicalization, DkimSigner},
-    testing::{canonicalize_headers, chunked_body_digest, whole_body_digest},
+    testing::{
+        assert_stream_matches_buffered, canonicalize_headers, chunked_body_digest,
+        whole_body_digest,
+    },
     headers::{HeaderFolder, HeaderWriter, Writer},
     signer::Ready,
 };
@@ -149,4 +152,5 @@ fuzz_target!(|data: &[u8]| {
     check_body(seed, rest);
     check_headers(rest);
     check_streaming(seed, rest);
+    assert_stream_matches_buffered(rest, usize::from(seed % 17) + 1);
 });

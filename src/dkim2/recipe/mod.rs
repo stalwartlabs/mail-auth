@@ -189,6 +189,16 @@ impl Recipe {
             }
         }
 
+        if original.is_streamed() || modified.is_streamed() {
+            return match (&original.streamed_body, &modified.streamed_body) {
+                (Some(original), Some(modified)) if original.same_as(modified) => Ok(Recipe {
+                    headers,
+                    body: BodyRecipe::None,
+                }),
+                _ => Err(crate::Error::BodyNotAvailable),
+            };
+        }
+
         let orig_body = original.raw_body();
         let mod_body = modified.raw_body();
         let body = if orig_body == mod_body {

@@ -20,7 +20,7 @@ use crate::{
     Error,
     crypto::HashAlgorithm,
     dkim::{self, Canonicalization},
-    dkim2,
+    dkim2::{self, Dkim2Hash, canonicalize::Digests},
     headers::{AuthenticatedHeader, Header, HeaderParser},
 };
 use mail_parser::{AddressList, HeaderForm, HeaderName, Message};
@@ -54,6 +54,7 @@ pub struct AuthenticatedMessage<'x> {
     pub(crate) raw_message: &'x [u8],
     pub(crate) body_offset: u32,
     pub(crate) body_hashes: Vec<(Canonicalization, HashAlgorithm, u64, Vec<u8>)>,
+    pub(crate) streamed_body: Option<Box<StreamedBody>>,
     pub(crate) dkim_headers: Vec<Header<'x, dkim::Signature>>,
     pub(crate) dkim2_signatures: Vec<Header<'x, dkim2::Signature>>,
     pub(crate) dkim2_instances: Vec<Header<'x, dkim2::MessageInstance>>,
@@ -71,6 +72,28 @@ pub struct AuthenticatedMessage<'x> {
     #[cfg(feature = "arc")]
     pub(crate) has_arc_errors: bool,
     pub(crate) has_dkim2_errors: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct StreamedBody {
+    pub(crate) len: u64,
+    pub(crate) dkim2: Digests,
+}
+
+impl StreamedBody {
+    pub(crate) fn has_dkim2_digests(&self, wanted: impl IntoIterator<Item = Dkim2Hash>) -> bool {
+        wanted
+            .into_iter()
+            .all(|hash| matches!(self.dkim2.get(hash.index()), Some(Some(_))))
+    }
+
+    pub(crate) fn same_as(&self, other: &Self) -> bool {
+        self.len == other.len
+            && self.dkim2.iter().zip(&other.dkim2).any(|pair| match pair {
+                (Some(a), Some(b)) => a.as_ref() == b.as_ref(),
+                _ => false,
+            })
+    }
 }
 
 impl<'x> AsRef<AuthenticatedMessage<'x>> for AuthenticatedMessage<'x> {
@@ -215,6 +238,75 @@ impl<'x> AuthenticatedMessage<'x> {
             Some(message.finalize())
         } else {
             None
+        }
+    }
+
+    pub(crate) fn parse_streamed(
+        header_section: &'x [u8],
+        prepend_headers: Option<&'x [u8]>,
+        strict: bool,
+        body_hashes: &[(Canonicalization, HashAlgorithm, u64, Vec<u8>)],
+        body: StreamedBody,
+    ) -> crate::Result<Self> {
+        let mut message = AuthenticatedMessage {
+            raw_message: header_section,
+            headers: Vec::with_capacity(EXPECTED_HEADER_COUNT),
+            ..Default::default()
+        };
+
+        if let Some(headers) = prepend_headers {
+            message.parse_headers(headers, strict);
+        }
+        message.parse_headers(header_section, strict);
+        if message.headers.is_empty() {
+            return Err(Error::Parse);
+        }
+        message.body_offset = header_section.len() as u32;
+        let mut message = message.finalize();
+        for (cb, ha, l, bh) in &mut message.body_hashes {
+            *bh = body_hashes
+                .iter()
+                .find(|(c, h, len, _)| c == cb && h == ha && len == l)
+                .map(|(_, _, _, bh)| bh.clone())
+                .ok_or(Error::BodyNotAvailable)?;
+        }
+        for hash in body_hashes {
+            if !message
+                .body_hashes
+                .iter()
+                .any(|(c, h, l, _)| (c, h, l) == (&hash.0, &hash.1, &hash.2))
+            {
+                message.body_hashes.push(hash.clone());
+            }
+        }
+        let named = message
+            .dkim2_instances
+            .iter()
+            .flat_map(|header| &header.header.hashes)
+            .filter_map(|hash| hash.name.known());
+        if !body.has_dkim2_digests(named) {
+            return Err(Error::BodyNotAvailable);
+        }
+        message.streamed_body = Some(Box::new(body));
+        Ok(message)
+    }
+
+    /// Returns `true` when the message came from a
+    /// [`MessageStream`](crate::stream::MessageStream): its body was hashed
+    /// and is not held, so [`raw_body`](Self::raw_body) is empty and
+    /// [`raw_message`](Self::raw_message) is the header section.
+    pub fn is_streamed(&self) -> bool {
+        self.streamed_body.is_some()
+    }
+
+    pub(crate) fn streamed_dkim2_digests(
+        &self,
+        wanted: impl IntoIterator<Item = Dkim2Hash>,
+    ) -> crate::Result<Option<Digests>> {
+        match self.streamed_body.as_deref() {
+            Some(body) if body.has_dkim2_digests(wanted) => Ok(Some(body.dkim2.clone())),
+            Some(_) => Err(Error::BodyNotAvailable),
+            None => Ok(None),
         }
     }
 

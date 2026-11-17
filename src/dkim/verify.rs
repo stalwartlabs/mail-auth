@@ -268,6 +268,7 @@ impl MessageAuthenticator {
                             #[cfg(feature = "arc")]
                             Error::Arc(_) => (record.rr & RR_OTHER) != 0,
                             Error::MissingParameters
+                            | Error::BodyNotAvailable
                             | Error::NoHeadersFound
                             | Error::Dkim(DkimError::BodyLengthTag)
                             | Error::NotAligned
