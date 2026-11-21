@@ -17,6 +17,7 @@ All notable changes to this project will be documented in this file. This projec
 ### Fixed
 - DKIM1: `DkimSigningStream` hashed the body from the first `\r\n\r\n` instead of where the header section ends, so a header line without a colon or a bare LF empty line produced a body hash that did not verify.
 - DKIM2: a verification proof was accepted as covering a message parsed with `prepend_headers` it was not made for, so `Dkim2Signer` signed it without a new `Message-Instance` and the chain failed at the next hop (#69).
+- SPF: the `ptr` mechanism did not match a PTR name equal to `<target-name>`, or a subdomain of a macro-expanded `<target-name>`, because the trailing dot of the PTR record or of the expanded name was compared (#71).
 
 ## [0.15.1] - 2026-10-30
 

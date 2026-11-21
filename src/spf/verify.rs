@@ -375,7 +375,9 @@ impl MessageAuthenticator {
 
                         let target_name = macro_string.eval(&vars, &domain, true);
                         let target_addr = to_lowercase(target_name.as_ref());
-                        let target_addr = target_addr.as_ref();
+                        let target_addr = target_addr
+                            .strip_suffix('.')
+                            .unwrap_or(target_addr.as_ref());
                         let mut matches = false;
 
                         if let Ok(records) = self.ptr_lookup(ip, params.ptr_cache()).await {
@@ -392,10 +394,10 @@ impl MessageAuthenticator {
                                         )
                                         .await
                                 {
-                                    matches = record.as_ref() == target_addr
+                                    let record =
+                                        record.strip_suffix('.').unwrap_or(record.as_ref());
+                                    matches = record == target_addr
                                         || record
-                                            .strip_suffix('.')
-                                            .unwrap_or(record.as_ref())
                                             .strip_suffix(target_addr)
                                             .is_some_and(|prefix| prefix.ends_with('.'));
                                     if matches {

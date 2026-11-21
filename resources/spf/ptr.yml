@@ -55,3 +55,52 @@ tests:
     sender: sender@test.org
     ip: 192.168.1.6
     expect: fail
+
+---
+# Resolvers return PTR names as FQDNs, with a trailing dot, while
+# <target-name> may or may not have one.
+
+name: PTR match with FQDN records
+records:
+  ptr: 192.168.1.5 mail.test.org.
+  ptr: 192.168.2.5 test2.org.
+  ptr: 192.168.3.5 a.mail.test3.org.
+  ptr: 192.168.4.5 a.mail.test4.org.
+  ptr: 192.168.4.6 mail.test4.org.
+  ptr: 192.168.5.5 amail.test5.org.
+  a: mail.test.org. 192.168.1.5
+  a: test2.org. 192.168.2.5
+  a: a.mail.test3.org. 192.168.3.5
+  a: a.mail.test4.org. 192.168.4.5
+  a: mail.test4.org. 192.168.4.6
+  a: amail.test5.org. 192.168.5.5
+  spf: test.org v=spf1 ptr:mail.test.org -all
+  spf: test2.org v=spf1 ptr -all
+  spf: test3.org v=spf1 ptr:mail.test3.org -all
+  spf: test4.org v=spf1 ptr:mail.%{d} -all
+  spf: test5.org v=spf1 ptr:mail.%{d} -all
+tests:
+  - domain: test.org
+    sender: sender@test.org
+    ip: 192.168.1.5
+    expect: pass
+  - domain: test2.org
+    sender: sender@test2.org
+    ip: 192.168.2.5
+    expect: pass
+  - domain: test3.org
+    sender: sender@test3.org
+    ip: 192.168.3.5
+    expect: pass
+  - domain: test4.org
+    sender: sender@test4.org
+    ip: 192.168.4.5
+    expect: pass
+  - domain: test4.org
+    sender: sender@test4.org
+    ip: 192.168.4.6
+    expect: pass
+  - domain: test5.org
+    sender: sender@test5.org
+    ip: 192.168.5.5
+    expect: fail
