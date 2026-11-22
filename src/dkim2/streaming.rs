@@ -177,9 +177,10 @@ impl Dkim2SigningStream<'_> {
         };
         self.signer
             .sign_internal(&message, hop, new_instance.as_ref(), verified, now, body)
-            .map(|signature| Dkim2Signed {
+            .map(|(signature, policy_domain)| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
+                policy_domain,
             })
     }
 }

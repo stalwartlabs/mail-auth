@@ -29,6 +29,7 @@ impl Dkim2Signer<NeedDomain> {
             flags: Vec::new(),
             nonce: None,
             out_of_band: false,
+            from_subdomain: false,
         }
     }
 
@@ -44,6 +45,7 @@ impl Dkim2Signer<NeedDomain> {
             flags: self.flags,
             nonce: self.nonce,
             out_of_band: self.out_of_band,
+            from_subdomain: self.from_subdomain,
         }
     }
 }
@@ -62,6 +64,7 @@ impl Dkim2Signer<NeedSelector> {
             flags: self.flags,
             nonce: self.nonce,
             out_of_band: self.out_of_band,
+            from_subdomain: self.from_subdomain,
         }
     }
 }
@@ -164,6 +167,20 @@ impl Dkim2Signer<Ready> {
     /// checks still apply.
     pub fn out_of_band_arrangement(mut self) -> Self {
         self.out_of_band = true;
+        self
+    }
+
+    /// Lets the signer make a `From` header field Authentic with a signing
+    /// domain that is a subdomain of the `From` domain (§11.1). That is only
+    /// allowed when the Domain Policy Record of the `From` domain permits it
+    /// (§12.4), which the signer cannot look up: such a signature names the
+    /// domain in [`Dkim2Signed::policy_domain`](super::Dkim2Signed::policy_domain),
+    /// and the caller must check it with
+    /// [`MessageAuthenticator::dkim2_check_policy`](crate::MessageAuthenticator::dkim2_check_policy)
+    /// before using the signature. Without it, such a `From` is rejected with
+    /// [`Dkim2Error::FromNotAuthentic`](super::Dkim2Error::FromNotAuthentic).
+    pub fn allow_from_subdomain(mut self) -> Self {
+        self.from_subdomain = true;
         self
     }
 }

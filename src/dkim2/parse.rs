@@ -957,7 +957,7 @@ mod test {
         ));
     }
 
-    // -08 §14.6: an unknown algorithm is kept so that it counts as a PERMERROR in its group.
+    // -09 §14.6: an unknown algorithm is kept so that it counts as a PERMERROR in its group.
     #[test]
     fn unknown_algorithm_in_s_is_kept() {
         let v: &[u8] =
@@ -1023,7 +1023,7 @@ mod test {
         assert_eq!(sig.s[0].a, AlgorithmName::Unknown("rsa-sha1".into()));
     }
 
-    // -08 §8: an empty value is allowed unless the tag's own ABNF needs at least one character.
+    // -09 §8: an empty value is allowed unless the tag's own ABNF needs at least one character.
     #[test]
     fn empty_tag_values() {
         let base = "i=1; m=1; t=0; d=ex.com;";
@@ -1061,7 +1061,7 @@ mod test {
         }
     }
 
-    // -08 §14.2: valid JSON that breaks the recipe rules is an invalid Recipe, not invalid JSON.
+    // -09 §14.2: valid JSON that breaks the recipe rules is an invalid Recipe, not invalid JSON.
     #[test]
     fn invalid_recipe_is_distinguished_from_invalid_json() {
         let instance = |json: &[u8]| {

@@ -34,6 +34,27 @@ pub(crate) const Z: u64 = b'z' as u64;
 
 pub(crate) use crate::dns::TxtRecordParser;
 
+pub(crate) fn is_dkim1_record(record: &[u8]) -> bool {
+    leading_version_tag(record).is_none_or(is_dkim1_version)
+}
+
+pub(crate) fn starts_with_dkim1_version(record: &[u8]) -> bool {
+    leading_version_tag(record).is_some_and(is_dkim1_version)
+}
+
+fn leading_version_tag(record: &[u8]) -> Option<&[u8]> {
+    let (name, rest) = record.trim_ascii_start().split_first()?;
+    if !name.eq_ignore_ascii_case(&b'v') {
+        return None;
+    }
+    let rest = rest.trim_ascii_start().strip_prefix(b"=")?;
+    Some(split_tag_value(rest).0.trim_ascii())
+}
+
+fn is_dkim1_version(value: &[u8]) -> bool {
+    value.eq_ignore_ascii_case(b"DKIM1")
+}
+
 pub(crate) trait TagParser: Sized {
     fn match_bytes(&mut self, bytes: &[u8]) -> bool;
     fn key(&mut self) -> Option<u64>;

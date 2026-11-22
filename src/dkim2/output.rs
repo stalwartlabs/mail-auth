@@ -32,12 +32,11 @@ pub enum Dkim2Result {
     /// numbering, an algorithm that is not implemented, or a missing,
     /// invalid or revoked public key.
     PermError(crate::Error),
-    /// A public key could not be fetched because of a temporary DNS error; a
-    /// later attempt may succeed.
+    /// A public key or a Domain Policy Record could not be fetched because of
+    /// a temporary DNS error; a later attempt may succeed.
     TempError(crate::Error),
     /// The message has no `DKIM2-Signature` and no `Message-Instance` header
-    /// field, so there was nothing to verify. This follows the `none` result
-    /// of DKIM and ARC; §14.2 reports it as a PERMERROR ("No DKIM2 header
+    /// field, so there was nothing to verify (§14.1, §14.2: "No DKIM2 header
     /// fields found").
     None,
 }

@@ -15,11 +15,12 @@
 //!
 //! Implemented specifications:
 //!
-//! - [draft-ietf-dkim-dkim2-spec-08](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/):
+//! - [draft-ietf-dkim-dkim2-spec-09](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/):
 //!   DKIM2 Signatures. Section references (`§`) in this module point to this draft.
-//! - [draft-ietf-dkim-dkim2-dns](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-dns/):
-//!   DKIM2 DNS Records. Pure ML-DSA-44 keys are published with `k=mldsa44`,
-//!   which the DNS draft does not define yet.
+//! - [draft-ietf-dkim-dkim2-dns-03](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-dns/):
+//!   Domain Name Specification for DKIM1 and DKIM2: the key records
+//!   (`k=rsa`, `k=ed25519` and `k=mldsa44`) and the Domain Policy Record
+//!   ([`DomainPolicy`]).
 //!
 //! Sign with [`Dkim2Signer`]. Verify a message with
 //! [`MessageAuthenticator::verify_dkim2`](crate::MessageAuthenticator::verify_dkim2)
@@ -40,6 +41,7 @@ mod error;
 pub mod headers;
 pub mod output;
 pub mod parse;
+pub mod policy;
 pub mod recipe;
 pub mod sign;
 pub mod streaming;
@@ -51,6 +53,7 @@ mod tests;
 pub use dsn::{Dkim2Dsn, Dkim2DsnFailure, Dkim2DsnOutput};
 pub use error::Dkim2Error;
 pub use output::{ChainLink, Dkim2Output, Dkim2Result, Verification};
+pub use policy::DomainPolicy;
 pub use recipe::{BodyRecipe, HeaderRecipe, Recipe, Step};
 pub use sign::{Dkim2Signed, Envelope, Hop};
 pub use streaming::Dkim2SigningStream;
@@ -116,6 +119,7 @@ pub struct Dkim2Signer<State = NeedDomain> {
     pub(crate) flags: Vec<Flag>,
     pub(crate) nonce: Option<String>,
     pub(crate) out_of_band: bool,
+    pub(crate) from_subdomain: bool,
 }
 
 pub(crate) struct KeyEntry {

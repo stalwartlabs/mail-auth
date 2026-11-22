@@ -11,11 +11,11 @@ protocols. The library aims to be fast, safe and correct while supporting all ma
 Features:
 
 - **DomainKeys Identified Mail v2 (DKIMv2)**:
-  - Implements [draft-ietf-dkim-dkim2-spec-08](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/).
+  - Implements [draft-ietf-dkim-dkim2-spec-09](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/) and [draft-ietf-dkim-dkim2-dns-03](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-dns/).
   - ED25519-SHA256, RSA-SHA256 and post-quantum ML-DSA-44 signing and chain verification, with SHA-256 and SHA-512 message hashes.
   - Algorithmic agility: a single `DKIM2-Signature` can carry several signatures under different selectors and algorithms, combined as alternatives (`|`) or as hybrids that must all verify (`,`).
   - SMTP envelope (MAIL FROM / RCPT TO) and next-domain chain binding, with per-hop `Message-Instance` hashes and modification recipes.
-  - Authentic `From` checks, full and provisional (§13.2) verification, and a signer that only extends Fully Verified DKIM2 Messages.
+  - Authentic `From` checks, including subdomain signing governed by the Domain Policy Record, full and provisional (§13.2) verification, and a signer that only extends Fully Verified DKIM2 Messages.
   - Verifiable delivery status notification (DSN) authentication.
 - **DomainKeys Identified Mail v1 (DKIMv1)**:
   - ED25519-SHA256 (Edwards-Curve Digital Signature Algorithm), RSA-SHA256 and RSA-SHA1 signing and verification.
@@ -373,8 +373,8 @@ To fuzz the library with `cargo-fuzz`:
 ## Conformed RFCs
 
 ### DKIM2
-- [draft-ietf-dkim-dkim2-spec-08 - DKIM2 Signatures](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/)
-- [draft-ietf-dkim-dkim2-dns - DKIM2 DNS Records](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-dns/)
+- [draft-ietf-dkim-dkim2-spec-09 - DKIM2 Signatures](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-spec/)
+- [draft-ietf-dkim-dkim2-dns-03 - Domain Name Specification for DKIM1 and DKIM2](https://datatracker.ietf.org/doc/draft-ietf-dkim-dkim2-dns/)
 - [FIPS 204 - Module-Lattice-Based Digital Signature Standard](https://csrc.nist.gov/pubs/fips/204/final) (ML-DSA-44)
 - [RFC 9881 - ML-DSA in X.509](https://datatracker.ietf.org/doc/rfc9881/) (ML-DSA-44 private key encoding)
 

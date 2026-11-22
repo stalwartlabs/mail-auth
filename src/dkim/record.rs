@@ -101,9 +101,11 @@ impl DomainKey {
         (self.f & R_FLAG_MATCH_DOMAIN) != 0
     }
 
-    /// Returns `true` when the name held more than one TXT record. DKIM uses
-    /// the first record that parses; DKIM2 treats this as an error
-    /// (draft-ietf-dkim-dkim2-spec Section 14.5).
+    /// Returns `true` when the name held more than one TXT record after
+    /// discarding those that begin with a `v=` tag other than `DKIM1`
+    /// (draft-ietf-dkim-dkim2-dns Section 3). DKIM uses the first record
+    /// that parses; DKIM2 treats this as an error
+    /// (draft-ietf-dkim-dkim2-spec Section 3.7).
     pub fn has_multiple_records(&self) -> bool {
         (self.f & R_MULTIPLE_RECORDS) != 0
     }

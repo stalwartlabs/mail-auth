@@ -10,7 +10,7 @@ use super::{
     DnsEntry, DnssecStatus, IpLookupStrategy, Mx, Negative, RecordSet, ResolverCache, ToFqdn,
     TxtRecord, TxtRecordParser, UnwrapTxtRecord,
 };
-use crate::{Error, MessageAuthenticator};
+use crate::{DnsError, Error, MessageAuthenticator};
 use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     sync::Arc,
@@ -42,9 +42,11 @@ impl MessageAuthenticator {
     /// [`DmarcRecord`](crate::dmarc::DmarcRecord) or
     /// [`TlsRptRecord`](crate::mta_sts::TlsRptRecord)).
     ///
-    /// When `cache` is set, a cached entry is returned without querying, and
-    /// the parse outcome (the record or the parse error) is stored after a
-    /// query. A negative answer that carries an SOA record is stored as
+    /// When `cache` is set, a cached entry for `T` is returned without
+    /// querying, and the parse outcome (the record, or the parse error as
+    /// [`TxtRecord::Invalid`] tagged with `T`) is stored after a query,
+    /// replacing any entry. An entry parsed as another record type counts as
+    /// a miss. A negative answer that carries an SOA record is stored as
     /// [`TxtRecord::Error`] until its negative TTL expires.
     ///
     /// # Errors
@@ -62,8 +64,12 @@ impl MessageAuthenticator {
         cache: Option<&impl ResolverCache<Box<str>, TxtRecord>>,
     ) -> crate::Result<Arc<T>> {
         let key = key.to_fqdn();
-        if let Some(value) = cache.as_ref().and_then(|c| c.get::<str>(key.as_ref())) {
-            return T::unwrap_txt(value);
+        if let Some(result) = cache
+            .as_ref()
+            .and_then(|c| c.get::<str>(key.as_ref()))
+            .and_then(T::unwrap_txt)
+        {
+            return result;
         }
 
         let DnsEntry {
@@ -81,13 +87,13 @@ impl MessageAuthenticator {
             }
         };
 
-        let result: TxtRecord = T::parse_records(&records).into();
-
-        if let Some(cache) = cache {
-            cache.insert(key.into_owned().into_boxed_str(), result.clone(), expires);
-        }
-
-        T::unwrap_txt(result)
+        let parsed = T::parse_records(&records);
+        let Some(cache) = cache else {
+            return parsed.map(Arc::new);
+        };
+        let record: TxtRecord = parsed.into();
+        cache.insert(key.into_owned().into_boxed_str(), record.clone(), expires);
+        T::unwrap_txt(record).unwrap_or(Err(Error::Dns(DnsError::InvalidRecordType)))
     }
 
     /// Queries the MX records of `key` (RFC 5321 Section 5.1).

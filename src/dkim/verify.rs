@@ -263,6 +263,7 @@ impl MessageAuthenticator {
                             Error::Dns(DnsError::Resolver(_))
                             | Error::Dns(DnsError::RecordNotFound(_))
                             | Error::Dns(DnsError::InvalidRecordType)
+                            | Error::Dns(DnsError::MultipleRecords)
                             | Error::Parse
                             | Error::Dkim(DkimError::PublicKeyRevoked) => (record.rr & RR_DNS) != 0,
                             #[cfg(feature = "arc")]

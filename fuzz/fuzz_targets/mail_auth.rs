@@ -10,7 +10,7 @@ use libfuzzer_sys::fuzz_target;
 use mail_auth::{
     AuthenticatedMessage, arc,
     dkim::{self, AtpsRecord, DkimReportRecord, DomainKey},
-    dkim2::{self, Recipe},
+    dkim2::{self, DomainPolicy, Recipe},
     dmarc::DmarcRecord,
     dns::TxtRecordParser,
     mta_sts::{MtaStsRecord, TlsRptRecord},
@@ -50,6 +50,10 @@ fuzz_target!(|data: &[u8]| {
 
     DomainKey::parse(data).ok();
     DomainKey::parse(&data_txt).ok();
+    DomainKey::parse_records(&[data.to_vec(), data_txt.to_vec()]).ok();
+
+    DomainPolicy::parse(data).ok();
+    DomainPolicy::parse_records(&[data.to_vec(), data_txt.to_vec()]).ok();
 
     DkimReportRecord::parse(data).ok();
     DkimReportRecord::parse(&data_txt).ok();

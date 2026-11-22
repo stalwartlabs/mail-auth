@@ -318,14 +318,17 @@ impl TxtRecordParser for DomainKey {
 
     fn parse_records(records: &[Vec<u8>]) -> crate::Result<Self> {
         let mut result = Err(Error::Dns(DnsError::InvalidRecordType));
-        for record in records {
-            result = Self::parse(record);
-            if let Ok(key) = &mut result {
-                if records.len() > 1 {
-                    key.f |= R_MULTIPLE_RECORDS;
-                }
-                break;
+        let mut remaining = 0usize;
+        for record in records.iter().filter(|record| is_dkim1_record(record)) {
+            remaining += 1;
+            if result.is_err() {
+                result = Self::parse(record);
             }
+        }
+        if remaining > 1
+            && let Ok(key) = &mut result
+        {
+            key.f |= R_MULTIPLE_RECORDS;
         }
         result
     }
@@ -727,6 +730,30 @@ mod test {
                 expected_result
             );
         }
+    }
+
+    // Records with a v= other than DKIM1 are discarded before counting duplicates.
+    #[test]
+    fn domain_key_record_selection() {
+        let key = "v=DKIM1; k=ed25519; p=11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=";
+        let records = |list: &[&str]| -> Vec<Vec<u8>> {
+            list.iter().map(|r| r.as_bytes().to_vec()).collect()
+        };
+        for (list, multiple) in [
+            (vec![key], false),
+            (vec!["v=spf1 -all", key, "v=DKIM2; p=abc"], false),
+            (vec![key, "V = dkim1; p="], true),
+            (vec!["k=rsa; p=", key], true),
+        ] {
+            assert_eq!(
+                DomainKey::parse_records(&records(&list))
+                    .unwrap()
+                    .has_multiple_records(),
+                multiple,
+                "{list:?}"
+            );
+        }
+        assert!(DomainKey::parse_records(&records(&["v=spf1 -all", "v=DKIM2; p=abc"])).is_err());
     }
 
     #[test]

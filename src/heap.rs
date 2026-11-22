@@ -8,6 +8,7 @@ use crate::{
     DnsError, Error,
     crypto::{CryptoError, SigningKey},
     dkim::{AtpsRecord, DkimReportRecord, DkimSigner, DomainKey, Signature},
+    dkim2::DomainPolicy,
     dmarc::{DmarcRecord, Uri},
     dns::TxtRecord,
     mta_sts::{MtaStsRecord, ReportUri, TlsRptRecord},
@@ -120,6 +121,12 @@ impl HeapSize for DkimReportRecord {
     }
 }
 
+impl HeapSize for DomainPolicy {
+    fn heap_size(&self) -> usize {
+        0
+    }
+}
+
 impl HeapSize for AtpsRecord {
     fn heap_size(&self) -> usize {
         self.d.heap_size()
@@ -179,12 +186,14 @@ impl TxtRecord {
             TxtRecord::Spf(record) => record.heap_size(),
             TxtRecord::SpfExplanation(record) => record.heap_size(),
             TxtRecord::DomainKey(record) => record.heap_size(),
+            TxtRecord::Dkim2Policy(record) => record.heap_size(),
             TxtRecord::DkimReport(record) => record.heap_size(),
             TxtRecord::Dmarc(record) => record.heap_size(),
             TxtRecord::Atps(record) => record.heap_size(),
             TxtRecord::MtaSts(record) => record.heap_size(),
             TxtRecord::TlsRpt(record) => record.heap_size(),
             TxtRecord::Error(err) => err.heap_size(),
+            TxtRecord::Invalid { error, .. } => error.heap_size(),
         }
     }
 }
@@ -265,6 +274,10 @@ mod test {
         assert_eq!(
             TxtRecord::Error(Error::Io("timeout".to_string())).heap_size(),
             "timeout".len()
+        );
+        assert_eq!(
+            TxtRecord::from(SpfRecord::parse(b"v=DMARC1; p=none")).heap_size(),
+            ARC_HEADER + size_of::<Error>()
         );
     }
 

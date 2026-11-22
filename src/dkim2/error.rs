@@ -24,6 +24,8 @@ pub enum Dkim2Error {
     InstanceMissing(u32),
     /// The `Message-Instance` has a syntax error or a repeated tag.
     InstanceSyntax(u32),
+    /// More than one `Message-Instance` has this `m=`.
+    InstanceDuplicated(u32),
     /// A required `Message-Instance` tag is missing.
     InstanceTagMissing {
         /// Revision number (`m=`) of the instance.
@@ -69,8 +71,7 @@ pub enum Dkim2Error {
         tag: &'static str,
     },
     /// A `DKIM2-Signature` tag is not allowed in this position, such as
-    /// `nd=` together with `mf=`/`rt=`, `nd=` on the most recent signature,
-    /// or the `exploded` flag (`f=`) on the first signature.
+    /// `nd=` together with `mf=`/`rt=`.
     SignatureTagUnexpected {
         /// Sequence number (`i=`) of the signature.
         i: u32,
@@ -79,6 +80,13 @@ pub enum Dkim2Error {
     },
     /// The `s=` tag names the same selector twice.
     DuplicateSelector(u32),
+    /// More than one `DKIM2-Signature` has this `i=`.
+    SignatureDuplicated(u32),
+    /// The first `DKIM2-Signature` (`i=1`) has the `exploded` flag (§12.5).
+    ExplodedFirstSignature,
+    /// The most recent `DKIM2-Signature` names a next domain (`nd=`), so it
+    /// does not bind the envelope it was received with (§14.4).
+    UnexpectedNextDomain(u32),
     /// The `s=` tag has more than eight entries, a local limit on the public
     /// key lookups a signature can cause.
     TooManySelectors(u32),
@@ -159,9 +167,16 @@ pub enum Dkim2Error {
         selector: Box<str>,
     },
     /// The public key is malformed: an Ed25519 key that is not 32 octets, an
-    /// ML-DSA-44 key that is not 1312 octets, an RSA key that cannot be
-    /// decoded or is shorter than 1024 bits (§14.5).
+    /// ML-DSA-44 key that is not 1312 octets, or an RSA key that cannot be
+    /// decoded (§14.5).
     PublicKeyMalformed {
+        /// Sequence number (`i=`) of the signature.
+        i: u32,
+        /// Selector of the key.
+        selector: Box<str>,
+    },
+    /// The RSA public key is shorter than 1024 bits (§14.6).
+    PublicKeyTooShort {
         /// Sequence number (`i=`) of the signature.
         i: u32,
         /// Selector of the key.
@@ -213,15 +228,44 @@ pub enum Dkim2Error {
     },
     /// A `Message-Instance` with this `m=` has a null body recipe, so the
     /// body hashes of the instances below it cannot be checked and the
-    /// message is not a Fully Verified DKIM2 Message (§13).
+    /// message is not a Fully Verified DKIM2 Message (§13, §14.2).
     NullBodyRecipe(u32),
     /// The `Message-Instance` with this `m=` has a body recipe, and the
     /// message was streamed, so the earlier body cannot be rebuilt.
     BodyNotAvailable(u32),
-    /// A `From` header field is not Authentic (§11): its domain does not
-    /// relaxed-match `d=` of the signature that covers it, or it has no
-    /// single address with a domain name.
+    /// A `From` header field is not Authentic (§11): its domain and `d=` of
+    /// the signature that covers it do not relaxed-match in either direction,
+    /// or there is not exactly one `From` header field holding one valid
+    /// mailbox.
     FromNotAuthentic(u32),
+    /// `d=` of the signature is a subdomain of the `From` domain, and the
+    /// Domain Policy Record of that domain has the `strict` flag (§3.8,
+    /// §11.1).
+    FromSubdomainForbidden {
+        /// Sequence number (`i=`) of the signature.
+        i: u32,
+        /// Domain of the `From` header field.
+        domain: Box<str>,
+    },
+    /// The `From` header field has more than one address (§11).
+    FromMultipleAddresses(u32),
+    /// The `From` header field address uses a domain literal (§11).
+    FromDomainLiteral(u32),
+    /// The Domain Policy Record lookup of the `From` domain failed with a
+    /// temporary DNS error (§3.8).
+    PolicyFetch {
+        /// Sequence number (`i=`) of the signature.
+        i: u32,
+        /// Domain of the `From` header field.
+        domain: Box<str>,
+    },
+    /// The `From` domain has more than one Domain Policy Record (§3.8).
+    PolicyMultiple {
+        /// Sequence number (`i=`) of the signature.
+        i: u32,
+        /// Domain of the `From` header field.
+        domain: Box<str>,
+    },
     /// [`Recipe::diff`](super::Recipe::diff) found a changed header field
     /// value with a bare CR or LF outside folding, which a recipe cannot
     /// recreate.
@@ -243,6 +287,7 @@ impl Display for Dkim2Error {
         match self {
             Dkim2Error::InstanceMissing(m) => write!(f, "Message-Instance m={m} missing"),
             Dkim2Error::InstanceSyntax(m) => write!(f, "Message-Instance m={m} syntax error"),
+            Dkim2Error::InstanceDuplicated(m) => write!(f, "Message-Instance m={m} is duplicated"),
             Dkim2Error::InstanceTagMissing { m, tag } => {
                 write!(f, "Message-Instance m={m} tag={tag} missing")
             }
@@ -254,7 +299,7 @@ impl Display for Dkim2Error {
                 write!(f, "Message-Instance m={m} contains invalid JSON")
             }
             Dkim2Error::InvalidRecipe { m, value } => {
-                write!(f, "Message-Instance m={m} Recipe {value} is invalid")
+                write!(f, "Message-Instance m={m} recipe {value} is invalid")
             }
             Dkim2Error::UnknownHash { m, name } => {
                 write!(f, "Message-Instance m={m} algorithm {name} unknown")
@@ -272,6 +317,13 @@ impl Display for Dkim2Error {
             }
             Dkim2Error::DuplicateSelector(i) => {
                 write!(f, "DKIM2-Signature i={i} has a duplicate selector")
+            }
+            Dkim2Error::SignatureDuplicated(i) => write!(f, "DKIM2-Signature i={i} is duplicated"),
+            Dkim2Error::ExplodedFirstSignature => {
+                write!(f, "DKIM2-Signature i=1 has an exploded flag")
+            }
+            Dkim2Error::UnexpectedNextDomain(i) => {
+                write!(f, "DKIM2-Signature i={i} unexpected nd= tag")
             }
             Dkim2Error::TooManySelectors(i) => {
                 write!(f, "DKIM2-Signature i={i} has more selectors than allowed")
@@ -292,7 +344,7 @@ impl Display for Dkim2Error {
                 write!(f, "DKIM2-Signature i={i} RCPT TO {value} did not match")
             }
             Dkim2Error::MailFromDomainMismatch(i) => {
-                write!(f, "DKIM2-Signature i={i} MAIL FROM and d= do not match")
+                write!(f, "DKIM2-Signature i={i} mf= and d= do not match")
             }
             Dkim2Error::NextDomainMismatch(i) => {
                 write!(f, "DKIM2-Signature i={i} nd= does not match")
@@ -338,6 +390,9 @@ impl Display for Dkim2Error {
                     f,
                     "DKIM2-Signature i={i} public key {selector} is malformed"
                 )
+            }
+            Dkim2Error::PublicKeyTooShort { i, selector } => {
+                write!(f, "DKIM2-Signature i={i} public key {selector} too short")
             }
             Dkim2Error::PublicKeyAlgorithmMismatch { i, selector } => {
                 write!(
@@ -387,13 +442,31 @@ impl Display for Dkim2Error {
                 )
             }
             Dkim2Error::NullBodyRecipe(m) => {
-                write!(
-                    f,
-                    "Message-Instance m={m} has a null Recipe, earlier body hashes cannot be checked"
-                )
+                write!(f, "Message-Instance m={m} has a null recipe")
             }
             Dkim2Error::FromNotAuthentic(i) => {
                 write!(f, "DKIM2-Signature i={i} matching From is not authentic")
+            }
+            Dkim2Error::FromSubdomainForbidden { i, domain } => {
+                write!(
+                    f,
+                    "DKIM2-Signature i={i} From {domain} forbids subdomain signing"
+                )
+            }
+            Dkim2Error::FromMultipleAddresses(i) => {
+                write!(f, "DKIM2-Signature i={i} From has more than one address")
+            }
+            Dkim2Error::FromDomainLiteral(i) => {
+                write!(f, "DKIM2-Signature i={i} From uses a domain literal")
+            }
+            Dkim2Error::PolicyFetch { i, domain } => {
+                write!(f, "DKIM2-Signature i={i} policy for {domain} unavailable")
+            }
+            Dkim2Error::PolicyMultiple { i, domain } => {
+                write!(
+                    f,
+                    "DKIM2-Signature i={i} multiple records for {domain} policy"
+                )
             }
             Dkim2Error::HeaderNotRepresentable => {
                 write!(

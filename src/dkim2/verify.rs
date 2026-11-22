@@ -9,8 +9,8 @@
 //! [`MessageAuthenticator::verify_dkim2_provisionally`].
 
 use super::{
-    ChainBinding, ChainLink, Dkim2Error, Dkim2Hash, Dkim2Output, MessageHash, MessageInstance,
-    Signature, SignatureValue, Verification,
+    ChainBinding, ChainLink, Dkim2Error, Dkim2Hash, Dkim2Output, Dkim2Signed, MessageHash,
+    MessageInstance, Signature, SignatureValue, Verification,
     recipe::{BodyRecipe, apply_body_recipe, body_lines, headers_len},
     sign::Envelope,
 };
@@ -20,7 +20,7 @@ use crate::{
     ResolverCache, TxtRecord,
     crypto::{Algorithm, CryptoError},
     dkim::{DkimError, DomainKey},
-    dkim2::parse::is_domain,
+    dkim2::{DomainPolicy, Flag, parse::is_domain},
     dkim2::{
         canonicalize::{CanonicalizedHeaderWriter, Digests, body_digests, header_digests},
         sign::now,
@@ -65,7 +65,10 @@ impl MessageAuthenticator {
     /// For each `s=` entry it evaluates it performs one DNS TXT lookup for
     /// the public key at `<selector>._domainkey.<d>`, served from the cache
     /// when one is given. Entries of a group that already failed and groups
-    /// after one that passed are not looked up.
+    /// after one that passed are not looked up. A `From` domain that is only
+    /// Authentic because `d=` is one of its subdomains also costs one lookup
+    /// of its Domain Policy Record at `_domainkey.<from domain>` (§3.8,
+    /// §11.1), made after the signatures verified.
     ///
     /// The returned [`Dkim2Output`] holds one of:
     ///
@@ -74,15 +77,20 @@ impl MessageAuthenticator {
     /// - [`Dkim2Result::Fail`]: verification completed but the message is not
     ///   a Fully Verified DKIM2 Message: a signature, header hash or body hash
     ///   did not match, a timestamp is out of range, the envelope or chain of
-    ///   custody does not match, a `From` header field is not Authentic, or a
-    ///   null body recipe prevents checking earlier body hashes (§13).
+    ///   custody does not match, or a `From` header field is not Authentic
+    ///   (including a subdomain signature that the `From` domain forbids
+    ///   with `f=strict`).
     /// - [`Dkim2Result::PermError`]: a DKIM2 header field is malformed,
-    ///   incomplete or missing, the numbering has a gap, the chain is longer
-    ///   than 50 hops, a signature or hash algorithm is not implemented, or a
-    ///   public key is missing, malformed, duplicated, revoked or of the wrong
-    ///   type, and no group passed.
+    ///   incomplete, missing or duplicated, the numbering has a gap, the first
+    ///   signature has the `exploded` flag, the chain is longer than 50 hops,
+    ///   a null body recipe prevents checking earlier body hashes, a signature
+    ///   or hash algorithm is not implemented, a public key is missing,
+    ///   malformed, too short, duplicated, revoked or of the wrong type and no
+    ///   group passed, or the `From` domain has more than one Domain Policy
+    ///   Record.
     /// - [`Dkim2Result::TempError`]: a public key lookup failed with a
-    ///   temporary DNS error and no group passed.
+    ///   temporary DNS error and no group passed, or a Domain Policy Record
+    ///   lookup failed with a temporary DNS error.
     /// - [`Dkim2Result::None`]: the message has no `DKIM2-Signature` and no
     ///   `Message-Instance` header field.
     ///
@@ -166,6 +174,65 @@ impl MessageAuthenticator {
             Verification::Provisional,
         )
         .await
+    }
+
+    /// Fetches the DKIM2 Domain Policy Record of `domain` from
+    /// `_domainkey.<domain>` (§3.8), served from the cache when one is
+    /// given. `domain` is mapped to an A-label and a trailing dot is ignored.
+    /// A domain without a record gets the default policy, which authorizes
+    /// subdomains.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Dns`] with [`DnsError::MultipleRecords`] when the name
+    /// has more than one Domain Policy Record, or the lookup error otherwise
+    /// (such as [`DnsError::Resolver`] for a temporary failure).
+    pub async fn dkim2_domain_policy(
+        &self,
+        domain: &str,
+        cache_txt: Option<&impl ResolverCache<Box<str>, TxtRecord>>,
+    ) -> crate::Result<DomainPolicy> {
+        let domain = to_a_label(domain.strip_suffix('.').unwrap_or(domain));
+        match self
+            .txt_lookup::<DomainPolicy>(format!("_domainkey.{domain}."), cache_txt)
+            .await
+        {
+            Ok(policy) => Ok(*policy),
+            Err(Error::Dns(DnsError::RecordNotFound(_))) => Ok(DomainPolicy::default()),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Checks that the Domain Policy Record of the `From` domain permits a
+    /// signature made with [`Dkim2Signer::allow_from_subdomain`](super::Dkim2Signer::allow_from_subdomain)
+    /// (§12.4). Returns `Ok(())` without a lookup when
+    /// [`Dkim2Signed::policy_domain`](super::Dkim2Signed::policy_domain) is
+    /// `None`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the errors the verifier reports for the same record:
+    /// [`Dkim2Error::FromSubdomainForbidden`] when the record has `f=strict`,
+    /// [`Dkim2Error::PolicyMultiple`] when the domain has more than one
+    /// record, and [`Dkim2Error::PolicyFetch`] when it cannot be fetched. The
+    /// signature must not be used in any of these cases.
+    pub async fn dkim2_check_policy(
+        &self,
+        signed: &Dkim2Signed,
+        cache_txt: Option<&impl ResolverCache<Box<str>, TxtRecord>>,
+    ) -> Result<(), Dkim2Error> {
+        let Some(domain) = signed.policy_domain() else {
+            return Ok(());
+        };
+        self.check_domain_policy(
+            &PolicyCheck {
+                i: signed.signature.i,
+                domain: domain.into(),
+            },
+            cache_txt,
+        )
+        .await
+        .map_err(Failure::into_error)
     }
 
     pub(crate) async fn verify_dkim2_<'x, TXT, A, R>(
@@ -298,8 +365,11 @@ impl MessageAuthenticator {
             Verification::Full => signatures,
             Verification::Provisional => signatures.get(previous.len()..).unwrap_or_default(),
         };
+        let mut policies = Vec::new();
         match verification {
-            Verification::Full => check_instances(message, signatures, instances, body_present),
+            Verification::Full => {
+                check_instances(message, signatures, instances, body_present, &mut policies)
+            }
             Verification::Provisional => instances.last().map_or(Ok(()), |header| {
                 StateHashes::for_message(message).check(
                     &header.header,
@@ -324,7 +394,42 @@ impl MessageAuthenticator {
                 Err(failure) => return Err(failure.into()),
             }
         }
+        for check in &policies {
+            match self.check_domain_policy(check, cache_txt).await {
+                Ok(()) => {}
+                Err(Failure::TempError(error)) => {
+                    temp_error.get_or_insert(error);
+                }
+                Err(failure) => return Err(failure.into()),
+            }
+        }
         temp_error.map_or(Ok(()), |error| Err(Failure::TempError(error).into()))
+    }
+
+    async fn check_domain_policy<TXT>(
+        &self,
+        check: &PolicyCheck,
+        cache_txt: Option<&TXT>,
+    ) -> Result<(), Failure>
+    where
+        TXT: ResolverCache<Box<str>, TxtRecord>,
+    {
+        let policy_error =
+            |error: fn(u32, Box<str>) -> Dkim2Error| error(check.i, check.domain.clone());
+        match self.dkim2_domain_policy(&check.domain, cache_txt).await {
+            Ok(policy) if policy.is_strict() => Err(Failure::Fail(policy_error(|i, domain| {
+                Dkim2Error::FromSubdomainForbidden { i, domain }
+            }))),
+            Ok(_) => Ok(()),
+            Err(Error::Dns(DnsError::MultipleRecords)) => {
+                Err(Failure::PermError(policy_error(|i, domain| {
+                    Dkim2Error::PolicyMultiple { i, domain }
+                })))
+            }
+            Err(_) => Err(Failure::TempError(policy_error(|i, domain| {
+                Dkim2Error::PolicyFetch { i, domain }
+            }))),
+        }
     }
 
     async fn check_signature<TXT>(
@@ -436,7 +541,7 @@ impl MessageAuthenticator {
             && key.p.public_key_bits() < MIN_RSA_BITS
         {
             return Err(Failure::PermError(key_error(|i, selector| {
-                Dkim2Error::PublicKeyMalformed { i, selector }
+                Dkim2Error::PublicKeyTooShort { i, selector }
             })));
         }
 
@@ -482,8 +587,12 @@ fn check_numbering(
 ) -> Result<(), Dkim2Error> {
     for (expected, header) in (1u32..).zip(signatures) {
         let signature = &header.header;
-        if signature.i != expected {
+        if expected > 1 && signature.i == expected - 1 {
+            return Err(Dkim2Error::SignatureDuplicated(signature.i));
+        } else if signature.i != expected {
             return Err(Dkim2Error::SequenceGap(expected));
+        } else if expected == 1 && signature.flags.contains(&Flag::Exploded) {
+            return Err(Dkim2Error::ExplodedFirstSignature);
         }
         if let ChainBinding::Envelope { mail_from, rcpt_to } = &signature.chain
             && require_reverse_path()
@@ -494,7 +603,10 @@ fn check_numbering(
     }
 
     for (expected, header) in (1u32..).zip(instances) {
-        if header.header.m != expected {
+        let m = header.header.m;
+        if expected > 1 && m == expected - 1 {
+            return Err(Dkim2Error::InstanceDuplicated(m));
+        } else if m != expected {
             return Err(Dkim2Error::InstanceMissing(expected));
         }
     }
@@ -542,10 +654,7 @@ where
             }
             Ok(())
         }
-        ChainBinding::NextDomain(_) => Err(Dkim2Error::SignatureTagUnexpected {
-            i: top.i,
-            tag: "nd",
-        }),
+        ChainBinding::NextDomain(_) => Err(Dkim2Error::UnexpectedNextDomain(top.i)),
     }
 }
 
@@ -715,19 +824,20 @@ fn check_instances(
     signatures: &[Header<'_, Signature>],
     instances: &[Header<'_, MessageInstance>],
     body_present: bool,
+    policies: &mut Vec<PolicyCheck>,
 ) -> Result<(), Failure> {
     let mut hashes = StateHashes::for_message(message);
     let mut header_buffer;
     let mut body_buffer;
     let mut headers: Cow<'_, [(&[u8], &[u8])]> = Cow::Borrowed(&message.headers);
     let mut body = body_present.then(|| message.raw_body());
-    let mut from = from_domain(&message.headers);
+    let mut from = FromDomain::parse(&message.headers);
     let mut null_body_recipe = None;
 
     for header in instances.iter().rev() {
         let instance = &header.header;
         if let Some(m) = null_body_recipe {
-            return Err(Failure::Fail(Dkim2Error::NullBodyRecipe(m)));
+            return Err(Failure::PermError(Dkim2Error::NullBodyRecipe(m)));
         }
         hashes.check(instance, &headers, body)?;
 
@@ -746,7 +856,7 @@ fn check_instances(
                 .ok_or(Failure::PermError(Dkim2Error::InstanceNotSigned(
                     instance.m,
                 )))?;
-            check_from_authentic(from.as_deref(), signature).map_err(Failure::Fail)?;
+            from.check(signature, policies).map_err(Failure::Fail)?;
         }
 
         match (&recipe.body, body) {
@@ -775,48 +885,110 @@ fn check_instances(
             headers = Cow::Owned(HeaderIterator::new(&header_buffer).collect());
             hashes.header = Default::default();
             if replaces_from {
-                from = from_domain(&headers);
+                from = FromDomain::parse(&headers);
             }
         }
     }
 
     signatures.first().map_or(Ok(()), |first| {
-        check_from_authentic(from.as_deref(), &first.header).map_err(Failure::Fail)
+        from.check(&first.header, policies).map_err(Failure::Fail)
     })
 }
 
-pub(crate) fn from_domain(headers: &[(&[u8], &[u8])]) -> Option<String> {
-    let mut from = headers
-        .iter()
-        .filter(|(name, _)| name.trim_ascii().eq_ignore_ascii_case(b"from"));
-    let (Some((_, value)), None) = (from.next(), from.next()) else {
-        return None;
-    };
-    let parsed = HeaderForm::Addresses.parse(value);
-    let list = parsed.value().as_address()?;
-    let mut addresses = list.iter();
-    let (Some(Address::Mailbox(mailbox)), None) = (addresses.next(), addresses.next()) else {
-        return None;
-    };
-    let (local, domain) = mailbox.address()?.split_once('@')?;
-    let valid = !local.is_empty()
-        && local.bytes().chain(domain.bytes()).all(|ch| {
-            !ch.is_ascii_whitespace() && !ch.is_ascii_control() && !b"@<>()[],;:\"".contains(&ch)
-        });
-    let domain = to_a_label(domain);
-    (valid && is_domain(domain.as_bytes())).then(|| domain.into_owned())
+pub(crate) struct PolicyCheck {
+    i: u32,
+    domain: Box<str>,
 }
 
-fn check_from_authentic(domain: Option<&str>, signature: &Signature) -> Result<(), Dkim2Error> {
-    if is_from_authentic(domain, &signature.d) {
-        Ok(())
-    } else {
-        Err(Dkim2Error::FromNotAuthentic(signature.i))
+pub(crate) enum FromDomain {
+    Domain(String),
+    MultipleAddresses,
+    DomainLiteral,
+    Invalid,
+}
+
+pub(crate) enum FromMatch<'x> {
+    Authentic,
+    Subdomain(&'x str),
+}
+
+impl FromDomain {
+    pub(crate) fn parse(headers: &[(&[u8], &[u8])]) -> Self {
+        let mut from = headers
+            .iter()
+            .filter(|(name, _)| name.trim_ascii().eq_ignore_ascii_case(b"from"));
+        let (Some((_, value)), None) = (from.next(), from.next()) else {
+            return FromDomain::Invalid;
+        };
+        let parsed = HeaderForm::Addresses.parse(value);
+        let Some(list) = parsed.value().as_address() else {
+            return FromDomain::Invalid;
+        };
+        let mut addresses = list.iter();
+        let mailbox = match (addresses.next(), addresses.next()) {
+            (Some(Address::Mailbox(mailbox)), None) => mailbox,
+            (Some(_), Some(_)) => return FromDomain::MultipleAddresses,
+            (Some(Address::Group(group)), None) if group.len() > 1 => {
+                return FromDomain::MultipleAddresses;
+            }
+            _ => return FromDomain::Invalid,
+        };
+        let Some((local, domain)) = mailbox
+            .address()
+            .and_then(|address| address.split_once('@'))
+        else {
+            return FromDomain::Invalid;
+        };
+        if domain.starts_with('[') {
+            return FromDomain::DomainLiteral;
+        }
+        let valid = !local.is_empty()
+            && local.bytes().chain(domain.bytes()).all(|ch| {
+                !ch.is_ascii_whitespace()
+                    && !ch.is_ascii_control()
+                    && !b"@<>()[],;:\"".contains(&ch)
+            });
+        let domain = to_a_label(domain);
+        if valid && is_domain(domain.as_bytes()) {
+            FromDomain::Domain(domain.into_owned())
+        } else {
+            FromDomain::Invalid
+        }
     }
-}
 
-pub(crate) fn is_from_authentic(from_domain: Option<&str>, signing_domain: &str) -> bool {
-    from_domain.is_some_and(|domain| relaxed_domain_match(domain, signing_domain))
+    pub(crate) fn authenticate(
+        &self,
+        i: u32,
+        signing_domain: &str,
+    ) -> Result<FromMatch<'_>, Dkim2Error> {
+        match self {
+            FromDomain::Domain(domain) if relaxed_domain_match(domain, signing_domain) => {
+                Ok(FromMatch::Authentic)
+            }
+            FromDomain::Domain(domain) if relaxed_domain_match(signing_domain, domain) => {
+                Ok(FromMatch::Subdomain(domain))
+            }
+            FromDomain::Domain(_) | FromDomain::Invalid => Err(Dkim2Error::FromNotAuthentic(i)),
+            FromDomain::MultipleAddresses => Err(Dkim2Error::FromMultipleAddresses(i)),
+            FromDomain::DomainLiteral => Err(Dkim2Error::FromDomainLiteral(i)),
+        }
+    }
+
+    fn check(
+        &self,
+        signature: &Signature,
+        policies: &mut Vec<PolicyCheck>,
+    ) -> Result<(), Dkim2Error> {
+        if let FromMatch::Subdomain(domain) = self.authenticate(signature.i, &signature.d)?
+            && !policies.iter().any(|check| check.domain.as_ref() == domain)
+        {
+            policies.push(PolicyCheck {
+                i: signature.i,
+                domain: domain.into(),
+            });
+        }
+        Ok(())
+    }
 }
 
 fn local_and_domain(address: &str) -> (&str, &str) {

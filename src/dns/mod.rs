@@ -60,7 +60,7 @@ pub use doh::DohResolver;
 #[cfg(any(test, feature = "test"))]
 pub use query::mock_resolve;
 pub(crate) use query::{QueryError, QueryResult};
-pub use txt::{TxtRecord, TxtRecordParser, UnwrapTxtRecord};
+pub use txt::{TxtRecord, TxtRecordKind, TxtRecordParser, UnwrapTxtRecord};
 
 #[cfg(not(feature = "dns-doh"))]
 pub(crate) const DNS_RCODE_NXDOMAIN: ResponseCode = ResponseCode::NXDomain;

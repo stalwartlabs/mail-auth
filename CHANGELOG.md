@@ -5,16 +5,28 @@ All notable changes to this project will be documented in this file. This projec
 ## [0.16.0] - Unreleased
 
 ### Added
+- DKIM2: updated to [draft-ietf-dkim-dkim2-spec-09](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-09) (from -08) and [draft-ietf-dkim-dkim2-dns-03](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-dns-03).
+- DKIM2: the Domain Policy Record (`dkim2::DomainPolicy`, cached as `TxtRecord::Dkim2Policy`). A `From` domain is now also Authentic when `d=` is one of its subdomains, unless `_domainkey.<from domain>` has `f=strict` (§3.8, §11.1); the verifier looks the record up only in that case. The signer refuses such a `d=` unless built with `Dkim2Signer::allow_from_subdomain`; it then names the `From` domain in `Dkim2Signed::policy_domain()`, and the caller must check it with `MessageAuthenticator::dkim2_check_policy` before using the signature (§12.4). `MessageAuthenticator::dkim2_domain_policy` fetches a domain's record.
+- DKIM2: new errors `FromSubdomainForbidden`, `FromMultipleAddresses`, `FromDomainLiteral`, `PolicyFetch`, `PolicyMultiple`, `PublicKeyTooShort`, `SignatureDuplicated`, `InstanceDuplicated`, `ExplodedFirstSignature` and `UnexpectedNextDomain` (§14.2, §14.4, §14.6, §14.8).
+- `DnsError::MultipleRecords`. `TxtRecord`, `DnsError` and `Dkim2Error` are not `#[non_exhaustive]`, so exhaustive matches on them need the new variants.
 - `webpki-roots` feature: TLS resolvers verify against Mozilla's root certificates compiled into the binary (#65).
 - DKIM2: `Dkim2Signer::sign_streaming` returns a `Dkim2SigningStream`, which signs a message fed in chunks while buffering only its header section, as `DkimSigningStream` does for DKIM1 (#66).
 - `stream::MessageStream` parses a message fed in chunks into a `StreamedMessage`, which buffers only the header section and keeps the body as the hashes that DKIM, ARC and DKIM2 need. Its `message()` works with `verify_dkim`, `verify_arc`, `verify_dkim2`, DMARC and `ArcSealer::seal`; an operation that needs the body, or a hash the stream did not compute, fails with `Error::BodyNotAvailable` or `Dkim2Error::BodyNotAvailable` (#68).
 - DKIM2: `Dkim2Signer::sign_message` and `sign_revised_message` sign already parsed messages, including streamed ones (#68).
 
 ### Changed
+- DKIM2: a null body recipe is now a `PermError` instead of a `Fail` (§14.2), and an RSA key shorter than 1024 bits is reported as `PublicKeyTooShort` instead of `PublicKeyMalformed` (§14.6).
+- DKIM2 and DKIM1: TXT records at a selector that begin with a `v=` tag other than `DKIM1` are discarded before checking for multiple key records (draft-ietf-dkim-dkim2-dns Section 3), so an unrelated record no longer makes a DKIM2 key `PublicKeyMultiple`.
+- DKIM2: `Dkim2Signed` has a private field, so it can no longer be built or destructured with a struct literal outside the crate.
+- DKIM2: duplicated `i=` and `m=` values are reported as `SignatureDuplicated` and `InstanceDuplicated` instead of `SequenceGap` and `InstanceMissing`; an `nd=` on the most recent signature is `UnexpectedNextDomain` instead of `SignatureTagUnexpected`; the `exploded` flag on `i=1` is `ExplodedFirstSignature` for both the signer and the verifier.
+- DKIM2: the signer and the verifier report a `From` with more than one address or with a domain literal as `FromMultipleAddresses` or `FromDomainLiteral` instead of `FromNotAuthentic`.
+- DKIM2: the `mf=`/`d=` mismatch and invalid recipe error texts follow -09.
+- DKIM1: when no key record at a selector parses, the error returned (and cached) is that of the last record not discarded for its `v=` tag, so `["v=DKIM1; p=", "v=spf1 -all"]` now gives `PublicKeyRevoked` instead of `InvalidRecordType`.
 - The `aws-lc-rs` feature no longer enables the operating system's certificate store for TLS resolvers; it moved to the new `rustls-platform-verifier` feature, enabled by default. Builds with `default-features = false` that use TLS resolvers must enable `rustls-platform-verifier` or `webpki-roots` (#65).
 - DKIM2: `MessageInstance::from_recipe` returns `Result<Option<MessageInstance>>`: it and `from_message` fail with `Error::BodyNotAvailable` for a streamed message without the body digest a new instance needs (#68).
 
 ### Fixed
+- DNS: the TXT cache is keyed by name only, and a parse failure or record cached by one record type was returned to lookups of another. An SPF `include:` or `exp=` of a name such as `_dmarc.<domain>`, `_domainkey.<domain>` or a DKIM selector could make the DMARC policy, the DKIM2 Domain Policy Record or a DKIM key look absent or broken (for example bypassing `p=reject`). Parse failures are now cached as `TxtRecord::Invalid`, tagged with a `TxtRecordKind`, and an entry of another record type is treated as a cache miss; `TxtRecord::Error` now only holds negative answers, which apply to every type.
 - DKIM1: `DkimSigningStream` hashed the body from the first `\r\n\r\n` instead of where the header section ends, so a header line without a colon or a bare LF empty line produced a body hash that did not verify.
 - DKIM2: a verification proof was accepted as covering a message parsed with `prepend_headers` it was not made for, so `Dkim2Signer` signed it without a new `Message-Instance` and the chain failed at the next hop (#69).
 - SPF: the `ptr` mechanism did not match a PTR name equal to `<target-name>`, or a subdomain of a macro-expanded `<target-name>`, because the trailing dot of the PTR record or of the expanded name was compared (#71).

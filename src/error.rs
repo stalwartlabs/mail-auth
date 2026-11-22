@@ -34,6 +34,9 @@ pub enum DnsError {
     /// record type (for example, a TXT record without `v=spf1` when an SPF
     /// record was requested).
     InvalidRecordType,
+    /// More than one record of the requested type remained after discarding
+    /// the records that belong to another type or version.
+    MultipleRecords,
 }
 
 /// The error type for every fallible operation in this crate.
@@ -108,6 +111,7 @@ impl Display for DnsError {
             DnsError::Resolver(err) => write!(f, "DNS resolution error: {err}"),
             DnsError::RecordNotFound(code) => write!(f, "DNS record not found: {code}"),
             DnsError::InvalidRecordType => write!(f, "Invalid record"),
+            DnsError::MultipleRecords => write!(f, "Multiple records"),
         }
     }
 }

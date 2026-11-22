@@ -620,6 +620,7 @@ impl AsAuthResult for Error {
             Error::Arc(ArcError::BrokenChain) => "broken ARC chain",
             Error::NotAligned => "policy not aligned",
             Error::Dns(DnsError::InvalidRecordType) => "invalid dns record type",
+            Error::Dns(DnsError::MultipleRecords) => "multiple dns records",
             Error::Dkim2(e) => {
                 write!(CommentWriter(header), "{e}").ok();
                 header.push(')');

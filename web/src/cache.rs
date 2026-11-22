@@ -13,6 +13,7 @@
 */
 
 use mail_auth::dkim::DomainKey;
+use mail_auth::dkim2::DomainPolicy;
 use mail_auth::dmarc::DmarcRecord;
 use mail_auth::dns::TxtRecordParser;
 use mail_auth::spf::SpfRecord;
@@ -95,9 +96,12 @@ impl OfflineCache {
             "TXT" => {
                 let value = unquote_txt(value);
                 let value = value.as_ref();
-                let txt: TxtRecord = if name.contains("._domainkey.") {
+                let lower = name.to_ascii_lowercase();
+                let txt: TxtRecord = if lower.contains("._domainkey.") {
                     DomainKey::parse(value.as_bytes()).into()
-                } else if name.to_ascii_lowercase().starts_with("_dmarc.") {
+                } else if lower.starts_with("_domainkey.") {
+                    DomainPolicy::parse_records(&[value.as_bytes().to_vec()]).into()
+                } else if lower.starts_with("_dmarc.") {
                     DmarcRecord::parse(value.as_bytes()).into()
                 } else {
                     SpfRecord::parse(value.as_bytes()).into()

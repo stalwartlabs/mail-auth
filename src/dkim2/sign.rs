@@ -12,7 +12,7 @@ use super::{
     MessageInstance, Signature, SignatureValue,
     parse::{MAX_SIGNATURE_VALUES, is_domain, is_textstring},
     recipe::Recipe,
-    verify::{StateHashes, check_custody, check_mail_from_domain, from_domain, is_from_authentic},
+    verify::{FromDomain, FromMatch, StateHashes, check_custody, check_mail_from_domain},
 };
 use crate::SystemTime;
 use crate::dkim2::BodyRecipe;
@@ -149,9 +149,23 @@ pub struct Dkim2Signed {
     pub message_instance: Option<MessageInstance>,
     /// New `DKIM2-Signature` header field.
     pub signature: Signature,
+    pub(crate) policy_domain: Option<Box<str>>,
 }
 
 impl Dkim2Signed {
+    /// The `From` domain (an A-label) whose Domain Policy Record decides
+    /// whether this signature makes the `From` header field Authentic, or
+    /// `None` when no lookup is needed. It is set only by a signer with
+    /// [`allow_from_subdomain`](Dkim2Signer::allow_from_subdomain), when the
+    /// signing domain is a subdomain of the `From` domain (§11.1, §12.4).
+    /// Check it with
+    /// [`MessageAuthenticator::dkim2_check_policy`](crate::MessageAuthenticator::dkim2_check_policy)
+    /// and discard the signature when the record is strict or cannot be
+    /// fetched.
+    pub fn policy_domain(&self) -> Option<&str> {
+        self.policy_domain.as_deref()
+    }
+
     /// Writes the `DKIM2-Signature` header field and then, when present, the
     /// `Message-Instance` header field, each unfolded and terminated by
     /// CRLF.
@@ -189,9 +203,13 @@ impl Dkim2Signer<Ready> {
     ///
     /// Returns [`Error::Parse`] if the message cannot be parsed,
     /// [`Dkim2Error::NotFullyVerified`] if the validity proof is missing or
-    /// does not match the message, [`Dkim2Error::FromNotAuthentic`] if the
-    /// message is new (or its `From` changed) and its `From` domain is not
-    /// the signing domain or a subdomain of it (§12.4), [`Dkim2Error::HeaderHashMismatch`] or
+    /// does not match the message, [`Dkim2Error::FromNotAuthentic`],
+    /// [`Dkim2Error::FromMultipleAddresses`] or
+    /// [`Dkim2Error::FromDomainLiteral`] if the message is new (or its `From`
+    /// changed) and its `From` domain is not the signing domain or a
+    /// subdomain of it, nor (with
+    /// [`allow_from_subdomain`](Self::allow_from_subdomain)) one of its
+    /// parents (§12.4), [`Dkim2Error::HeaderHashMismatch`] or
     /// [`Dkim2Error::BodyHashMismatch`] if the message changed since its most
     /// recent `Message-Instance` (use [`sign_revised`](Self::sign_revised)),
     /// [`Dkim2Error::SignatureSyntax`] if the signing domain, the `nd=`
@@ -305,9 +323,10 @@ impl Dkim2Signer<Ready> {
             MessageInstance::from_message(&modified, Some(&original.try_into()?), &self.hashes)?;
 
         self.sign_internal(&modified, hop, new_instance.as_ref(), verified, now, None)
-            .map(|signature| Dkim2Signed {
+            .map(|(signature, policy_domain)| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
+                policy_domain,
             })
     }
 
@@ -387,9 +406,10 @@ impl Dkim2Signer<Ready> {
         }
         let body = modified.streamed_dkim2_digests([])?;
         self.sign_internal(modified, hop, instance, verified, now(), body)
-            .map(|signature| Dkim2Signed {
+            .map(|(signature, policy_domain)| Dkim2Signed {
                 message_instance: None,
                 signature,
+                policy_domain,
             })
     }
 
@@ -462,9 +482,10 @@ impl Dkim2Signer<Ready> {
         let body = message.streamed_dkim2_digests([])?;
 
         self.sign_internal(message, hop, new_instance.as_ref(), verified, now, body)
-            .map(|signature| Dkim2Signed {
+            .map(|(signature, policy_domain)| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
+                policy_domain,
             })
     }
 
@@ -485,9 +506,10 @@ impl Dkim2Signer<Ready> {
         let new_instance = MessageInstance::from_message(&message, None, &self.hashes)?;
 
         self.sign_internal(&message, hop, new_instance.as_ref(), verified, now, None)
-            .map(|signature| Dkim2Signed {
+            .map(|(signature, policy_domain)| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
+                policy_domain,
             })
     }
 
@@ -510,9 +532,10 @@ impl Dkim2Signer<Ready> {
         let new_instance = MessageInstance::from_recipe(&message, Some(recipe), &self.hashes)?;
 
         self.sign_internal(&message, hop, new_instance.as_ref(), verified, now, None)
-            .map(|signature| Dkim2Signed {
+            .map(|(signature, policy_domain)| Dkim2Signed {
                 message_instance: new_instance,
                 signature,
+                policy_domain,
             })
     }
 
@@ -524,7 +547,7 @@ impl Dkim2Signer<Ready> {
         verified: Option<&Dkim2Output<'_>>,
         now: u64,
         body: Option<Digests>,
-    ) -> crate::Result<Signature>
+    ) -> crate::Result<(Signature, Option<Box<str>>)>
     where
         A: AsRef<str>,
         R: IntoIterator<Item: AsRef<str>>,
@@ -567,12 +590,22 @@ impl Dkim2Signer<Ready> {
                     .iter()
                     .any(|header| header.name.eq_ignore_ascii_case("from"))
             });
-        if (signatures.is_empty() || from_changed)
-            && require_authentic_from()
-            && !is_from_authentic(from_domain(&parsed.headers).as_deref(), &domain)
-        {
-            return Err(Error::Dkim2(Dkim2Error::FromNotAuthentic(next_i)));
-        }
+        let policy_domain = if (signatures.is_empty() || from_changed) && require_authentic_from() {
+            match FromDomain::parse(&parsed.headers)
+                .authenticate(next_i, &domain)
+                .map_err(Error::Dkim2)?
+            {
+                FromMatch::Authentic => None,
+                FromMatch::Subdomain(from_domain) if self.from_subdomain => {
+                    Some(from_domain.into())
+                }
+                FromMatch::Subdomain(_) => {
+                    return Err(Error::Dkim2(Dkim2Error::FromNotAuthentic(next_i)));
+                }
+            }
+        } else {
+            None
+        };
 
         if new_instance.is_none()
             && let Some(highest) = instances.last()
@@ -665,7 +698,7 @@ impl Dkim2Signer<Ready> {
             value.b = entry.key.sign(input.as_slice())?;
         }
 
-        Ok(signature)
+        Ok((signature, policy_domain))
     }
 
     fn check_signature(
@@ -674,10 +707,7 @@ impl Dkim2Signer<Ready> {
         previous: Option<&Signature>,
     ) -> Result<(), Dkim2Error> {
         if signature.i == 1 && signature.flags.contains(&Flag::Exploded) {
-            return Err(Dkim2Error::SignatureTagUnexpected {
-                i: signature.i,
-                tag: "f",
-            });
+            return Err(Dkim2Error::ExplodedFirstSignature);
         } else if signature.n.as_ref().is_some_and(|nonce| {
             nonce.len() > MAX_NONCE_LEN
                 || !nonce.bytes().all(|ch| ch.is_ascii_graphic() && ch != b';')
@@ -1118,9 +1148,10 @@ pub(super) mod test {
                 TIMESTAMP,
                 None,
             )
-            .map(|signature| Dkim2Signed {
+            .map(|(signature, policy_domain)| Dkim2Signed {
                 message_instance: instance,
                 signature,
+                policy_domain,
             })
             .unwrap();
         let normalized = normalize_crlf(&input_raw);

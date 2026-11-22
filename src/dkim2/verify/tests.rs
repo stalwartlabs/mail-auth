@@ -12,7 +12,7 @@ use crate::{
     AuthenticatedMessage, Dkim2Result, DnsError, Error, MessageAuthenticator,
     crypto::{DkimKey, Ed25519Key, MlDsa44Key, RsaKey, Sha256, SigningKey},
     dkim::{DkimError, DomainKey},
-    dkim2::{Dkim2Error, Dkim2Hash, Dkim2Signer, Flag, Hop},
+    dkim2::{Dkim2Error, Dkim2Hash, Dkim2Signer, DomainPolicy, Flag, Hop},
     dns::{TxtRecord, cache::test::DummyCaches},
     headers::Writer,
     parse::TxtRecordParser,
@@ -538,7 +538,7 @@ async fn signer_local_checks() {
             None,
             NOW
         )),
-        Dkim2Error::SignatureTagUnexpected { i: 1, tag: "f" }
+        Dkim2Error::ExplodedFirstSignature
     );
     assert_eq!(
         err(signer("test1.dkim2.com")
@@ -911,9 +911,9 @@ async fn verify_from_is_authentic() {
         ("sender@mail.test1.dkim2.com", Dkim2Result::Pass),
         (
             "a@test1.dkim2.com, b@test1.dkim2.com",
-            fail(Dkim2Error::FromNotAuthentic(1)),
+            fail(Dkim2Error::FromMultipleAddresses(1)),
         ),
-        ("a@[192.0.2.1]", fail(Dkim2Error::FromNotAuthentic(1))),
+        ("a@[192.0.2.1]", fail(Dkim2Error::FromDomainLiteral(1))),
     ] {
         let raw = format!("From: {from}\r\nSubject: x\r\n\r\nbody\r\n");
         let message = prepend(
@@ -1213,7 +1213,11 @@ async fn verify_public_key_errors() {
             }),
         ),
         (
-            DomainKey::parse_records(&[ed25519.as_bytes().to_vec(), b"v=spf1".to_vec()])
+            DomainKey::parse_records(&[
+                ed25519.as_bytes().to_vec(),
+                b"v=spf1 -all".to_vec(),
+                b"k=rsa; p=".to_vec(),
+            ])
                 .unwrap()
                 .into(),
             perm(Dkim2Error::PublicKeyMultiple {
@@ -1298,6 +1302,25 @@ async fn verify_header_field_presence() {
             ),
             perm(Dkim2Error::InstanceSyntax(0)),
         ),
+        (
+            format!("{}{}{instance}{body}", signature(1), signature(1)),
+            perm(Dkim2Error::SignatureDuplicated(1)),
+        ),
+        (
+            format!("{}{instance}{body}", signature(0)),
+            perm(Dkim2Error::SequenceGap(1)),
+        ),
+        (
+            format!("{}{instance}{instance}{body}", signature(1)),
+            perm(Dkim2Error::InstanceDuplicated(1)),
+        ),
+        (
+            format!(
+                "{}{instance}{body}",
+                signature(1).replace("s=ed25519", "f=exploded; s=ed25519")
+            ),
+            perm(Dkim2Error::ExplodedFirstSignature),
+        ),
     ] {
         assert_eq!(
             verify_raw(
@@ -1354,7 +1377,7 @@ async fn verify_null_body_recipe() {
     let message2 = prepend(&signed, modified.as_bytes());
     assert_eq!(
         verify_raw(&message2, "gw@test2.dkim2.com", &["recipient@example.com"]).await,
-        fail(Dkim2Error::NullBodyRecipe(2))
+        perm(Dkim2Error::NullBodyRecipe(2))
     );
 }
 
@@ -2259,22 +2282,42 @@ async fn from_authenticity_requires_one_clean_mailbox() {
         );
         (raw, result)
     };
-    for from_lines in [
-        "From: ceo@victim.example sender@test1.dkim2.com\r\n",
-        "From: <ceo@victim.example> <sender@test1.dkim2.com>\r\n",
-        "From: ceo@victim.example <>, sender@test1.dkim2.com\r\n",
-        "From: sender@test1.dkim2.com, Bank Support\r\n",
-        "From: ceo@victim.example\r\n From: sender@test1.dkim2.com\r\n",
-        "From: sender@test1.dkim2.com\r\nFrom : ceo@victim.example\r\n",
-        "From: group: sender@test1.dkim2.com;\r\n",
-        "From: sender@[192.0.2.1]\r\n",
-        "From: <sender@test1.dkim2.com.>\r\n",
-        "To: r@example.com\r\n",
+    let not_authentic = Dkim2Error::FromNotAuthentic(1);
+    let multiple = Dkim2Error::FromMultipleAddresses(1);
+    for (from_lines, expected) in [
+        (
+            "From: ceo@victim.example sender@test1.dkim2.com\r\n",
+            &not_authentic,
+        ),
+        (
+            "From: <ceo@victim.example> <sender@test1.dkim2.com>\r\n",
+            &not_authentic,
+        ),
+        (
+            "From: ceo@victim.example <>, sender@test1.dkim2.com\r\n",
+            &multiple,
+        ),
+        ("From: sender@test1.dkim2.com, Bank Support\r\n", &multiple),
+        (
+            "From: ceo@victim.example\r\n From: sender@test1.dkim2.com\r\n",
+            &not_authentic,
+        ),
+        (
+            "From: sender@test1.dkim2.com\r\nFrom : ceo@victim.example\r\n",
+            &not_authentic,
+        ),
+        ("From: group: sender@test1.dkim2.com;\r\n", &not_authentic),
+        (
+            "From: sender@[192.0.2.1]\r\n",
+            &Dkim2Error::FromDomainLiteral(1),
+        ),
+        ("From: <sender@test1.dkim2.com.>\r\n", &not_authentic),
+        ("To: r@example.com\r\n", &not_authentic),
     ] {
         let (raw, result) = sign(from_lines);
         assert_eq!(
             result.unwrap_err(),
-            Error::Dkim2(Dkim2Error::FromNotAuthentic(1)),
+            Error::Dkim2(expected.clone()),
             "signer: {from_lines:?}"
         );
         let _lenient = crate::dkim2::sign::test_authentic_from::LenientFrom::new();
@@ -2286,7 +2329,7 @@ async fn from_authenticity_requires_one_clean_mailbox() {
                 &["recipient@example.com"]
             )
             .await,
-            fail(Dkim2Error::FromNotAuthentic(1)),
+            fail(expected.clone()),
             "verifier: {from_lines:?}"
         );
     }
@@ -2332,7 +2375,7 @@ async fn signer_validates_flags_recipients_and_nonce() {
         err(signer("test1.dkim2.com")
             .flags([Flag::Unknown("exploded".into())])
             .sign_at(&original, hop(), None, NOW)),
-        Dkim2Error::SignatureTagUnexpected { i: 1, tag: "f" }
+        Dkim2Error::ExplodedFirstSignature
     );
     let signed = signer("test1.dkim2.com")
         .flags([
@@ -2420,7 +2463,7 @@ async fn recipe_generator_handles_bare_line_breaks() {
                 &["recipient@example.com"]
             )
             .await,
-            fail(Dkim2Error::NullBodyRecipe(2))
+            perm(Dkim2Error::NullBodyRecipe(2))
         );
     }
 
@@ -2889,5 +2932,408 @@ mod streamed {
                 Error::BodyNotAvailable
             );
         }
+    }
+}
+
+// §14.6: an RSA key shorter than 1024 bits is a permerror of its own.
+#[tokio::test]
+async fn verify_rejects_short_rsa_key() {
+    for (name, mail_from) in [
+        ("too_short_rsa512.eml", "<sender@test.dkim2.eu>"),
+        ("too_short_rsa768.eml", "<sender@test.dkim2.eu>"),
+    ] {
+        let resolver = MessageAuthenticator::new_system_conf().unwrap();
+        let caches = load_caches();
+        let raw = std::fs::read(resource(&["expected", name])).unwrap();
+        let message = AuthenticatedMessage::parse(&raw).unwrap();
+        let params = caches.parameters(&message);
+        let result = resolver
+            .verify_dkim2_(
+                &message,
+                Envelope::new(mail_from, ["<recipient@example.com>"]),
+                params.txt_cache(),
+                1782394396,
+                true,
+                Verification::Full,
+            )
+            .await
+            .result()
+            .clone();
+        assert!(
+            matches!(
+                &result,
+                Dkim2Result::PermError(Error::Dkim2(Dkim2Error::PublicKeyTooShort { i: 1, .. }))
+            ),
+            "{name}: {result:?}"
+        );
+    }
+}
+
+// §7.1 item 3 and §3.8: a d= below the From domain is Authentic unless its policy has f=strict.
+#[tokio::test]
+async fn verify_subdomain_signing_policy() {
+    let raw = b"From: sender@dkim2.com\r\nTo: r@example.com\r\nSubject: s\r\n\r\nbody\r\n";
+    let message = prepend(
+        &signer("test1.dkim2.com")
+            .allow_from_subdomain()
+            .sign_at(
+                raw.as_slice(),
+                Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]),
+                None,
+                NOW,
+            )
+            .unwrap(),
+        raw,
+    );
+    let parsed = AuthenticatedMessage::parse(&message).unwrap();
+    let resolver = MessageAuthenticator::new_system_conf().unwrap();
+    let domain = || -> Box<str> { "dkim2.com".into() };
+    for (record, expected) in [
+        (
+            crate::spf::SpfRecord::parse(b"v=DKIM1; f=strict").into(),
+            Dkim2Result::Pass,
+        ),
+        (
+            crate::spf::SpfRecord::parse(b"v=spf1 -all").into(),
+            Dkim2Result::Pass,
+        ),
+        (DomainPolicy::default().into(), Dkim2Result::Pass),
+        (
+            DomainPolicy::parse_records(&[b"v=DKIM1; f=strict".to_vec(), b"v=spf1".to_vec()])
+                .into(),
+            fail(Dkim2Error::FromSubdomainForbidden {
+                i: 1,
+                domain: domain(),
+            }),
+        ),
+        (
+            TxtRecord::Error(Error::Dns(DnsError::MultipleRecords)),
+            perm(Dkim2Error::PolicyMultiple {
+                i: 1,
+                domain: domain(),
+            }),
+        ),
+        (
+            TxtRecord::Error(Error::Dns(DnsError::Resolver("timeout".into()))),
+            Dkim2Result::TempError(Error::Dkim2(Dkim2Error::PolicyFetch {
+                i: 1,
+                domain: domain(),
+            })),
+        ),
+    ] {
+        let caches = load_caches();
+        caches.txt_add(
+            "_domainkey.dkim2.com.",
+            record,
+            Instant::now() + Duration::new(3600, 0),
+        );
+        let params = caches.parameters(&parsed);
+        let output = resolver
+            .verify_dkim2_(
+                &parsed,
+                Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]),
+                params.txt_cache(),
+                NOW,
+                true,
+                Verification::Full,
+            )
+            .await;
+        assert_eq!(output.result(), &expected);
+    }
+}
+
+// The upward match never reaches a sibling domain, and the signer refuses one.
+#[tokio::test]
+async fn verify_sibling_from_is_not_authentic() {
+    let raw = b"From: sender@test2.dkim2.com\r\nTo: r@example.com\r\n\r\nbody\r\n";
+    let hop = || Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]);
+    assert_eq!(
+        signer("test1.dkim2.com")
+            .sign_at(raw.as_slice(), hop(), None, NOW)
+            .unwrap_err(),
+        Error::Dkim2(Dkim2Error::FromNotAuthentic(1))
+    );
+    let _lenient = crate::dkim2::sign::test_authentic_from::LenientFrom::new();
+    let message = prepend(
+        &signer("test1.dkim2.com")
+            .sign_at(raw.as_slice(), hop(), None, NOW)
+            .unwrap(),
+        raw,
+    );
+    assert_eq!(
+        verify_raw(
+            &message,
+            "sender@test1.dkim2.com",
+            &["recipient@example.com"]
+        )
+        .await,
+        fail(Dkim2Error::FromNotAuthentic(1))
+    );
+}
+
+// A key temperror does not hide a strict FAIL, and another type's cached entry is re-queried.
+#[tokio::test]
+async fn verify_subdomain_policy_precedence_and_cache() {
+    let raw = b"From: sender@dkim2.com\r\nTo: r@example.com\r\n\r\nbody\r\n";
+    let message = prepend(
+        &signer("test1.dkim2.com")
+            .allow_from_subdomain()
+            .sign_at(
+                raw.as_slice(),
+                Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]),
+                None,
+                NOW,
+            )
+            .unwrap(),
+        raw,
+    );
+    let parsed = AuthenticatedMessage::parse(&message).unwrap();
+    let resolver = MessageAuthenticator::new_system_conf().unwrap();
+    let valid_until = Instant::now() + Duration::new(3600, 0);
+
+    let caches = DummyCaches::new();
+    caches.txt_add(
+        "ed25519._domainkey.test1.dkim2.com.",
+        TxtRecord::Error(Error::Dns(DnsError::Resolver("timeout".into()))),
+        valid_until,
+    );
+    caches.txt_add("_domainkey.dkim2.com.", DomainPolicy::strict(), valid_until);
+    let params = caches.parameters(&parsed);
+    let output = resolver
+        .verify_dkim2_(
+            &parsed,
+            Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]),
+            params.txt_cache(),
+            NOW,
+            true,
+            Verification::Full,
+        )
+        .await;
+    assert_eq!(
+        output.result(),
+        &fail(Dkim2Error::FromSubdomainForbidden {
+            i: 1,
+            domain: "dkim2.com".into(),
+        })
+    );
+
+    let caches = load_caches();
+    caches.txt_add(
+        "_domainkey.dkim2.com.",
+        crate::spf::SpfRecord::parse(b"v=DKIM1; f=strict"),
+        valid_until,
+    );
+    let params = caches.parameters(&parsed);
+    let output = resolver
+        .verify_dkim2_(
+            &parsed,
+            Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]),
+            params.txt_cache(),
+            NOW,
+            true,
+            Verification::Full,
+        )
+        .await;
+    assert_eq!(output.result(), &Dkim2Result::Pass);
+}
+
+// A subdomain signing for its parent From is refused unless the signer opts in, which reports the policy domain.
+#[test]
+fn signer_reports_policy_domain() {
+    let hop = || Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]);
+    let sign = |from: &str, opt_in: bool| {
+        let raw = format!("From: {from}\r\nTo: r@example.com\r\n\r\nbody\r\n");
+        let signer = signer("test1.dkim2.com");
+        let signer = if opt_in {
+            signer.allow_from_subdomain()
+        } else {
+            signer
+        };
+        signer
+            .sign_at(raw.as_bytes(), hop(), None, NOW)
+            .map(|signed| signed.policy_domain().map(str::to_string))
+    };
+    assert_eq!(
+        sign("sender@dkim2.com", false),
+        Err(Error::Dkim2(Dkim2Error::FromNotAuthentic(1)))
+    );
+    for (from, expected) in [
+        ("sender@dkim2.com", Some("dkim2.com")),
+        ("sender@DKIM2.com", Some("dkim2.com")),
+        ("sender@test1.dkim2.com", None),
+        ("sender@mail.test1.dkim2.com", None),
+    ] {
+        assert_eq!(sign(from, true), Ok(expected.map(str::to_string)), "{from}");
+    }
+}
+
+// The streaming signer reports the same policy domain as the buffered one.
+#[test]
+fn streaming_signer_reports_policy_domain() {
+    let raw = b"From: sender@dkim2.com\r\nTo: r@example.com\r\n\r\nbody\r\n";
+    let signer = signer("test1.dkim2.com").allow_from_subdomain();
+    let mut stream = signer.sign_streaming();
+    stream.write(raw);
+    let signed = stream
+        .finish(
+            Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]),
+            None,
+        )
+        .unwrap();
+    assert_eq!(signed.policy_domain(), Some("dkim2.com"));
+}
+
+// A hop that rewrites From to a parent of d= needs the policy; one that keeps From does not.
+#[tokio::test]
+async fn revised_signer_reports_policy_domain() {
+    let original = b"From: sender@test1.dkim2.com\r\nTo: r@example.com\r\n\r\nbody\r\n";
+    let first = prepend(
+        &signer("test1.dkim2.com")
+            .sign_at(
+                original.as_slice(),
+                Hop::real("sender@test1.dkim2.com", ["list@test2.dkim2.com"]),
+                None,
+                NOW,
+            )
+            .unwrap(),
+        original,
+    );
+    let parsed = AuthenticatedMessage::parse(&first).unwrap();
+    let proof = verify(
+        &parsed,
+        "sender@test1.dkim2.com",
+        &["list@test2.dkim2.com"],
+        Verification::Full,
+    )
+    .await;
+    let relay = || signer("test2.dkim2.com").allow_from_subdomain();
+    let hop = || Hop::real("list@test2.dkim2.com", ["recipient@example.com"]);
+
+    let unchanged = relay()
+        .sign_at(first.as_slice(), hop(), Some(&proof), NOW)
+        .unwrap();
+    assert_eq!(unchanged.policy_domain(), None);
+
+    let text = String::from_utf8(first.clone()).unwrap();
+    let rewritten = text.replace("From: sender@test1.dkim2.com", "From: list@dkim2.com");
+    let revised = relay()
+        .sign_revised_at(
+            first.as_slice(),
+            rewritten.as_bytes(),
+            hop(),
+            Some(&proof),
+            NOW,
+        )
+        .unwrap();
+    assert_eq!(revised.policy_domain(), Some("dkim2.com"));
+}
+
+// The policy check maps each record state to the verifier's result for the same record.
+#[tokio::test]
+async fn dkim2_check_policy_matches_verifier() {
+    let resolver = MessageAuthenticator::new_system_conf().unwrap();
+    let valid_until = Instant::now() + Duration::new(3600, 0);
+    let raw = b"From: sender@dkim2.com\r\nTo: r@example.com\r\n\r\nbody\r\n";
+    let signed = signer("test1.dkim2.com")
+        .allow_from_subdomain()
+        .sign_at(
+            raw.as_slice(),
+            Hop::real("sender@test1.dkim2.com", ["recipient@example.com"]),
+            None,
+            NOW,
+        )
+        .unwrap();
+    let message = prepend(&signed, raw);
+    let parsed = AuthenticatedMessage::parse(&message).unwrap();
+    let domain = || -> Box<str> { "dkim2.com".into() };
+    for (record, expected) in [
+        (None, Ok(())),
+        (Some(DomainPolicy::default().into()), Ok(())),
+        (
+            Some(DomainPolicy::strict().into()),
+            Err(Dkim2Error::FromSubdomainForbidden {
+                i: 1,
+                domain: domain(),
+            }),
+        ),
+        (
+            Some(TxtRecord::Error(Error::Dns(DnsError::MultipleRecords))),
+            Err(Dkim2Error::PolicyMultiple {
+                i: 1,
+                domain: domain(),
+            }),
+        ),
+        (
+            Some(TxtRecord::Error(Error::Dns(DnsError::Resolver(
+                "timeout".into(),
+            )))),
+            Err(Dkim2Error::PolicyFetch {
+                i: 1,
+                domain: domain(),
+            }),
+        ),
+    ] {
+        let caches = load_caches();
+        if let Some(record) = record {
+            caches.txt_add("_domainkey.dkim2.com.", record, valid_until);
+        }
+        let checked = resolver
+            .dkim2_check_policy(&signed, Some(&caches.txt))
+            .await;
+        let params = caches.parameters(&parsed);
+        let verified = resolver
+            .verify_dkim2_(
+                &parsed,
+                Envelope::new("sender@test1.dkim2.com", ["recipient@example.com"]),
+                params.txt_cache(),
+                NOW,
+                true,
+                Verification::Full,
+            )
+            .await;
+        assert_eq!(checked, expected);
+        assert_eq!(verified.error().cloned(), expected.err().map(Error::Dkim2));
+    }
+}
+
+// The policy helper treats a missing record as authorized and reports lookup problems as errors.
+#[tokio::test]
+async fn dkim2_domain_policy_lookup() {
+    let resolver = MessageAuthenticator::new_system_conf().unwrap();
+    let valid_until = Instant::now() + Duration::new(3600, 0);
+    for (record, expected) in [
+        (None, Ok(DomainPolicy::default())),
+        (
+            Some(DomainPolicy::strict().into()),
+            Ok(DomainPolicy::strict()),
+        ),
+        (
+            Some(crate::spf::SpfRecord::parse(b"v=DKIM1; f=strict").into()),
+            Ok(DomainPolicy::default()),
+        ),
+        (
+            Some(TxtRecord::from(DomainPolicy::parse_records(&[
+                b"v=DKIM1".to_vec(),
+                b"v=DKIM1; f=strict".to_vec(),
+            ]))),
+            Err(Error::Dns(DnsError::MultipleRecords)),
+        ),
+        (
+            Some(TxtRecord::Error(Error::Dns(DnsError::Resolver(
+                "timeout".into(),
+            )))),
+            Err(Error::Dns(DnsError::Resolver("timeout".into()))),
+        ),
+    ] {
+        let caches = DummyCaches::new();
+        if let Some(record) = record {
+            caches.txt_add("_domainkey.dkim2.com.", record, valid_until);
+        }
+        assert_eq!(
+            resolver
+                .dkim2_domain_policy("DKIM2.com.", Some(&caches.txt))
+                .await,
+            expected
+        );
     }
 }

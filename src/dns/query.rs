@@ -409,4 +409,56 @@ mod test {
         );
         assert_eq!(is_cached(&caches, MISSING), [false; 4]);
     }
+
+    // A cached parse result only answers lookups of its own record type.
+    #[tokio::test]
+    async fn txt_cache_entries_are_bound_to_their_record_type() {
+        use crate::{dmarc::DmarcRecord, parse::TxtRecordParser};
+
+        let resolver = resolver();
+        let name = "_dmarc.victim.example.org.";
+        let expires = Instant::now() + Duration::from_secs(60);
+        let not_found = Some(Error::Dns(DnsError::RecordNotFound(DNS_RCODE_NXDOMAIN)));
+        for (entry, dmarc) in [
+            (
+                SpfRecord::parse(b"v=DMARC1; p=reject").into(),
+                not_found.clone(),
+            ),
+            (SpfRecord::parse(b"v=spf1 -all").into(), not_found.clone()),
+            (
+                DmarcRecord::parse(b"v=spf1 -all").into(),
+                Some(Error::Dns(DnsError::InvalidRecordType)),
+            ),
+            (DmarcRecord::parse(b"v=DMARC1; p=reject").into(), None),
+            (TxtRecord::Error(NXDOMAIN.into()), not_found.clone()),
+        ] {
+            let caches = DummyCaches::new();
+            caches.txt.insert(name.into(), entry, expires);
+            assert_eq!(
+                resolver
+                    .txt_lookup::<DmarcRecord>(name, Some(&caches.txt))
+                    .await
+                    .err(),
+                dmarc
+            );
+        }
+
+        let caches = DummyCaches::new();
+        let entry: TxtRecord = SpfRecord::parse(b"v=DMARC1; p=reject").into();
+        assert!(matches!(
+            &entry,
+            TxtRecord::Invalid {
+                kind: crate::TxtRecordKind::Spf,
+                error,
+            } if **error == Error::Dns(DnsError::InvalidRecordType)
+        ));
+        caches.txt.insert(name.into(), entry, expires);
+        assert_eq!(
+            resolver
+                .txt_lookup::<SpfRecord>(name, Some(&caches.txt))
+                .await
+                .err(),
+            Some(Error::Dns(DnsError::InvalidRecordType))
+        );
+    }
 }
