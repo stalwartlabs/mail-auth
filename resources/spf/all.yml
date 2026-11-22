@@ -5,7 +5,7 @@
 
 name: All test
 records:
-  spf: test.org v=spf1 -all ip:10.0.0.1
+  spf: test.org v=spf1 -all ip4:10.0.0.1
   spf: redir.test.org v=spf1 ?all redirect=test.org
 tests:
   - domain: test.org

@@ -728,6 +728,61 @@ fn parse_spf() {
 }
 
 #[test]
+fn parse_spf_unknown_terms() {
+    // Unknown modifiers are ignored whatever their value, unknown mechanisms are errors
+    let include_softfail = SpfRecord {
+        ra: None,
+        rp: 100,
+        rr: u8::MAX,
+        exp: None,
+        redirect: None,
+        directives: Box::new([
+            Directive::new(
+                Qualifier::Pass,
+                Mechanism::Include {
+                    macro_string: Macro::Literal(b"spf.example.org".as_slice().into()),
+                },
+            ),
+            Directive::new(Qualifier::SoftFail, Mechanism::All),
+        ]),
+    };
+
+    for record in [
+        "v=spf1 include:spf.example.org xss=<script>alert('SPF-XSS')</script> ~all",
+        "v=spf1 include:spf.example.org foo=a/b/c ~all",
+        "v=spf1 include:spf.example.org x-foo_1.2= ~all",
+        "v=spf1 include:spf.example.org foo=%{d}/%{l1r-}.%% ~all",
+        "v=spf1 foo=bar include:spf.example.org ~all foo=baz",
+        "v=spf1 include:spf.example.org ~all foo=a/b",
+        "v=spf1 moo.cow-far_out=man:dog/cat include:spf.example.org ~all",
+    ] {
+        assert_eq!(
+            SpfRecord::parse(record.as_bytes())
+                .unwrap_or_else(|err| panic!("{record:?} : {err:?}")),
+            include_softfail,
+            "{record}"
+        );
+    }
+
+    for record in [
+        "v=spf1 foo -all",
+        "v=spf1 foo:example.org -all",
+        "v=spf1 foo/24 -all",
+        "v=spf1 -all foo",
+        "v=spf1 ip4:1.2.3.4 -all moo",
+        "v=spf1 moo.cow/far_out=man:dog/cat ip4:1.2.3.4 -all",
+        "v=spf1 moo.cow:far_out=man:dog/cat ip4:1.2.3.4 -all",
+        "v=spf1 -all foo=%abc",
+        "v=spf1 foo=%{z} -all",
+        "v=spf1 foo=bar% -all",
+        "v=spf1 exists:%{d}% -all",
+        "v=spf1 a:%{d}%/24 -all",
+    ] {
+        assert!(SpfRecord::parse(record.as_bytes()).is_err(), "{record}");
+    }
+}
+
+#[test]
 fn parse_ip6() {
     for test in [
         "ABCD:EF01:2345:6789:ABCD:EF01:2345:6789",

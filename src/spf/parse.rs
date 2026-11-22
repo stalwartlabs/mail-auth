@@ -191,10 +191,15 @@ impl TxtRecordParser for SpfRecord {
                     rr = record.rr()?;
                 }
                 _ => {
-                    let (_, stop_char) = record.macro_string(false)?;
-                    if stop_char != b' ' {
+                    if stop_char != b'=' {
                         return Err(Error::Parse);
                     }
+                    let mut parts = record.as_slice().splitn(2, u8::is_ascii_whitespace);
+                    let value = parts.next().unwrap_or_default();
+                    if memchr::memchr(b'%', value).is_some() {
+                        value.iter().macro_string_slow(true)?;
+                    }
+                    record = parts.next().unwrap_or_default().iter();
                 }
             }
         }
@@ -821,6 +826,10 @@ impl SPFMacroParser for Iter<'_, u8> {
             }
 
             last_is_pct = false;
+        }
+
+        if last_is_pct {
+            return Err(Error::Parse);
         }
 
         if !literal.is_empty() {
