@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.16.0] - Unreleased
+## [0.16.0] - 2026-11-22
 
 ### Added
 - DKIM2: updated to [draft-ietf-dkim-dkim2-spec-09](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-spec-09) (from -08) and [draft-ietf-dkim-dkim2-dns-03](https://datatracker.ietf.org/doc/html/draft-ietf-dkim-dkim2-dns-03).
