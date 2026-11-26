@@ -11,7 +11,7 @@
 use super::{
     ChainBinding, ChainLink, Dkim2Error, Dkim2Hash, Dkim2Output, Dkim2Signed, MessageHash,
     MessageInstance, Signature, SignatureValue, Verification,
-    recipe::{BodyRecipe, apply_body_recipe, body_lines, headers_len},
+    recipe::{BodyRecipe, apply_body_recipe, headers_len},
     sign::Envelope,
 };
 use crate::dns::DnsCache;
@@ -865,7 +865,7 @@ fn check_instances(
             }
             (BodyRecipe::Steps(steps), Some(current)) => {
                 let mut previous = Vec::with_capacity(current.len());
-                apply_body_recipe(&body_lines(current), steps, &mut previous);
+                apply_body_recipe(current, steps, &mut previous);
                 body_buffer = previous;
                 body = Some(&body_buffer);
                 hashes.body = Default::default();

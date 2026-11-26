@@ -232,7 +232,7 @@ impl Recipe {
         let mut out = Vec::with_capacity(headers_len(headers) + body.len());
         self.apply_headers(headers, &mut out);
         if let BodyRecipe::Steps(steps) = &self.body {
-            apply_body_recipe(&body_lines(body), steps, &mut out);
+            apply_body_recipe(body, steps, &mut out);
         } else {
             out.extend_from_slice(body);
         }
@@ -402,21 +402,18 @@ pub(crate) fn headers_len(headers: &[(&[u8], &[u8])]) -> usize {
 
 pub(crate) fn body_lines(body: &[u8]) -> Vec<&[u8]> {
     let mut lines = Vec::with_capacity(memchr::memchr_iter(b'\n', body).count() + 1);
-    let mut start = 0;
-
-    for pos in memchr::memchr_iter(b'\n', body) {
-        let line = body.get(start..pos).unwrap_or_default();
-        lines.push(line.strip_suffix(b"\r").unwrap_or(line));
-        start = pos + 1;
-    }
-    let line = body.get(start..).unwrap_or_default();
-    lines.push(line.strip_suffix(b"\r").unwrap_or(line));
-
-    if lines.last().is_some_and(|l| l.is_empty()) {
-        lines.pop();
-    }
-
+    lines.extend(lines_of(body));
     lines
+}
+
+/// The lines of `body` without their line breaks. A final lone CR is not a line.
+fn lines_of(body: &[u8]) -> impl Iterator<Item = &[u8]> {
+    body.split_inclusive(|&byte| byte == b'\n')
+        .filter(|line| *line != b"\r".as_slice())
+        .map(|line| {
+            let line = line.strip_suffix(b"\n").unwrap_or(line);
+            line.strip_suffix(b"\r").unwrap_or(line)
+        })
 }
 
 pub(crate) fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step]) -> Vec<&'x [u8]> {
@@ -449,15 +446,26 @@ pub(crate) fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step])
     emitted
 }
 
-pub(crate) fn apply_body_recipe(lines: &[&[u8]], steps: &[Step], out: &mut Vec<u8>) {
+/// Reads the body forward once: copy ranges never go back (see [`copy_range`]).
+pub(crate) fn apply_body_recipe(body: &[u8], steps: &[Step], out: &mut Vec<u8>) {
     let mark = out.len();
+    let available = lines_of(body).count();
+    let mut lines = lines_of(body);
     let mut next = 1;
 
     for step in steps {
         match step {
             Step::Copy { start, end } => {
-                for line in copy_range(*start, *end, lines.len(), &mut next)
-                    .filter_map(|number| lines.get(number - 1))
+                // `lines` has yielded the lines before `next`.
+                let unread = next;
+                let range = copy_range(*start, *end, available, &mut next);
+                if range.is_empty() {
+                    continue;
+                }
+                for line in lines
+                    .by_ref()
+                    .skip(range.start() - unread)
+                    .take(range.end() - range.start() + 1)
                 {
                     out.extend_from_slice(line);
                     out.extend_from_slice(b"\r\n");

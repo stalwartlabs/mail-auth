@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.1] - Unreleased
+
+### Fixed
+- DKIM2: applying a body recipe, in `verify_dkim2` or `Recipe::apply`, no longer builds an index of the body's lines, which took 16 bytes per line: about 210 MB for a 25 MiB body of empty lines. The output is unchanged.
+
 ## [0.16.0] - 2026-11-22
 
 ### Added
