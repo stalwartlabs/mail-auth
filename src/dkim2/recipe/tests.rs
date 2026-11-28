@@ -1000,3 +1000,93 @@ fn message_instance_keeps_lenient_recipe() {
         instance
     );
 }
+
+// The index-based application this replaced, kept as the reference.
+fn apply_body_recipe_indexed(body: &[u8], steps: &[Step]) -> Vec<u8> {
+    let mut lines = Vec::new();
+    let mut start = 0;
+    for pos in memchr::memchr_iter(b'\n', body) {
+        let line = body.get(start..pos).unwrap_or_default();
+        lines.push(line.strip_suffix(b"\r").unwrap_or(line));
+        start = pos + 1;
+    }
+    let line = body.get(start..).unwrap_or_default();
+    lines.push(line.strip_suffix(b"\r").unwrap_or(line));
+    if lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+
+    let mut out = Vec::new();
+    let mut next = 1;
+    for step in steps {
+        match step {
+            Step::Copy { start, end } => {
+                for line in copy_range(*start, *end, lines.len(), &mut next)
+                    .filter_map(|number| lines.get(number - 1))
+                {
+                    out.extend_from_slice(line);
+                    out.extend_from_slice(b"\r\n");
+                }
+            }
+            Step::Data(values) => {
+                for value in values {
+                    out.extend_from_slice(value.as_bytes());
+                    out.extend_from_slice(b"\r\n");
+                }
+            }
+            Step::Bytes(values) => {
+                for value in values {
+                    out.extend_from_slice(value);
+                    out.extend_from_slice(b"\r\n");
+                }
+            }
+        }
+    }
+    if out.is_empty() {
+        out.extend_from_slice(b"\r\n");
+    }
+    out
+}
+
+// Unvalidated copy ranges give the same output as the index-based application.
+#[test]
+fn apply_body_recipe_matches_indexed_application() {
+    let bodies: [&[u8]; 13] = [
+        b"",
+        b"\r",
+        b"\r\n",
+        b"l1",
+        b"l1\r\n",
+        b"l1\r\nl2\r\nl3\r\n",
+        b"l1\r\n\r\n\r\nl4\r\nl5",
+        b"l1\nl2\r\n\nl4\r",
+        b"l1\n\r",
+        b"l1\r\r",
+        b"l1\r\n\r\r\n",
+        b"\r\n\r\n\r\n",
+        b"l1\r\nl2\r\nl3\r\nl4\r\nl5\r\nl6\r\n",
+    ];
+    let bounds = [0, 1, 2, 3, 4, 6, 7, u32::MAX];
+    let copies: Vec<Step> = bounds
+        .iter()
+        .flat_map(|&start| bounds.iter().map(move |&end| Step::Copy { start, end }))
+        .collect();
+    let data = Step::Data(vec!["d".to_string()]);
+
+    for body in bodies {
+        for first in &copies {
+            for second in copies.iter().chain([&data]) {
+                for third in &copies {
+                    let steps = [first.clone(), second.clone(), third.clone()];
+                    let mut out = Vec::new();
+                    apply_body_recipe(body, &steps, &mut out);
+                    assert_eq!(
+                        out,
+                        apply_body_recipe_indexed(body, &steps),
+                        "body {body:?}, steps {steps:?}"
+                    );
+                }
+            }
+        }
+    }
+}

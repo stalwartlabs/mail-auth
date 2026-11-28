@@ -74,6 +74,10 @@ required-features = ["test"]
 name = "parse"
 harness = false
 
+[[bench]]
+name = "recipe"
+harness = false
+
 [[example]]
 name = "arc_seal"
 required-features = ["arc", "aws-lc-rs"]
