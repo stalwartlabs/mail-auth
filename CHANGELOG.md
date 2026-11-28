@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.16.1] - 2026-11-28
+
+### Fixed
+- SPF: the `ptr` mechanism counted each PTR name it validated against the limit of 10 DNS lookups, so a record with 9 or 10 DNS terms including `ptr` returned `permerror`, and only 9 PTR names were validated. It now counts as one term, and validates up to 10 names (#72).
+
 ## [0.16.0] - 2026-11-22
 
 ### Added

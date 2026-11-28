@@ -173,3 +173,33 @@ tests:
     sender: sender@test.org
     ip: 172.168.0.1
     expect: fail
+
+---
+# The ptr mechanism counts as one term against the limit of 10 DNS lookups;
+# the address lookups of its validated names fall under a separate limit
+# of 10 names per mechanism (RFC 7208 Section 4.6.4).
+
+name: DNS Lookup Limits with ptr
+records:
+  spf: ptr10.test.org v=spf1 ptr:a.test.org ptr:b.test.org a:t1.org a:t2.org a:t3.org a:t4.org a:t5.org a:t6.org a:t7.org a:t8.org -all
+  spf: ptrnames.test.org v=spf1 ptr:test.net -all
+  ptr: 10.0.0.12 h12.test.org
+  ptr: 10.0.0.13 n1.test.net, n2.test.net, n3.test.net, n4.test.net, n5.test.net, n6.test.net, n7.test.net, n8.test.net, n9.test.net, n10.test.net, n11.test.net
+  ptr: 10.0.0.14 n1.test.net, n2.test.net, n3.test.net, n4.test.net, n5.test.net, n6.test.net, n7.test.net, n8.test.net, n9.test.net, n10.test.net, n11.test.net
+  a: h12.test.org 10.0.0.12
+  a: t8.org 10.0.0.12
+  a: n10.test.net 10.0.0.13
+  a: n11.test.net 10.0.0.14
+tests:
+  - domain: ptr10.test.org
+    sender: sender@ptr10.test.org
+    ip: 10.0.0.12
+    expect: pass
+  - domain: ptrnames.test.org
+    sender: sender@ptrnames.test.org
+    ip: 10.0.0.13
+    expect: pass
+  - domain: ptrnames.test.org
+    sender: sender@ptrnames.test.org
+    ip: 10.0.0.14
+    expect: fail
