@@ -401,19 +401,36 @@ pub(crate) fn headers_len(headers: &[(&[u8], &[u8])]) -> usize {
 }
 
 pub(crate) fn body_lines(body: &[u8]) -> Vec<&[u8]> {
-    let mut lines = Vec::with_capacity(memchr::memchr_iter(b'\n', body).count() + 1);
+    let mut lines = Vec::with_capacity(line_count(body));
     lines.extend(lines_of(body));
     lines
 }
 
-/// The lines of `body` without their line breaks. A final lone CR is not a line.
 fn lines_of(body: &[u8]) -> impl Iterator<Item = &[u8]> {
-    body.split_inclusive(|&byte| byte == b'\n')
-        .filter(|line| *line != b"\r".as_slice())
-        .map(|line| {
-            let line = line.strip_suffix(b"\n").unwrap_or(line);
-            line.strip_suffix(b"\r").unwrap_or(line)
+    let tail = unterminated_line(body);
+    let mut start = 0;
+    memchr::memchr_iter(b'\n', body)
+        .map(move |end| {
+            let line = body.get(start..end).unwrap_or_default();
+            start = end + 1;
+            strip_cr(line)
         })
+        .chain(tail)
+}
+
+fn line_count(body: &[u8]) -> usize {
+    memchr::memchr_iter(b'\n', body).count() + usize::from(unterminated_line(body).is_some())
+}
+
+fn unterminated_line(body: &[u8]) -> Option<&[u8]> {
+    body.rsplit(|&byte| byte == b'\n')
+        .next()
+        .map(strip_cr)
+        .filter(|line| !line.is_empty())
+}
+
+fn strip_cr(line: &[u8]) -> &[u8] {
+    line.strip_suffix(b"\r").unwrap_or(line)
 }
 
 pub(crate) fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step]) -> Vec<&'x [u8]> {
@@ -446,17 +463,15 @@ pub(crate) fn apply_header_recipe<'x>(instances: &[&'x [u8]], steps: &'x [Step])
     emitted
 }
 
-/// Reads the body forward once: copy ranges never go back (see [`copy_range`]).
 pub(crate) fn apply_body_recipe(body: &[u8], steps: &[Step], out: &mut Vec<u8>) {
     let mark = out.len();
-    let available = lines_of(body).count();
+    let available = line_count(body);
     let mut lines = lines_of(body);
     let mut next = 1;
 
     for step in steps {
         match step {
             Step::Copy { start, end } => {
-                // `lines` has yielded the lines before `next`.
                 let unread = next;
                 let range = copy_range(*start, *end, available, &mut next);
                 if range.is_empty() {

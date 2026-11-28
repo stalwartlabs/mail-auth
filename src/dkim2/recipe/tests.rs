@@ -1048,8 +1048,7 @@ fn apply_body_recipe_indexed(body: &[u8], steps: &[Step]) -> Vec<u8> {
     out
 }
 
-// Steps from a message are not validated, so they may overlap, descend or
-// point past the body; the result must match the index-based application.
+// Unvalidated copy ranges give the same output as the index-based application.
 #[test]
 fn apply_body_recipe_matches_indexed_application() {
     let bodies: [&[u8]; 13] = [

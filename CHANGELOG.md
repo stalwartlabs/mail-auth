@@ -2,10 +2,11 @@
 
 All notable changes to this project will be documented in this file. This project adheres to [Semantic Versioning](https://semver.org/).
 
-## [0.16.1] - Unreleased
+## [0.16.1] - 2026-11-28
 
 ### Fixed
-- DKIM2: applying a body recipe, in `verify_dkim2` or `Recipe::apply`, no longer builds an index of the body's lines, which took 16 bytes per line: about 210 MB for a 25 MiB body of empty lines. The output is unchanged.
+- SPF: the `ptr` mechanism counted each PTR name it validated against the limit of 10 DNS lookups, so a record with 9 or 10 DNS terms including `ptr` returned `permerror`, and only 9 PTR names were validated. It now counts as one term, and validates up to 10 names (#72).
+- DKIM2: applying a body recipe, in `verify_dkim2` or `Recipe::apply`, no longer builds an index of the body's lines, which took 16 bytes per line: about 210 MB for a 25 MiB body of empty lines (#73).
 
 ## [0.16.0] - 2026-11-22
 
