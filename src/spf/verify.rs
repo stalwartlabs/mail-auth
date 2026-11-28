@@ -381,18 +381,17 @@ impl MessageAuthenticator {
                         let mut matches = false;
 
                         if let Ok(records) = self.ptr_lookup(ip, params.ptr_cache()).await {
-                            for record in records.records.iter() {
-                                if lookup_limit.can_lookup()
-                                    && let Ok(true) = self
-                                        .ip_matches(
-                                            record,
-                                            ip,
-                                            u32::MAX,
-                                            u128::MAX,
-                                            params.ipv4_cache(),
-                                            params.ipv6_cache(),
-                                        )
-                                        .await
+                            for record in records.records.iter().take(MAX_PTR_NAMES) {
+                                if let Ok(true) = self
+                                    .ip_matches(
+                                        record,
+                                        ip,
+                                        u32::MAX,
+                                        u128::MAX,
+                                        params.ipv4_cache(),
+                                        params.ipv6_cache(),
+                                    )
+                                    .await
                                 {
                                     let record =
                                         record.strip_suffix('.').unwrap_or(record.as_ref());
@@ -739,6 +738,8 @@ impl From<Error> for SpfResult {
         }
     }
 }
+
+const MAX_PTR_NAMES: usize = 10;
 
 struct LookupLimit {
     num_lookups: u32,
